@@ -171,6 +171,21 @@ CREATE TABLE IF NOT EXISTS items (
 	UNIQUE(feed_id, guid),
 	FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS tombstones (
+	feed_id INTEGER NOT NULL,
+	guid TEXT NOT NULL,
+	deleted_at DATETIME NOT NULL,
+	PRIMARY KEY (feed_id, guid),
+	FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+);
+
+CREATE TRIGGER IF NOT EXISTS tombstones_prune
+AFTER INSERT ON tombstones
+BEGIN
+	DELETE FROM tombstones
+	WHERE datetime(deleted_at) <= datetime('now', '-30 days');
+END;
 `
 	_, err := db.Exec(schema)
 	return err
@@ -616,7 +631,10 @@ func upsertItems(db *sql.DB, feedID int64, items []*gofeed.Item) error {
 	stmt, err := db.Prepare(`
 INSERT OR IGNORE INTO items
 (feed_id, guid, title, link, summary, content, published_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?
+WHERE NOT EXISTS (
+	SELECT 1 FROM tombstones WHERE feed_id = ? AND guid = ?
+)
 `)
 	if err != nil {
 		return err
@@ -656,6 +674,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			content,
 			nullTimeToValue(publishedAt),
 			now,
+			feedID,
+			guid,
 		); err != nil {
 			return err
 		}
@@ -665,7 +685,31 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 }
 
 func enforceItemLimit(db *sql.DB, feedID int64) error {
-	_, err := db.Exec(`
+	now := time.Now().UTC()
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err = tx.Exec(`
+INSERT OR IGNORE INTO tombstones (feed_id, guid, deleted_at)
+SELECT feed_id, guid, ?
+FROM items
+WHERE feed_id = ?
+  AND id NOT IN (
+	SELECT id FROM items
+	WHERE feed_id = ?
+	ORDER BY COALESCE(published_at, created_at) DESC, id DESC
+	LIMIT ?
+  )
+`, now, feedID, feedID, maxItemsPerFeed); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`
 DELETE FROM items
 WHERE feed_id = ?
   AND id NOT IN (
@@ -674,8 +718,10 @@ WHERE feed_id = ?
 	ORDER BY COALESCE(published_at, created_at) DESC, id DESC
 	LIMIT ?
   )
-`, feedID, feedID, maxItemsPerFeed)
-	return err
+`, feedID, feedID, maxItemsPerFeed); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func listFeeds(db *sql.DB) ([]FeedView, error) {
@@ -1045,8 +1091,27 @@ func (a *App) cleanupLoop() {
 
 func cleanupReadItems(db *sql.DB) error {
 	cutoff := time.Now().UTC().Add(-readRetention)
-	_, err := db.Exec("DELETE FROM items WHERE read_at IS NOT NULL AND read_at <= ?", cutoff)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err = tx.Exec(`
+INSERT OR IGNORE INTO tombstones (feed_id, guid, deleted_at)
+SELECT feed_id, guid, ?
+FROM items
+WHERE read_at IS NOT NULL AND read_at <= ?
+`, time.Now().UTC(), cutoff); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("DELETE FROM items WHERE read_at IS NOT NULL AND read_at <= ?", cutoff); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func fallbackString(value, fallback string) string {

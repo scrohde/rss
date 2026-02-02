@@ -210,6 +210,27 @@ func TestToggleReadAndCleanup(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("expected item to be deleted, got %d", len(items))
 	}
+	if !existsInTombstones(t, app.db, feedID, "1") {
+		t.Fatalf("expected tombstone to be recorded")
+	}
+
+	if err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Item",
+		Link:            "http://example.com/1",
+		GUID:            "1",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		UpdatedParsed:   timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems after cleanup: %v", err)
+	}
+	items, err = listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems after reinserting: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected item to stay deleted, got %d", len(items))
+	}
 }
 
 func TestItemLimit(t *testing.T) {
@@ -373,6 +394,19 @@ FROM items
 WHERE feed_id = ? AND guid = ?
 `, feedID, guid).Scan(&count); err != nil {
 		t.Fatalf("existsByGUID: %v", err)
+	}
+	return count > 0
+}
+
+func existsInTombstones(t *testing.T, db *sql.DB, feedID int64, guid string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`
+SELECT COUNT(*)
+FROM tombstones
+WHERE feed_id = ? AND guid = ?
+`, feedID, guid).Scan(&count); err != nil {
+		t.Fatalf("existsInTombstones: %v", err)
 	}
 	return count > 0
 }
