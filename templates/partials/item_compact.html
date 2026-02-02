@@ -1,12 +1,18 @@
 {{define "item_compact"}}
-  <article class="item-card {{if .IsRead}}is-read{{end}}" id="item-{{.ID}}">
+  <article
+    class="item-card clickable {{if .IsRead}}is-read{{end}}"
+    id="item-{{.ID}}"
+    hx-get="/items/{{.ID}}"
+    hx-target="#item-{{.ID}}"
+    hx-swap="outerHTML"
+    hx-trigger="click[!((event.target.closest && event.target.closest('a, button')) || (event.target.parentElement && event.target.parentElement.closest('a, button')))]"
+  >
     <div class="item-row">
       <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
       <div class="item-actions">
         <button class="chip" hx-post="/items/{{.ID}}/toggle" hx-vals='{"view":"compact"}' hx-target="#item-{{.ID}}" hx-swap="outerHTML">
           {{if .IsRead}}Mark unread{{else}}Mark read{{end}}
         </button>
-        <button class="chip ghost" hx-get="/items/{{.ID}}" hx-target="#item-{{.ID}}" hx-swap="outerHTML">Summary</button>
       </div>
     </div>
     <div class="item-meta">
