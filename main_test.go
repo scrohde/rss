@@ -346,28 +346,9 @@ func TestItemLimit(t *testing.T) {
 
 func TestPollingAndNewItemsBanner(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
-	items := []rssItem{
-		{
-			Title:       "First",
-			Link:        "http://example.com/1",
-			GUID:        "1",
-			PubDate:     base.Format(time.RFC1123Z),
-			Description: "<p>First summary</p>",
-		},
-		{
-			Title:       "Second",
-			Link:        "http://example.com/2",
-			GUID:        "2",
-			PubDate:     base.Add(time.Minute).Format(time.RFC1123Z),
-			Description: "<p>Second summary</p>",
-		},
-	}
-	fs, server := newFeedServer(t, rssXML("Poll Feed", items))
-	defer server.Close()
-
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, server.URL, "Poll Feed")
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Poll Feed")
 	if err != nil {
 		t.Fatalf("upsertFeed: %v", err)
 	}
@@ -392,17 +373,28 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 		t.Fatalf("loadItemList: %v", err)
 	}
 
-	newItem := rssItem{
-		Title:       "Third",
-		Link:        "http://example.com/3",
-		GUID:        "3",
-		PubDate:     base.Add(2 * time.Minute).Format(time.RFC1123Z),
-		Description: "<p>Third summary</p>",
-	}
-	fs.setFeedXML(rssXML("Poll Feed", append(items, newItem)))
-
 	pollReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
 	pollRec := httptest.NewRecorder()
+	app.route(pollRec, pollReq)
+	if pollRec.Code != http.StatusOK {
+		t.Fatalf("poll status: %d", pollRec.Code)
+	}
+	if !strings.Contains(pollRec.Body.String(), "New items (0)") {
+		t.Fatalf("expected banner to show zero new items")
+	}
+
+	if err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Third",
+		Link:            "http://example.com/3",
+		GUID:            "3",
+		Description:     "<p>Third summary</p>",
+		PublishedParsed: timePtr(base.Add(2 * time.Minute)),
+	}}); err != nil {
+		t.Fatalf("upsertItems new: %v", err)
+	}
+
+	pollReq = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
+	pollRec = httptest.NewRecorder()
 	app.route(pollRec, pollReq)
 	if pollRec.Code != http.StatusOK {
 		t.Fatalf("poll status: %d", pollRec.Code)

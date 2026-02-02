@@ -4,6 +4,12 @@
       <div>
         <div class="items-title">{{.Feed.Title}}</div>
         <div class="items-meta">{{.Feed.ItemCount}} items - Latest updates first</div>
+        <div class="items-observability">
+          <span>Last checked: {{.Feed.LastCheckedDisplay}}{{if .Feed.LastDurationDisplay}} ({{.Feed.LastDurationDisplay}}){{end}}</span>
+          {{if .Feed.LastError}}
+            <span class="items-error">Last error: {{.Feed.LastError}}</span>
+          {{end}}
+        </div>
       </div>
       <div class="item-actions">
         <button class="chip ghost" hx-post="/feeds/{{.Feed.ID}}/items/read" hx-target="closest section" hx-swap="outerHTML">
@@ -13,7 +19,7 @@
     </div>
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
-    <div class="poller" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="every 60s [document.visibilityState === 'visible']" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
+    <div class="poller" data-poll-aligned="true" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="refresh" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
     <div class="item-list" id="item-list">
       {{range .Items}}
         {{template "item_compact" .}}
