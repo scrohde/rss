@@ -341,6 +341,25 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	}
 }
 
+func TestRewriteSummaryImages(t *testing.T) {
+	input := `<p>Hello</p><img src="https://example.com/image.jpg" alt="x">`
+	output := rewriteSummaryImages(input)
+	expected := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/image.jpg")
+	if !strings.Contains(output, expected) {
+		t.Fatalf("expected proxied image url, got %q", output)
+	}
+}
+
+func TestRewriteSummaryImagesSrcset(t *testing.T) {
+	input := `<img srcset="https://example.com/a.jpg 1x, https://example.com/b.jpg 2x" src="https://example.com/a.jpg">`
+	output := rewriteSummaryImages(input)
+	expectedA := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/a.jpg")
+	expectedB := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/b.jpg")
+	if !strings.Contains(output, expectedA) || !strings.Contains(output, expectedB) {
+		t.Fatalf("expected proxied srcset urls, got %q", output)
+	}
+}
+
 func timePtr(t time.Time) *time.Time {
 	return &t
 }

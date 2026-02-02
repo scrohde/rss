@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,13 +16,32 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 	_ "modernc.org/sqlite"
 )
 
 const (
-	maxItemsPerFeed = 200
-	readRetention   = 2 * time.Hour
+	maxItemsPerFeed         = 200
+	readRetention           = 2 * time.Hour
+	imageProxyPath          = "/image-proxy"
+	maxImageProxyURLLength  = 4096
+	imageProxyTimeout       = 15 * time.Second
+	imageProxyCacheFallback = "public, max-age=86400"
 )
+
+var imageProxyClient = &http.Client{
+	Timeout: imageProxyTimeout,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if !isAllowedProxyURL(req.URL) {
+			return errors.New("redirect blocked")
+		}
+		return nil
+	},
+}
 
 type App struct {
 	db   *sql.DB
@@ -162,6 +184,11 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path == "/" && r.Method == http.MethodGet {
 		a.handleIndex(w, r)
+		return
+	}
+
+	if r.URL.Path == imageProxyPath {
+		a.handleImageProxy(w, r)
 		return
 	}
 
@@ -410,6 +437,82 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 	a.renderTemplate(w, templateName, item)
 }
 
+func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	raw := r.URL.Query().Get("url")
+	if raw == "" {
+		http.Error(w, "missing url", http.StatusBadRequest)
+		return
+	}
+	if len(raw) > maxImageProxyURLLength {
+		http.Error(w, "url too long", http.StatusRequestURITooLong)
+		return
+	}
+
+	target, err := url.Parse(raw)
+	if err != nil || !isAllowedProxyURL(target) {
+		http.Error(w, "invalid url", http.StatusBadRequest)
+		return
+	}
+
+	req, err := http.NewRequest(http.MethodGet, target.String(), nil)
+	if err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	req.Header.Set("User-Agent", "PulseRSS/1.0")
+	req.Header.Set("Accept", "image/*,*/*;q=0.8")
+	req.Header.Set("Referer", fmt.Sprintf("%s://%s/", target.Scheme, target.Host))
+
+	resp, err := imageProxyClient.Do(req)
+	if err != nil {
+		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		http.Error(w, "upstream error", http.StatusBadGateway)
+		return
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	sniff, _ := reader.Peek(512)
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" || !strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		detected := http.DetectContentType(sniff)
+		if !strings.HasPrefix(detected, "image/") {
+			http.Error(w, "upstream did not return image content", http.StatusUnsupportedMediaType)
+			return
+		}
+		contentType = detected
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" {
+		w.Header().Set("Cache-Control", cacheControl)
+	} else {
+		w.Header().Set("Cache-Control", imageProxyCacheFallback)
+	}
+	if etag := resp.Header.Get("ETag"); etag != "" {
+		w.Header().Set("ETag", etag)
+	}
+	if modified := resp.Header.Get("Last-Modified"); modified != "" {
+		w.Header().Set("Last-Modified", modified)
+	}
+	if length := resp.Header.Get("Content-Length"); length != "" {
+		w.Header().Set("Content-Length", length)
+	}
+
+	if _, err := io.Copy(w, reader); err != nil {
+		log.Printf("image proxy copy: %v", err)
+	}
+}
+
 func (a *App) renderTemplate(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := a.tmpl.ExecuteTemplate(w, name, data); err != nil {
@@ -631,11 +734,11 @@ WHERE f.id = ?
 }
 
 func getFeedURL(db *sql.DB, feedID int64) (string, error) {
-	var url string
-	if err := db.QueryRow("SELECT url FROM feeds WHERE id = ?", feedID).Scan(&url); err != nil {
+	var u string
+	if err := db.QueryRow("SELECT url FROM feeds WHERE id = ?", feedID).Scan(&u); err != nil {
 		return "", err
 	}
-	return url, nil
+	return u, nil
 }
 
 func listItems(db *sql.DB, feedID int64) ([]ItemView, error) {
@@ -770,7 +873,146 @@ func pickSummaryHTML(summary, content sql.NullString) template.HTML {
 	if text == "" {
 		text = "<p>No summary available.</p>"
 	}
+	text = rewriteSummaryImages(text)
 	return template.HTML(text)
+}
+
+func rewriteSummaryImages(text string) string {
+	if !strings.Contains(text, "<img") && !strings.Contains(text, "<source") {
+		return text
+	}
+	root := &html.Node{Type: html.ElementNode, DataAtom: atom.Div, Data: "div"}
+	nodes, err := html.ParseFragment(strings.NewReader(text), root)
+	if err != nil {
+		return text
+	}
+	changed := false
+	for _, node := range nodes {
+		if rewriteImageNode(node) {
+			changed = true
+		}
+	}
+	if !changed {
+		return text
+	}
+	var b strings.Builder
+	for _, node := range nodes {
+		_ = html.Render(&b, node)
+	}
+	return b.String()
+}
+
+func rewriteImageNode(node *html.Node) bool {
+	changed := false
+	if node.Type == html.ElementNode {
+		switch node.Data {
+		case "img":
+			if rewriteAttr(node, "src", proxyImageURL) {
+				changed = true
+			}
+			if rewriteAttr(node, "srcset", rewriteSrcset) {
+				changed = true
+			}
+		case "source":
+			if rewriteAttr(node, "srcset", rewriteSrcset) {
+				changed = true
+			}
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if rewriteImageNode(child) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+func rewriteAttr(node *html.Node, key string, rewrite func(string) (string, bool)) bool {
+	for i, attr := range node.Attr {
+		if attr.Key != key {
+			continue
+		}
+		if updated, ok := rewrite(attr.Val); ok {
+			node.Attr[i].Val = updated
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+func rewriteSrcset(value string) (string, bool) {
+	parts := strings.Split(value, ",")
+	changed := false
+	for i, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) == 0 {
+			continue
+		}
+		if updated, ok := proxyImageURL(fields[0]); ok {
+			fields[0] = updated
+			changed = true
+		}
+		parts[i] = strings.Join(fields, " ")
+	}
+	if !changed {
+		return value, false
+	}
+	return strings.Join(parts, ", "), true
+}
+
+func proxyImageURL(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return raw, false
+	}
+	if strings.HasPrefix(trimmed, imageProxyPath+"?") {
+		return raw, false
+	}
+	if strings.HasPrefix(strings.ToLower(trimmed), "data:") {
+		return raw, false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" {
+		return raw, false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return raw, false
+	}
+	if !isAllowedProxyURL(parsed) {
+		return raw, false
+	}
+	return imageProxyPath + "?url=" + url.QueryEscape(parsed.String()), true
+}
+
+func isAllowedProxyURL(target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	if target.Scheme != "http" && target.Scheme != "https" {
+		return false
+	}
+	if target.Hostname() == "" {
+		return false
+	}
+	return !isDisallowedHost(target.Hostname())
+}
+
+func isDisallowedHost(host string) bool {
+	hostname := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if hostname == "" || hostname == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+			return true
+		}
+	}
+	return false
 }
 
 func formatTime(t time.Time) string {
