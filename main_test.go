@@ -233,6 +233,70 @@ func TestToggleReadAndCleanup(t *testing.T) {
 	}
 }
 
+func TestMarkAllRead(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	err = upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Item A",
+		Link:            "http://example.com/1",
+		GUID:            "1",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}, {
+		Title:           "Item B",
+		Link:            "http://example.com/2",
+		GUID:            "2",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+	}})
+	if err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+
+	items, err := listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	past := time.Now().UTC().Add(-30 * time.Minute)
+	if _, err := app.db.Exec("UPDATE items SET read_at = ? WHERE id = ?", past, items[0].ID); err != nil {
+		t.Fatalf("set read_at: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/items/read", feedID), nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mark all read status: %d", rec.Code)
+	}
+
+	rows, err := app.db.Query("SELECT read_at FROM items WHERE feed_id = ?", feedID)
+	if err != nil {
+		t.Fatalf("read_at query: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var readAt sql.NullTime
+		if err := rows.Scan(&readAt); err != nil {
+			t.Fatalf("read_at scan: %v", err)
+		}
+		if !readAt.Valid {
+			t.Fatalf("expected read_at to be set for all items")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read_at rows: %v", err)
+	}
+}
+
 func TestItemLimit(t *testing.T) {
 	app := newTestApp(t)
 	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Feed")

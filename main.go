@@ -219,21 +219,24 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 			a.handleSubscribe(w, r)
 			return
 		}
-		if r.Method == http.MethodGet && len(parts) >= 3 && parts[2] == "items" {
+		if len(parts) >= 3 && parts[2] == "items" {
 			feedID, err := strconv.ParseInt(parts[1], 10, 64)
 			if err != nil {
 				http.NotFound(w, r)
 				return
 			}
 			switch {
-			case len(parts) == 3:
+			case r.Method == http.MethodGet && len(parts) == 3:
 				a.handleFeedItems(w, r, feedID)
 				return
-			case len(parts) == 4 && parts[3] == "new":
+			case r.Method == http.MethodGet && len(parts) == 4 && parts[3] == "new":
 				a.handleFeedItemsNew(w, r, feedID)
 				return
-			case len(parts) == 4 && parts[3] == "poll":
+			case r.Method == http.MethodGet && len(parts) == 4 && parts[3] == "poll":
 				a.handleFeedItemsPoll(w, r, feedID)
+				return
+			case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "read":
+				a.handleMarkAllRead(w, r, feedID)
 				return
 			}
 		}
@@ -450,6 +453,21 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 		templateName = "item_expanded"
 	}
 	a.renderTemplate(w, templateName, item)
+}
+
+func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID int64) {
+	if err := markAllRead(a.db, feedID); err != nil {
+		http.Error(w, "failed to update items", http.StatusInternalServerError)
+		return
+	}
+
+	itemList, err := loadItemList(a.db, feedID)
+	if err != nil {
+		http.Error(w, "failed to load items", http.StatusInternalServerError)
+		return
+	}
+
+	a.renderTemplate(w, "item_list", itemList)
 }
 
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
@@ -1075,6 +1093,15 @@ func toggleRead(db *sql.DB, itemID int64) error {
 		return err
 	}
 	_, err := db.Exec("UPDATE items SET read_at = ? WHERE id = ?", time.Now().UTC(), itemID)
+	return err
+}
+
+func markAllRead(db *sql.DB, feedID int64) error {
+	_, err := db.Exec(`
+UPDATE items
+SET read_at = ?
+WHERE feed_id = ? AND read_at IS NULL
+`, time.Now().UTC(), feedID)
 	return err
 }
 

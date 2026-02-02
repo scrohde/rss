@@ -5,6 +5,11 @@
         <div class="items-title">{{.Feed.Title}}</div>
         <div class="items-meta">{{.Feed.ItemCount}} items - Latest updates first</div>
       </div>
+      <div class="item-actions">
+        <button class="chip ghost" hx-post="/feeds/{{.Feed.ID}}/items/read" hx-target="closest section" hx-swap="outerHTML">
+          Mark all read
+        </button>
+      </div>
     </div>
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
