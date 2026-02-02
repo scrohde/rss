@@ -1,0 +1,14 @@
+{{define "index"}}
+  {{template "layout" .}}
+{{end}}
+
+{{define "main"}}
+  {{if .ItemList}}
+    {{template "item_list" .ItemList}}
+  {{else}}
+    <section class="empty-state">
+      <h2>Pick a feed to start reading.</h2>
+      <p>Subscribe to a new feed or select one from the sidebar.</p>
+    </section>
+  {{end}}
+{{end}}

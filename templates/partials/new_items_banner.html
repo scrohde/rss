@@ -1,0 +1,7 @@
+{{define "new_items_banner"}}
+  <div id="new-items-banner" class="new-items-banner {{if eq .Count 0}}hidden{{end}}" {{if .SwapOOB}}hx-swap-oob="true"{{end}}>
+    <button class="new-items-button" hx-get="/feeds/{{.FeedID}}/items/new" hx-target="#item-list" hx-swap="afterbegin" hx-include="#cursor">
+      New items ({{.Count}})
+    </button>
+  </div>
+{{end}}

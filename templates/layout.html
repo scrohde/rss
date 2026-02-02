@@ -1,0 +1,43 @@
+{{define "layout"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pulse RSS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">o</div>
+        <div>
+          <div class="brand-title">Pulse RSS</div>
+          <div class="brand-subtitle">Your compact feed cockpit</div>
+        </div>
+      </div>
+      <form class="subscribe-form" hx-post="/feeds" hx-target="#subscribe-message" hx-swap="outerHTML" hx-on::after-request="this.reset()">
+        <input type="url" name="url" placeholder="https://example.com/rss" required>
+        <button type="submit">Subscribe</button>
+      </form>
+      <div id="subscribe-message" class="message"></div>
+    </header>
+
+    <div class="app">
+      <aside class="sidebar" id="feed-list">
+        {{template "feed_list" .}}
+      </aside>
+
+      <main class="content" id="main-content">
+        {{template "main" .}}
+      </main>
+    </div>
+  </div>
+</body>
+</html>
+{{end}}

@@ -1,0 +1,7 @@
+{{define "item_new_response"}}
+  {{range .Items}}
+    {{template "item_compact" .}}
+  {{end}}
+  <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}" hx-swap-oob="true">
+  {{template "new_items_banner" .Banner}}
+{{end}}

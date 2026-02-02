@@ -1,0 +1,18 @@
+{{define "feed_list"}}
+  <div class="sidebar-header">
+    <span>Feeds</span>
+    <span class="sidebar-count">{{len .Feeds}}</span>
+  </div>
+  <ul class="feed-list">
+    {{range .Feeds}}
+      <li>
+        <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
+          <span class="feed-title">{{.Title}}</span>
+          <span class="feed-count">{{.ItemCount}}</span>
+        </button>
+      </li>
+    {{else}}
+      <li class="feed-empty">No feeds yet.</li>
+    {{end}}
+  </ul>
+{{end}}

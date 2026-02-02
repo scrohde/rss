@@ -1,0 +1,19 @@
+{{define "item_expanded"}}
+  <article class="item-card expanded {{if .IsRead}}is-read{{end}}" id="item-{{.ID}}">
+    <div class="item-row">
+      <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
+      <div class="item-actions">
+        <button class="chip" hx-post="/items/{{.ID}}/toggle" hx-vals='{"view":"expanded"}' hx-target="#item-{{.ID}}" hx-swap="outerHTML">
+          {{if .IsRead}}Mark unread{{else}}Mark read{{end}}
+        </button>
+        <button class="chip ghost" hx-get="/items/{{.ID}}/compact" hx-target="#item-{{.ID}}" hx-swap="outerHTML">Close</button>
+      </div>
+    </div>
+    <div class="item-meta">
+      <span>{{.PublishedDisplay}}</span>
+    </div>
+    <div class="item-summary">
+      {{.SummaryHTML}}
+    </div>
+  </article>
+{{end}}

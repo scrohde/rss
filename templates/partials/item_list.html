@@ -1,0 +1,23 @@
+{{define "item_list"}}
+  <section class="items">
+    <div class="items-header">
+      <div>
+        <div class="items-title">{{.Feed.Title}}</div>
+        <div class="items-meta">{{.Feed.ItemCount}} items - Latest updates first</div>
+      </div>
+    </div>
+    {{template "new_items_banner" .NewItems}}
+    <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
+    <div class="poller" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="every 60s [document.visibilityState === 'visible']" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
+    <div class="item-list" id="item-list">
+      {{range .Items}}
+        {{template "item_compact" .}}
+      {{else}}
+        <div class="empty-state small">
+          <h3>No items yet.</h3>
+          <p>Try refreshing the feed or subscribe to another source.</p>
+        </div>
+      {{end}}
+    </div>
+  </section>
+{{end}}
