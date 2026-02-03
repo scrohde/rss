@@ -8,11 +8,14 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -24,10 +27,15 @@ import (
 const (
 	maxItemsPerFeed         = 200
 	readRetention           = 2 * time.Hour
+	refreshInterval         = 10 * time.Minute
+	refreshLoopInterval     = 30 * time.Second
+	refreshBatchSize        = 5
+	feedFetchTimeout        = 15 * time.Second
 	imageProxyPath          = "/image-proxy"
 	maxImageProxyURLLength  = 4096
 	imageProxyTimeout       = 15 * time.Second
 	imageProxyCacheFallback = "public, max-age=86400"
+	maxErrorLength          = 300
 )
 
 var imageProxyClient = &http.Client{
@@ -44,15 +52,19 @@ var imageProxyClient = &http.Client{
 }
 
 type App struct {
-	db   *sql.DB
-	tmpl *template.Template
+	db        *sql.DB
+	tmpl      *template.Template
+	refreshMu sync.Mutex
 }
 
 type FeedView struct {
-	ID        int64
-	Title     string
-	URL       string
-	ItemCount int
+	ID                  int64
+	Title               string
+	URL                 string
+	ItemCount           int
+	LastCheckedDisplay  string
+	LastDurationDisplay string
+	LastError           string
 }
 
 type ItemView struct {
@@ -99,6 +111,7 @@ type NewItemsResponseData struct {
 }
 
 func main() {
+	setupLogging()
 	db, err := openDB("rss.db")
 	if err != nil {
 		log.Fatal(err)
@@ -115,6 +128,7 @@ func main() {
 	app := &App{db: db, tmpl: tmpl}
 
 	go app.cleanupLoop()
+	go app.refreshLoop()
 
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
@@ -128,10 +142,20 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Println("RSS reader running on http://localhost:8080")
+	slog.Info("rss reader running", "addr", server.Addr)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+func setupLogging() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	slog.SetDefault(slog.New(handler))
 }
 
 func openDB(path string) (*sql.DB, error) {
@@ -154,7 +178,13 @@ CREATE TABLE IF NOT EXISTS feeds (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	url TEXT NOT NULL UNIQUE,
 	title TEXT NOT NULL,
-	created_at DATETIME NOT NULL
+	created_at DATETIME NOT NULL,
+	etag TEXT,
+	last_modified TEXT,
+	last_refreshed_at DATETIME,
+	last_error TEXT,
+	last_duration_ms INTEGER,
+	next_refresh_at DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS items (
@@ -187,8 +217,10 @@ BEGIN
 	WHERE datetime(deleted_at) <= datetime('now', '-30 days');
 END;
 `
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *App) route(w http.ResponseWriter, r *http.Request) {
@@ -296,32 +328,63 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	feed, err := fetchFeed(feedURL)
+	start := time.Now()
+	slog.Info("subscribe feed", "feed_url", feedURL)
+	result, err := fetchFeed(feedURL, "", "")
 	if err != nil {
+		slog.Error("subscribe fetch failed", "feed_url", feedURL, "err", err)
 		a.renderSubscribeError(w, err)
 		return
 	}
+	if result.NotModified || result.Feed == nil {
+		slog.Warn("subscribe feed returned no content", "feed_url", feedURL, "status", result.StatusCode)
+		a.renderSubscribeError(w, errors.New("feed returned no content"))
+		return
+	}
 
-	feedTitle := strings.TrimSpace(feed.Title)
+	feedTitle := strings.TrimSpace(result.Feed.Title)
 	if feedTitle == "" {
 		feedTitle = feedURL
 	}
 
 	feedID, err := upsertFeed(a.db, feedURL, feedTitle)
 	if err != nil {
+		slog.Error("subscribe upsert feed failed", "feed_url", feedURL, "err", err)
 		a.renderSubscribeError(w, err)
 		return
 	}
 
-	if err := upsertItems(a.db, feedID, feed.Items); err != nil {
+	inserted, err := upsertItems(a.db, feedID, result.Feed.Items)
+	if err != nil {
+		slog.Error("subscribe upsert items failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		a.renderSubscribeError(w, err)
 		return
 	}
 
 	if err := enforceItemLimit(a.db, feedID); err != nil {
+		slog.Error("subscribe enforce item limit failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		a.renderSubscribeError(w, err)
 		return
 	}
+
+	duration := time.Since(start).Milliseconds()
+	if err := updateFeedRefreshMeta(a.db, feedID, FeedRefreshMeta{
+		ETag:           chooseHeader(result.ETag, ""),
+		LastModified:   chooseHeader(result.LastModified, ""),
+		LastCheckedAt:  time.Now().UTC(),
+		LastDurationMs: duration,
+		LastError:      "",
+		NextRefreshAt:  time.Now().UTC().Add(refreshInterval),
+	}); err != nil {
+		log.Printf("refresh meta update failed: %v", err)
+	}
+	slog.Info("subscribe feed stored",
+		"feed_id", feedID,
+		"title", feedTitle,
+		"items_in_feed", len(result.Feed.Items),
+		"items_new", inserted,
+		"duration_ms", duration,
+	)
 
 	feeds, err := listFeeds(a.db)
 	if err != nil {
@@ -368,11 +431,6 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request, feedID int
 func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID int64) {
 	afterID := parseAfterID(r)
 
-	if _, err := refreshFeed(a.db, feedID); err != nil {
-		http.Error(w, "failed to refresh feed", http.StatusInternalServerError)
-		return
-	}
-
 	count, err := countItemsAfter(a.db, feedID, afterID)
 	if err != nil {
 		http.Error(w, "failed to check new items", http.StatusInternalServerError)
@@ -385,11 +443,6 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID
 
 func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request, feedID int64) {
 	afterID := parseAfterID(r)
-
-	if _, err := refreshFeed(a.db, feedID); err != nil {
-		http.Error(w, "failed to refresh feed", http.StatusInternalServerError)
-		return
-	}
 
 	items, err := listItemsAfter(a.db, feedID, afterID)
 	if err != nil {
@@ -441,6 +494,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 		http.Error(w, "failed to update item", http.StatusInternalServerError)
 		return
 	}
+	slog.Info("item read toggled", "item_id", itemID, "view", view)
 
 	item, err := getItemView(a.db, itemID)
 	if err != nil {
@@ -460,6 +514,7 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 		http.Error(w, "failed to update items", http.StatusInternalServerError)
 		return
 	}
+	slog.Info("feed items marked read", "feed_id", feedID)
 
 	itemList, err := loadItemList(a.db, feedID)
 	if err != nil {
@@ -584,47 +639,224 @@ func normalizeFeedURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
-func fetchFeed(feedURL string) (*gofeed.Feed, error) {
-	parser := gofeed.NewParser()
-	parser.Client = &http.Client{Timeout: 15 * time.Second}
-	parser.UserAgent = "PulseRSS/1.0"
-	feed, err := parser.ParseURL(feedURL)
+type FeedFetchResult struct {
+	Feed         *gofeed.Feed
+	ETag         string
+	LastModified string
+	NotModified  bool
+	StatusCode   int
+}
+
+func fetchFeed(feedURL, etag, lastModified string) (*FeedFetchResult, error) {
+	req, err := http.NewRequest(http.MethodGet, feedURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "PulseRSS/1.0")
+	if strings.TrimSpace(etag) != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	if strings.TrimSpace(lastModified) != "" {
+		req.Header.Set("If-Modified-Since", lastModified)
+	}
+
+	client := &http.Client{Timeout: feedFetchTimeout}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch feed: %w", err)
 	}
-	return feed, nil
+	defer resp.Body.Close()
+
+	result := &FeedFetchResult{
+		ETag:         strings.TrimSpace(resp.Header.Get("ETag")),
+		LastModified: strings.TrimSpace(resp.Header.Get("Last-Modified")),
+		StatusCode:   resp.StatusCode,
+	}
+
+	if resp.StatusCode == http.StatusNotModified {
+		result.NotModified = true
+		return result, nil
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("unexpected status %d from feed", resp.StatusCode)
+	}
+
+	parser := gofeed.NewParser()
+	feed, err := parser.Parse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse feed: %w", err)
+	}
+	result.Feed = feed
+	return result, nil
 }
 
 func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 	feedURL, err := getFeedURL(db, feedID)
 	if err != nil {
+		slog.Error("refresh feed lookup failed", "feed_id", feedID, "err", err)
 		return 0, err
 	}
 
-	feed, err := fetchFeed(feedURL)
+	cache, err := getFeedCacheMeta(db, feedID)
 	if err != nil {
+		slog.Error("refresh feed cache lookup failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		return 0, err
 	}
 
-	feedTitle := strings.TrimSpace(feed.Title)
+	start := time.Now()
+	result, err := fetchFeed(feedURL, cache.ETag, cache.LastModified)
+	duration := time.Since(start).Milliseconds()
+	checkedAt := time.Now().UTC()
+
+	meta := FeedRefreshMeta{
+		LastCheckedAt:  checkedAt,
+		LastDurationMs: duration,
+		NextRefreshAt:  checkedAt.Add(refreshInterval),
+	}
+
+	if err != nil {
+		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		_ = updateFeedRefreshMeta(db, feedID, meta)
+		slog.Error("refresh feed fetch failed",
+			"feed_id", feedID,
+			"feed_url", feedURL,
+			"duration_ms", duration,
+			"err", err,
+		)
+		return 0, err
+	}
+
+	meta.LastError = ""
+	meta.ETag = chooseHeader(result.ETag, cache.ETag)
+	meta.LastModified = chooseHeader(result.LastModified, cache.LastModified)
+
+	if result.NotModified {
+		if err := updateFeedRefreshMeta(db, feedID, meta); err != nil {
+			return 0, err
+		}
+		slog.Info("refresh feed cache hit",
+			"feed_id", feedID,
+			"feed_url", feedURL,
+			"status", result.StatusCode,
+			"duration_ms", duration,
+		)
+		return feedID, nil
+	}
+
+	if result.Feed == nil {
+		meta.LastError = "feed returned no content"
+		_ = updateFeedRefreshMeta(db, feedID, meta)
+		slog.Warn("refresh feed returned no content",
+			"feed_id", feedID,
+			"feed_url", feedURL,
+			"status", result.StatusCode,
+		)
+		return 0, errors.New(meta.LastError)
+	}
+
+	feedTitle := strings.TrimSpace(result.Feed.Title)
 	if feedTitle == "" {
 		feedTitle = feedURL
 	}
 
 	updatedID, err := upsertFeed(db, feedURL, feedTitle)
 	if err != nil {
+		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		_ = updateFeedRefreshMeta(db, feedID, meta)
+		slog.Error("refresh upsert feed failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		return 0, err
 	}
 
-	if err := upsertItems(db, updatedID, feed.Items); err != nil {
+	inserted, err := upsertItems(db, updatedID, result.Feed.Items)
+	if err != nil {
+		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		_ = updateFeedRefreshMeta(db, feedID, meta)
+		slog.Error("refresh upsert items failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		return 0, err
 	}
 
 	if err := enforceItemLimit(db, updatedID); err != nil {
+		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		_ = updateFeedRefreshMeta(db, feedID, meta)
+		slog.Error("refresh enforce item limit failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		return 0, err
 	}
 
+	if err := updateFeedRefreshMeta(db, updatedID, meta); err != nil {
+		return 0, err
+	}
+
+	slog.Info("refresh feed updated",
+		"feed_id", updatedID,
+		"feed_url", feedURL,
+		"title", feedTitle,
+		"status", result.StatusCode,
+		"items_in_feed", len(result.Feed.Items),
+		"items_new", inserted,
+		"duration_ms", duration,
+	)
 	return updatedID, nil
+}
+
+type FeedCacheMeta struct {
+	ETag         string
+	LastModified string
+}
+
+type FeedRefreshMeta struct {
+	ETag           string
+	LastModified   string
+	LastCheckedAt  time.Time
+	LastDurationMs int64
+	LastError      string
+	NextRefreshAt  time.Time
+}
+
+func getFeedCacheMeta(db *sql.DB, feedID int64) (FeedCacheMeta, error) {
+	var (
+		etag         sql.NullString
+		lastModified sql.NullString
+	)
+	if err := db.QueryRow(`
+SELECT etag, last_modified
+FROM feeds
+WHERE id = ?
+`, feedID).Scan(&etag, &lastModified); err != nil {
+		return FeedCacheMeta{}, err
+	}
+	return FeedCacheMeta{
+		ETag:         strings.TrimSpace(etag.String),
+		LastModified: strings.TrimSpace(lastModified.String),
+	}, nil
+}
+
+func updateFeedRefreshMeta(db *sql.DB, feedID int64, meta FeedRefreshMeta) error {
+	if meta.LastCheckedAt.IsZero() {
+		meta.LastCheckedAt = time.Now().UTC()
+	}
+	if meta.NextRefreshAt.IsZero() {
+		meta.NextRefreshAt = meta.LastCheckedAt.Add(refreshInterval)
+	}
+	_, err := db.Exec(`
+UPDATE feeds
+SET etag = COALESCE(?, etag),
+    last_modified = COALESCE(?, last_modified),
+    last_refreshed_at = ?,
+    last_error = ?,
+    last_duration_ms = ?,
+    next_refresh_at = ?
+WHERE id = ?
+`,
+		nullString(meta.ETag),
+		nullString(meta.LastModified),
+		meta.LastCheckedAt,
+		nullString(meta.LastError),
+		nullInt64(meta.LastDurationMs),
+		meta.NextRefreshAt,
+		feedID,
+	)
+	return err
 }
 
 func upsertFeed(db *sql.DB, feedURL, title string) (int64, error) {
@@ -644,7 +876,7 @@ ON CONFLICT(url) DO UPDATE SET title = excluded.title
 	return id, nil
 }
 
-func upsertItems(db *sql.DB, feedID int64, items []*gofeed.Item) error {
+func upsertItems(db *sql.DB, feedID int64, items []*gofeed.Item) (int, error) {
 	now := time.Now().UTC()
 	stmt, err := db.Prepare(`
 INSERT OR IGNORE INTO items
@@ -655,10 +887,11 @@ WHERE NOT EXISTS (
 )
 `)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer stmt.Close()
 
+	inserted := 0
 	for idx, item := range items {
 		guid := strings.TrimSpace(item.GUID)
 		if guid == "" {
@@ -683,7 +916,7 @@ WHERE NOT EXISTS (
 
 		summary := strings.TrimSpace(item.Description)
 		content := strings.TrimSpace(item.Content)
-		if _, err := stmt.Exec(
+		res, err := stmt.Exec(
 			feedID,
 			guid,
 			fallbackString(item.Title, "(untitled)"),
@@ -694,12 +927,16 @@ WHERE NOT EXISTS (
 			now,
 			feedID,
 			guid,
-		); err != nil {
-			return err
+		)
+		if err != nil {
+			return inserted, err
+		}
+		if affected, err := res.RowsAffected(); err == nil && affected > 0 {
+			inserted += int(affected)
 		}
 	}
 
-	return nil
+	return inserted, nil
 }
 
 func enforceItemLimit(db *sql.DB, feedID int64) error {
@@ -745,7 +982,10 @@ WHERE feed_id = ?
 func listFeeds(db *sql.DB) ([]FeedView, error) {
 	rows, err := db.Query(`
 SELECT f.id, f.title, f.url,
-       (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count
+       (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
+       f.last_refreshed_at,
+       f.last_error,
+       f.last_duration_ms
 FROM feeds f
 ORDER BY f.title COLLATE NOCASE
 `)
@@ -756,13 +996,25 @@ ORDER BY f.title COLLATE NOCASE
 
 	var feeds []FeedView
 	for rows.Next() {
-		var feed FeedView
-		if err := rows.Scan(&feed.ID, &feed.Title, &feed.URL, &feed.ItemCount); err != nil {
+		var (
+			id           int64
+			title        string
+			url          string
+			itemCount    int
+			lastChecked  sql.NullTime
+			lastError    sql.NullString
+			lastDuration sql.NullInt64
+		)
+		if err := rows.Scan(&id, &title, &url, &itemCount, &lastChecked, &lastError, &lastDuration); err != nil {
 			return nil, err
 		}
-		feeds = append(feeds, feed)
+		feeds = append(feeds, buildFeedView(id, title, url, itemCount, lastChecked, lastError, lastDuration))
 	}
-	return feeds, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slog.Info("db list feeds", "count", len(feeds))
+	return feeds, nil
 }
 
 func loadItemList(db *sql.DB, feedID int64) (*ItemListData, error) {
@@ -784,17 +1036,29 @@ func loadItemList(db *sql.DB, feedID int64) (*ItemListData, error) {
 }
 
 func getFeed(db *sql.DB, feedID int64) (FeedView, error) {
-	var feed FeedView
 	row := db.QueryRow(`
 SELECT f.id, f.title, f.url,
-       (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count
+       (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
+       f.last_refreshed_at,
+       f.last_error,
+       f.last_duration_ms
 FROM feeds f
 WHERE f.id = ?
 `, feedID)
-	if err := row.Scan(&feed.ID, &feed.Title, &feed.URL, &feed.ItemCount); err != nil {
+	var (
+		id           int64
+		title        string
+		url          string
+		itemCount    int
+		lastChecked  sql.NullTime
+		lastError    sql.NullString
+		lastDuration sql.NullInt64
+	)
+	if err := row.Scan(&id, &title, &url, &itemCount, &lastChecked, &lastError, &lastDuration); err != nil {
 		return FeedView{}, err
 	}
-	return feed, nil
+	slog.Info("db get feed", "feed_id", feedID)
+	return buildFeedView(id, title, url, itemCount, lastChecked, lastError, lastDuration), nil
 }
 
 func getFeedURL(db *sql.DB, feedID int64) (string, error) {
@@ -803,6 +1067,30 @@ func getFeedURL(db *sql.DB, feedID int64) (string, error) {
 		return "", err
 	}
 	return u, nil
+}
+
+func listDueFeeds(db *sql.DB, now time.Time, limit int) ([]int64, error) {
+	rows, err := db.Query(`
+SELECT id
+FROM feeds
+WHERE next_refresh_at IS NULL OR next_refresh_at <= ?
+ORDER BY COALESCE(next_refresh_at, created_at) ASC
+LIMIT ?
+`, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func listItems(db *sql.DB, feedID int64) ([]ItemView, error) {
@@ -825,7 +1113,11 @@ ORDER BY COALESCE(published_at, created_at) DESC, id DESC
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slog.Info("db list items", "feed_id", feedID, "count", len(items))
+	return items, nil
 }
 
 func listItemsAfter(db *sql.DB, feedID, afterID int64) ([]ItemView, error) {
@@ -848,7 +1140,11 @@ ORDER BY COALESCE(published_at, created_at) DESC, id DESC
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slog.Info("db list items after", "feed_id", feedID, "after_id", afterID, "count", len(items))
+	return items, nil
 }
 
 func countItemsAfter(db *sql.DB, feedID, afterID int64) (int, error) {
@@ -860,6 +1156,7 @@ WHERE feed_id = ? AND id > ?
 `, feedID, afterID).Scan(&count); err != nil {
 		return 0, err
 	}
+	slog.Info("db count items after", "feed_id", feedID, "after_id", afterID, "count", count)
 	return count, nil
 }
 
@@ -871,6 +1168,30 @@ func maxItemID(items []ItemView) int64 {
 		}
 	}
 	return maxID
+}
+
+func buildFeedView(id int64, title, url string, itemCount int, lastChecked sql.NullTime, lastError sql.NullString, lastDuration sql.NullInt64) FeedView {
+	checkedDisplay := "Never"
+	if lastChecked.Valid {
+		checkedDisplay = formatTime(lastChecked.Time)
+	}
+	durationDisplay := ""
+	if lastDuration.Valid && lastDuration.Int64 > 0 {
+		durationDisplay = formatDurationMs(lastDuration.Int64)
+	}
+	errText := ""
+	if lastError.Valid {
+		errText = lastError.String
+	}
+	return FeedView{
+		ID:                  id,
+		Title:               title,
+		URL:                 url,
+		ItemCount:           itemCount,
+		LastCheckedDisplay:  checkedDisplay,
+		LastDurationDisplay: durationDisplay,
+		LastError:           errText,
+	}
 }
 
 func getItemView(db *sql.DB, itemID int64) (ItemView, error) {
@@ -892,6 +1213,7 @@ WHERE id = ?
 	if err := row.Scan(&id, &title, &link, &summary, &content, &published, &readAt); err != nil {
 		return ItemView{}, err
 	}
+	slog.Info("db get item", "item_id", itemID)
 	return buildItemView(id, title, link, summary, content, published, readAt), nil
 }
 
@@ -1110,10 +1432,40 @@ func (a *App) cleanupLoop() {
 	defer ticker.Stop()
 	for {
 		if err := cleanupReadItems(a.db); err != nil {
-			log.Printf("cleanup error: %v", err)
+			slog.Error("cleanup error", "err", err)
 		}
 		<-ticker.C
 	}
+}
+
+func (a *App) refreshLoop() {
+	ticker := time.NewTicker(refreshLoopInterval)
+	defer ticker.Stop()
+	for {
+		if err := a.refreshDueFeeds(); err != nil {
+			slog.Error("refresh loop error", "err", err)
+		}
+		<-ticker.C
+	}
+}
+
+func (a *App) refreshDueFeeds() error {
+	ids, err := listDueFeeds(a.db, time.Now().UTC(), refreshBatchSize)
+	if err != nil {
+		return err
+	}
+	if len(ids) > 0 {
+		slog.Info("refresh due feeds", "count", len(ids))
+	}
+	for _, id := range ids {
+		a.refreshMu.Lock()
+		_, err := refreshFeed(a.db, id)
+		a.refreshMu.Unlock()
+		if err != nil {
+			slog.Error("refresh feed error", "feed_id", id, "err", err)
+		}
+	}
+	return nil
 }
 
 func cleanupReadItems(db *sql.DB) error {
@@ -1135,10 +1487,17 @@ WHERE read_at IS NOT NULL AND read_at <= ?
 `, time.Now().UTC(), cutoff); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("DELETE FROM items WHERE read_at IS NOT NULL AND read_at <= ?", cutoff); err != nil {
+	deleteResult, err := tx.Exec("DELETE FROM items WHERE read_at IS NOT NULL AND read_at <= ?", cutoff)
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if deleted, err := deleteResult.RowsAffected(); err == nil && deleted > 0 {
+		slog.Info("cleanup read items", "deleted", deleted)
+	}
+	return nil
 }
 
 func fallbackString(value, fallback string) string {
@@ -1153,4 +1512,40 @@ func nullTimeToValue(value sql.NullTime) any {
 		return value.Time
 	}
 	return nil
+}
+
+func nullString(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func nullInt64(value int64) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func chooseHeader(preferred, fallback string) string {
+	if strings.TrimSpace(preferred) != "" {
+		return preferred
+	}
+	return fallback
+}
+
+func truncateString(value string, max int) string {
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max]
+}
+
+func formatDurationMs(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	seconds := float64(ms) / 1000.0
+	return fmt.Sprintf("%.1fs", seconds)
 }
