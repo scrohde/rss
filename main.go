@@ -165,7 +165,13 @@ CREATE TABLE IF NOT EXISTS feeds (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	url TEXT NOT NULL UNIQUE,
 	title TEXT NOT NULL,
-	created_at DATETIME NOT NULL
+	created_at DATETIME NOT NULL,
+	etag TEXT,
+	last_modified TEXT,
+	last_refreshed_at DATETIME,
+	last_error TEXT,
+	last_duration_ms INTEGER,
+	next_refresh_at DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS items (
@@ -201,69 +207,7 @@ END;
 	if _, err := db.Exec(schema); err != nil {
 		return err
 	}
-	return ensureFeedColumns(db)
-}
-
-func ensureFeedColumns(db *sql.DB) error {
-	cols, err := tableColumns(db, "feeds")
-	if err != nil {
-		return err
-	}
-	if err := addColumnIfMissing(db, "feeds", cols, "etag", "TEXT"); err != nil {
-		return err
-	}
-	if err := addColumnIfMissing(db, "feeds", cols, "last_modified", "TEXT"); err != nil {
-		return err
-	}
-	if err := addColumnIfMissing(db, "feeds", cols, "last_refreshed_at", "DATETIME"); err != nil {
-		return err
-	}
-	if err := addColumnIfMissing(db, "feeds", cols, "last_error", "TEXT"); err != nil {
-		return err
-	}
-	if err := addColumnIfMissing(db, "feeds", cols, "last_duration_ms", "INTEGER"); err != nil {
-		return err
-	}
-	if err := addColumnIfMissing(db, "feeds", cols, "next_refresh_at", "DATETIME"); err != nil {
-		return err
-	}
 	return nil
-}
-
-func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s);", table))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	cols := make(map[string]bool)
-	for rows.Next() {
-		var (
-			cid        int
-			name       string
-			colType    string
-			notNull    int
-			defaultV   sql.NullString
-			primaryKey int
-		)
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultV, &primaryKey); err != nil {
-			return nil, err
-		}
-		cols[name] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return cols, nil
-}
-
-func addColumnIfMissing(db *sql.DB, table string, cols map[string]bool, name, colType string) error {
-	if cols[name] {
-		return nil
-	}
-	_, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, name, colType))
-	return err
 }
 
 func (a *App) route(w http.ResponseWriter, r *http.Request) {
