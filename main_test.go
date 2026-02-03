@@ -150,7 +150,7 @@ func TestToggleReadAndCleanup(t *testing.T) {
 		t.Fatalf("upsertFeed: %v", err)
 	}
 
-	err = upsertItems(app.db, feedID, []*gofeed.Item{{
+	_, err = upsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item",
 		Link:            "http://example.com/1",
 		GUID:            "1",
@@ -214,7 +214,7 @@ func TestToggleReadAndCleanup(t *testing.T) {
 		t.Fatalf("expected tombstone to be recorded")
 	}
 
-	if err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item",
 		Link:            "http://example.com/1",
 		GUID:            "1",
@@ -241,7 +241,7 @@ func TestMarkAllRead(t *testing.T) {
 		t.Fatalf("upsertFeed: %v", err)
 	}
 
-	err = upsertItems(app.db, feedID, []*gofeed.Item{{
+	_, err = upsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item A",
 		Link:            "http://example.com/1",
 		GUID:            "1",
@@ -317,7 +317,7 @@ func TestItemLimit(t *testing.T) {
 		})
 	}
 
-	if err := upsertItems(app.db, feedID, items); err != nil {
+	if _, err := upsertItems(app.db, feedID, items); err != nil {
 		t.Fatalf("upsertItems: %v", err)
 	}
 	if err := enforceItemLimit(app.db, feedID); err != nil {
@@ -352,7 +352,7 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsertFeed: %v", err)
 	}
-	if err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "First",
 		Link:            "http://example.com/1",
 		GUID:            "1",
@@ -383,7 +383,7 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 		t.Fatalf("expected banner to show zero new items")
 	}
 
-	if err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Third",
 		Link:            "http://example.com/3",
 		GUID:            "3",
