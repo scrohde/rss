@@ -406,6 +406,10 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+.item-card.compact {
+  padding: 10px 14px;
+}
+
 .item-card.clickable {
   cursor: pointer;
 }
@@ -428,6 +432,30 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
+}
+
+.item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.item-title-row .item-title {
+  min-width: 0;
+}
+
+.item-time-badge {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(100, 116, 139, 0.7);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .item-row.clickable {
