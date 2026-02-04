@@ -179,7 +179,7 @@ body {
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
 }
 
-body[data-feed-edit="true"] .edit-feeds-button {
+.feed-edit-toggle:checked ~ .sidebar .edit-feeds-button {
   color: #b91c1c;
 }
 
@@ -196,6 +196,7 @@ body[data-feed-edit="true"] .edit-feeds-button {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
 .feed-remove {
@@ -211,12 +212,51 @@ body[data-feed-edit="true"] .edit-feeds-button {
   transition: transform 0.2s ease;
 }
 
-body[data-feed-edit="true"] .feed-remove {
+.feed-edit-toggle:checked ~ .sidebar .feed-remove {
   display: inline-flex;
 }
 
 .feed-remove:hover {
   transform: scale(1.05);
+}
+
+.feed-remove-confirm {
+  display: none;
+  flex-basis: 100%;
+  margin-left: 28px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(185, 28, 28, 0.2);
+  background: rgba(185, 28, 28, 0.06);
+  color: #7f1d1d;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.feed-edit-toggle:checked ~ .sidebar .feed-remove-confirm {
+  display: flex;
+  flex-direction: column;
+}
+
+.feed-edit-toggle:checked ~ .sidebar .feed-remove-confirm:empty {
+  display: none;
+}
+
+.feed-remove-message {
+  font-weight: 600;
+}
+
+.feed-remove-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.feed-remove-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .icon {

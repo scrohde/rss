@@ -40,6 +40,7 @@ const (
 	imageProxyTimeout       = 15 * time.Second
 	imageProxyCacheFallback = "public, max-age=86400"
 	maxErrorLength          = 300
+	skipDeleteWarningCookie = "pulse_rss_skip_delete_warning"
 )
 
 func init() {
@@ -93,18 +94,20 @@ type ItemListData struct {
 }
 
 type PageData struct {
-	Feeds          []FeedView
-	SelectedFeedID int64
-	ItemList       *ItemListData
+	Feeds             []FeedView
+	SelectedFeedID    int64
+	ItemList          *ItemListData
+	SkipDeleteWarning bool
 }
 
 type SubscribeResponseData struct {
-	Message        string
-	MessageClass   string
-	Feeds          []FeedView
-	SelectedFeedID int64
-	ItemList       *ItemListData
-	Update         bool
+	Message           string
+	MessageClass      string
+	Feeds             []FeedView
+	SelectedFeedID    int64
+	ItemList          *ItemListData
+	Update            bool
+	SkipDeleteWarning bool
 }
 
 type NewItemsData struct {
@@ -120,22 +123,30 @@ type NewItemsResponseData struct {
 }
 
 type PollResponseData struct {
-	Banner         NewItemsData
-	Feeds          []FeedView
-	SelectedFeedID int64
+	Banner            NewItemsData
+	Feeds             []FeedView
+	SelectedFeedID    int64
+	SkipDeleteWarning bool
 }
 
 type ItemListResponseData struct {
-	ItemList       *ItemListData
-	Feeds          []FeedView
-	SelectedFeedID int64
+	ItemList          *ItemListData
+	Feeds             []FeedView
+	SelectedFeedID    int64
+	SkipDeleteWarning bool
 }
 
 type ToggleReadResponseData struct {
-	Item           ItemView
-	Feeds          []FeedView
-	SelectedFeedID int64
-	View           string
+	Item              ItemView
+	Feeds             []FeedView
+	SelectedFeedID    int64
+	View              string
+	SkipDeleteWarning bool
+}
+
+type DeleteFeedConfirmData struct {
+	Feed FeedView
+	Show bool
 }
 
 func main() {
@@ -163,7 +174,7 @@ func main() {
 	mux.HandleFunc("/", app.route)
 
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         resolveAddr(),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -184,6 +195,20 @@ func setupLogging() {
 		Level: slog.LevelInfo,
 	})
 	slog.SetDefault(slog.New(handler))
+}
+
+func resolveAddr() string {
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		return ":8080"
+	}
+	if strings.HasPrefix(port, ":") {
+		return port
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		return ":8080"
+	}
+	return ":" + port
 }
 
 func openDB(path string) (*sql.DB, error) {
@@ -283,6 +308,15 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 			a.handleSubscribe(w, r)
 			return
 		}
+		if r.Method == http.MethodGet && len(parts) == 4 && parts[2] == "delete" && parts[3] == "confirm" {
+			feedID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			a.handleDeleteFeedConfirm(w, r, feedID)
+			return
+		}
 		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "delete" {
 			feedID, err := strconv.ParseInt(parts[1], 10, 64)
 			if err != nil {
@@ -345,6 +379,26 @@ func pathParts(path string) []string {
 	return strings.Split(trimmed, "/")
 }
 
+func deleteWarningSkipped(r *http.Request) bool {
+	cookie, err := r.Cookie(skipDeleteWarningCookie)
+	if err != nil {
+		return false
+	}
+	return cookie.Value == "1"
+}
+
+func setSkipDeleteWarningCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     skipDeleteWarningCookie,
+		Value:    "1",
+		Path:     "/",
+		MaxAge:   60 * 60 * 24 * 365,
+		Expires:  time.Now().Add(365 * 24 * time.Hour),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	feeds, err := listFeeds(a.db)
 	if err != nil {
@@ -352,7 +406,10 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := PageData{Feeds: feeds}
+	data := PageData{
+		Feeds:             feeds,
+		SkipDeleteWarning: deleteWarningSkipped(r),
+	}
 	a.renderTemplate(w, "index", data)
 }
 
@@ -442,12 +499,13 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := SubscribeResponseData{
-		Message:        fmt.Sprintf("Subscribed to %s", feedTitle),
-		MessageClass:   "success",
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
-		ItemList:       itemList,
-		Update:         true,
+		Message:           fmt.Sprintf("Subscribed to %s", feedTitle),
+		MessageClass:      "success",
+		Feeds:             feeds,
+		SelectedFeedID:    feedID,
+		ItemList:          itemList,
+		Update:            true,
+		SkipDeleteWarning: deleteWarningSkipped(r),
 	}
 
 	a.renderTemplate(w, "subscribe_response", data)
@@ -487,9 +545,10 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID
 	}
 
 	data := PollResponseData{
-		Banner:         NewItemsData{FeedID: feedID, Count: count},
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
+		Banner:            NewItemsData{FeedID: feedID, Count: count},
+		Feeds:             feeds,
+		SelectedFeedID:    feedID,
+		SkipDeleteWarning: deleteWarningSkipped(r),
 	}
 	a.renderTemplate(w, "poll_response", data)
 }
@@ -568,10 +627,11 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 	}
 
 	data := ToggleReadResponseData{
-		Item:           item,
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
-		View:           view,
+		Item:              item,
+		Feeds:             feeds,
+		SelectedFeedID:    feedID,
+		View:              view,
+		SkipDeleteWarning: deleteWarningSkipped(r),
 	}
 	a.renderTemplate(w, "item_toggle_response", data)
 }
@@ -596,11 +656,29 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 	}
 
 	data := ItemListResponseData{
-		ItemList:       itemList,
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
+		ItemList:          itemList,
+		Feeds:             feeds,
+		SelectedFeedID:    feedID,
+		SkipDeleteWarning: deleteWarningSkipped(r),
 	}
 	a.renderTemplate(w, "item_list_response", data)
+}
+
+func (a *App) handleDeleteFeedConfirm(w http.ResponseWriter, r *http.Request, feedID int64) {
+	if deleteWarningSkipped(r) || r.URL.Query().Get("cancel") == "1" {
+		data := DeleteFeedConfirmData{Feed: FeedView{ID: feedID}, Show: false}
+		a.renderTemplate(w, "feed_remove_confirm", data)
+		return
+	}
+
+	feed, err := getFeed(a.db, feedID)
+	if err != nil {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+
+	data := DeleteFeedConfirmData{Feed: feed, Show: true}
+	a.renderTemplate(w, "feed_remove_confirm", data)
 }
 
 func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
@@ -622,6 +700,12 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID in
 	}
 	slog.Info("feed deleted", "feed_id", feedID)
 
+	skipDeleteWarning := deleteWarningSkipped(r)
+	if r.FormValue("skip_delete_warning") != "" {
+		setSkipDeleteWarningCookie(w)
+		skipDeleteWarning = true
+	}
+
 	feeds, err := listFeeds(a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
@@ -640,9 +724,10 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID in
 	}
 
 	data := ItemListResponseData{
-		ItemList:       itemList,
-		Feeds:          feeds,
-		SelectedFeedID: selectedFeedID,
+		ItemList:          itemList,
+		Feeds:             feeds,
+		SelectedFeedID:    selectedFeedID,
+		SkipDeleteWarning: skipDeleteWarning,
 	}
 	a.renderTemplate(w, "delete_feed_response", data)
 }

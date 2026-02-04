@@ -19,7 +19,7 @@
     </div>
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
-    <div class="poller" data-poll-aligned="true" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="refresh" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
+    <div class="poller" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="every 60s" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
     <div class="item-list" id="item-list">
       {{range .Items}}
         {{template "item_compact" .}}

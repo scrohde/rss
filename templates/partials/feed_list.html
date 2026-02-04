@@ -3,9 +3,10 @@
     <span>Feeds</span>
     <div class="sidebar-actions">
       <span class="sidebar-count">{{len .Feeds}}</span>
-      <button class="edit-feeds-button" type="button" data-edit-feeds aria-pressed="false" aria-label="Edit feeds" title="Edit feeds">
+      <label class="edit-feeds-button" for="feed-edit-toggle" title="Edit feeds">
         <img class="icon" src="/static/icons/pencil.svg" alt="" aria-hidden="true">
-      </button>
+        <span class="sr-only">Edit feeds</span>
+      </label>
     </div>
   </div>
   <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
@@ -16,14 +17,16 @@
           class="feed-remove"
           type="button"
           aria-label="Remove feed {{.Title}}"
-          data-feed-remove
-          data-feed-title="{{.Title}}"
-          hidden
-          hx-post="/feeds/{{.ID}}/delete"
-          hx-target="#main-content"
-          hx-swap="innerHTML"
-          hx-include="#selected-feed-id"
-          hx-confirm="Remove feed"
+          {{if $.SkipDeleteWarning}}
+            hx-post="/feeds/{{.ID}}/delete"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            hx-include="#selected-feed-id"
+          {{else}}
+            hx-get="/feeds/{{.ID}}/delete/confirm"
+            hx-target="#feed-remove-confirm-{{.ID}}"
+            hx-swap="outerHTML"
+          {{end}}
         >
           <img class="icon" src="/static/icons/remove-circle.svg" alt="">
         </button>
@@ -31,6 +34,7 @@
           <span class="feed-title">{{.Title}}</span>
           <span class="feed-count">{{.UnreadCount}}</span>
         </button>
+        <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
       </li>
     {{else}}
       <li class="feed-empty">No feeds yet.</li>

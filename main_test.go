@@ -607,6 +607,75 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	}
 }
 
+func TestDeleteFeedConfirmEndpoint(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Delete Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm", feedID), nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("confirm status: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Don't warn again") {
+		t.Fatalf("expected skip checkbox label")
+	}
+	if !strings.Contains(body, fmt.Sprintf("feed-remove-confirm-%d", feedID)) {
+		t.Fatalf("expected confirm container id")
+	}
+	if !strings.Contains(body, fmt.Sprintf("hx-post=\"/feeds/%d/delete\"", feedID)) {
+		t.Fatalf("expected delete action in confirm")
+	}
+
+	cancelReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm?cancel=1", feedID), nil)
+	cancelRec := httptest.NewRecorder()
+	app.route(cancelRec, cancelReq)
+	if cancelRec.Code != http.StatusOK {
+		t.Fatalf("cancel status: %d", cancelRec.Code)
+	}
+	cancelBody := cancelRec.Body.String()
+	if strings.Contains(cancelBody, "skip_delete_warning") {
+		t.Fatalf("expected cancel response to omit confirm inputs")
+	}
+	if !strings.Contains(cancelBody, fmt.Sprintf("feed-remove-confirm-%d", feedID)) {
+		t.Fatalf("expected cancel placeholder id")
+	}
+}
+
+func TestDeleteFeedSkipCookie(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Skip Cookie Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	body := rec.Body.String()
+	if !strings.Contains(body, fmt.Sprintf("hx-get=\"/feeds/%d/delete/confirm\"", feedID)) {
+		t.Fatalf("expected confirm flow when cookie is not set")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: skipDeleteWarningCookie, Value: "1"})
+	rec = httptest.NewRecorder()
+	app.route(rec, req)
+	body = rec.Body.String()
+	if !strings.Contains(body, fmt.Sprintf("hx-post=\"/feeds/%d/delete\"", feedID)) {
+		t.Fatalf("expected direct delete when cookie is set")
+	}
+	if strings.Contains(body, fmt.Sprintf("hx-get=\"/feeds/%d/delete/confirm\"", feedID)) {
+		t.Fatalf("expected confirm flow to be skipped when cookie is set")
+	}
+}
+
 func TestRewriteSummaryImages(t *testing.T) {
 	input := `<p>Hello</p><img src="https://example.com/image.jpg" alt="x">`
 	output := rewriteSummaryImages(input)
