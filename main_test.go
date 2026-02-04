@@ -411,6 +411,69 @@ func TestMarkAllRead(t *testing.T) {
 	}
 }
 
+func TestDeleteFeedRemovesData(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Delete Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Item A",
+		Link:            "http://example.com/a",
+		GUID:            "a",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+
+	if _, err := app.db.Exec(
+		"INSERT INTO tombstones (feed_id, guid, deleted_at) VALUES (?, ?, ?)",
+		feedID,
+		"gone",
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("insert tombstone: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/delete", feedID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete feed status: %d", rec.Code)
+	}
+
+	if !strings.Contains(rec.Body.String(), "Pick a feed to start reading.") {
+		t.Fatalf("expected empty state after deleting last feed")
+	}
+
+	var count int
+	if err := app.db.QueryRow("SELECT COUNT(*) FROM feeds WHERE id = ?", feedID).Scan(&count); err != nil {
+		t.Fatalf("feed count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected feed to be deleted, got %d", count)
+	}
+	if err := app.db.QueryRow("SELECT COUNT(*) FROM items WHERE feed_id = ?", feedID).Scan(&count); err != nil {
+		t.Fatalf("items count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected items to be deleted, got %d", count)
+	}
+	if err := app.db.QueryRow("SELECT COUNT(*) FROM tombstones WHERE feed_id = ?", feedID).Scan(&count); err != nil {
+		t.Fatalf("tombstones count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected tombstones to be deleted, got %d", count)
+	}
+}
+
 func TestItemLimit(t *testing.T) {
 	app := newTestApp(t)
 	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Feed")

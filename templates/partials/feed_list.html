@@ -1,11 +1,32 @@
 {{define "feed_list"}}
   <div class="sidebar-header">
     <span>Feeds</span>
-    <span class="sidebar-count">{{len .Feeds}}</span>
+    <div class="sidebar-actions">
+      <span class="sidebar-count">{{len .Feeds}}</span>
+      <button class="edit-feeds-button" type="button" data-edit-feeds aria-pressed="false" aria-label="Edit feeds" title="Edit feeds">
+        <img class="icon" src="/static/icons/pencil.svg" alt="" aria-hidden="true">
+      </button>
+    </div>
   </div>
+  <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
   <ul class="feed-list">
     {{range .Feeds}}
-      <li>
+      <li class="feed-row">
+        <button
+          class="feed-remove"
+          type="button"
+          aria-label="Remove feed {{.Title}}"
+          data-feed-remove
+          data-feed-title="{{.Title}}"
+          hidden
+          hx-post="/feeds/{{.ID}}/delete"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
+          hx-include="#selected-feed-id"
+          hx-confirm="Remove feed"
+        >
+          <img class="icon" src="/static/icons/remove-circle.svg" alt="">
+        </button>
         <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
           <span class="feed-title">{{.Title}}</span>
           <span class="feed-count">{{.UnreadCount}}</span>

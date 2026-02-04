@@ -283,6 +283,15 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 			a.handleSubscribe(w, r)
 			return
 		}
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "delete" {
+			feedID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			a.handleDeleteFeed(w, r, feedID)
+			return
+		}
 		if len(parts) >= 3 && parts[2] == "items" {
 			feedID, err := strconv.ParseInt(parts[1], 10, 64)
 			if err != nil {
@@ -592,6 +601,50 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 		SelectedFeedID: feedID,
 	}
 	a.renderTemplate(w, "item_list_response", data)
+}
+
+func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	var selectedFeedID int64
+	if selected := r.FormValue("selected_feed_id"); selected != "" {
+		if parsed, err := strconv.ParseInt(selected, 10, 64); err == nil {
+			selectedFeedID = parsed
+		}
+	}
+
+	if err := deleteFeed(a.db, feedID); err != nil {
+		http.Error(w, "failed to delete feed", http.StatusInternalServerError)
+		return
+	}
+	slog.Info("feed deleted", "feed_id", feedID)
+
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	selectedFeedID = selectRemainingFeed(selectedFeedID, feedID, feeds)
+
+	var itemList *ItemListData
+	if selectedFeedID != 0 {
+		itemList, err = loadItemList(a.db, selectedFeedID)
+		if err != nil {
+			http.Error(w, "failed to load items", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	data := ItemListResponseData{
+		ItemList:       itemList,
+		Feeds:          feeds,
+		SelectedFeedID: selectedFeedID,
+	}
+	a.renderTemplate(w, "delete_feed_response", data)
 }
 
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
@@ -969,6 +1022,11 @@ ON CONFLICT(url) DO UPDATE SET title = excluded.title
 	return id, nil
 }
 
+func deleteFeed(db *sql.DB, feedID int64) error {
+	_, err := db.Exec("DELETE FROM feeds WHERE id = ?", feedID)
+	return err
+}
+
 func upsertItems(db *sql.DB, feedID int64, items []*gofeed.Item) (int, error) {
 	now := time.Now().UTC()
 	stmt, err := db.Prepare(`
@@ -1110,6 +1168,20 @@ ORDER BY f.title COLLATE NOCASE
 	}
 	slog.Info("db list feeds", "count", len(feeds))
 	return feeds, nil
+}
+
+func selectRemainingFeed(selectedID, deletedID int64, feeds []FeedView) int64 {
+	if len(feeds) == 0 {
+		return 0
+	}
+	if selectedID != 0 && selectedID != deletedID {
+		for _, feed := range feeds {
+			if feed.ID == selectedID {
+				return selectedID
+			}
+		}
+	}
+	return feeds[0].ID
 }
 
 func loadItemList(db *sql.DB, feedID int64) (*ItemListData, error) {

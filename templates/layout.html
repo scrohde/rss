@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/styles.css">
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
   <script src="/static/polling.js" defer></script>
+  <script src="/static/feeds.js" defer></script>
 </head>
 <body>
   <div class="page">
@@ -39,6 +40,20 @@
       </main>
     </div>
   </div>
+  <dialog class="modal" id="delete-feed-dialog">
+    <form method="dialog" class="modal-card">
+      <h3>Remove feed?</h3>
+      <p id="delete-feed-message">This removes the feed and all saved items.</p>
+      <label class="modal-check">
+        <input type="checkbox" id="delete-feed-skip">
+        <span>Don&#39;t show this warning again</span>
+      </label>
+      <div class="modal-actions">
+        <button class="chip ghost" value="cancel">Cancel</button>
+        <button class="chip danger" value="confirm">Remove feed</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>
 {{end}}
