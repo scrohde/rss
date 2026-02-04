@@ -1,0 +1,10 @@
+{{define "item_toggle_response"}}
+  {{if eq .View "expanded"}}
+    {{template "item_expanded" .Item}}
+  {{else}}
+    {{template "item_compact" .Item}}
+  {{end}}
+  <div id="feed-list" hx-swap-oob="innerHTML">
+    {{template "feed_list" .}}
+  </div>
+{{end}}

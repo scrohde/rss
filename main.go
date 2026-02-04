@@ -62,6 +62,7 @@ type FeedView struct {
 	Title               string
 	URL                 string
 	ItemCount           int
+	UnreadCount         int
 	LastCheckedDisplay  string
 	LastDurationDisplay string
 	LastError           string
@@ -108,6 +109,19 @@ type NewItemsResponseData struct {
 	Items    []ItemView
 	NewestID int64
 	Banner   NewItemsData
+}
+
+type ItemListResponseData struct {
+	ItemList       *ItemListData
+	Feeds          []FeedView
+	SelectedFeedID int64
+}
+
+type ToggleReadResponseData struct {
+	Item           ItemView
+	Feeds          []FeedView
+	SelectedFeedID int64
+	View           string
 }
 
 func main() {
@@ -496,17 +510,31 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 	}
 	slog.Info("item read toggled", "item_id", itemID, "view", view)
 
+	feedID, err := getFeedIDByItem(a.db, itemID)
+	if err != nil {
+		http.Error(w, "item not found", http.StatusNotFound)
+		return
+	}
+
 	item, err := getItemView(a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
 
-	templateName := "item_compact"
-	if view == "expanded" {
-		templateName = "item_expanded"
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
 	}
-	a.renderTemplate(w, templateName, item)
+
+	data := ToggleReadResponseData{
+		Item:           item,
+		Feeds:          feeds,
+		SelectedFeedID: feedID,
+		View:           view,
+	}
+	a.renderTemplate(w, "item_toggle_response", data)
 }
 
 func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID int64) {
@@ -522,7 +550,18 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 		return
 	}
 
-	a.renderTemplate(w, "item_list", itemList)
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := ItemListResponseData{
+		ItemList:       itemList,
+		Feeds:          feeds,
+		SelectedFeedID: feedID,
+	}
+	a.renderTemplate(w, "item_list_response", data)
 }
 
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
@@ -983,6 +1022,7 @@ func listFeeds(db *sql.DB) ([]FeedView, error) {
 	rows, err := db.Query(`
 SELECT f.id, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
+       (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
        f.last_error,
        f.last_duration_ms
@@ -1001,14 +1041,15 @@ ORDER BY f.title COLLATE NOCASE
 			title        string
 			url          string
 			itemCount    int
+			unreadCount  int
 			lastChecked  sql.NullTime
 			lastError    sql.NullString
 			lastDuration sql.NullInt64
 		)
-		if err := rows.Scan(&id, &title, &url, &itemCount, &lastChecked, &lastError, &lastDuration); err != nil {
+		if err := rows.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError, &lastDuration); err != nil {
 			return nil, err
 		}
-		feeds = append(feeds, buildFeedView(id, title, url, itemCount, lastChecked, lastError, lastDuration))
+		feeds = append(feeds, buildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError, lastDuration))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1039,6 +1080,7 @@ func getFeed(db *sql.DB, feedID int64) (FeedView, error) {
 	row := db.QueryRow(`
 SELECT f.id, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
+       (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
        f.last_error,
        f.last_duration_ms
@@ -1050,15 +1092,16 @@ WHERE f.id = ?
 		title        string
 		url          string
 		itemCount    int
+		unreadCount  int
 		lastChecked  sql.NullTime
 		lastError    sql.NullString
 		lastDuration sql.NullInt64
 	)
-	if err := row.Scan(&id, &title, &url, &itemCount, &lastChecked, &lastError, &lastDuration); err != nil {
+	if err := row.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError, &lastDuration); err != nil {
 		return FeedView{}, err
 	}
 	slog.Info("db get feed", "feed_id", feedID)
-	return buildFeedView(id, title, url, itemCount, lastChecked, lastError, lastDuration), nil
+	return buildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError, lastDuration), nil
 }
 
 func getFeedURL(db *sql.DB, feedID int64) (string, error) {
@@ -1170,7 +1213,7 @@ func maxItemID(items []ItemView) int64 {
 	return maxID
 }
 
-func buildFeedView(id int64, title, url string, itemCount int, lastChecked sql.NullTime, lastError sql.NullString, lastDuration sql.NullInt64) FeedView {
+func buildFeedView(id int64, title, url string, itemCount, unreadCount int, lastChecked sql.NullTime, lastError sql.NullString, lastDuration sql.NullInt64) FeedView {
 	checkedDisplay := "Never"
 	if lastChecked.Valid {
 		checkedDisplay = formatTime(lastChecked.Time)
@@ -1188,6 +1231,7 @@ func buildFeedView(id int64, title, url string, itemCount int, lastChecked sql.N
 		Title:               title,
 		URL:                 url,
 		ItemCount:           itemCount,
+		UnreadCount:         unreadCount,
 		LastCheckedDisplay:  checkedDisplay,
 		LastDurationDisplay: durationDisplay,
 		LastError:           errText,
@@ -1215,6 +1259,14 @@ WHERE id = ?
 	}
 	slog.Info("db get item", "item_id", itemID)
 	return buildItemView(id, title, link, summary, content, published, readAt), nil
+}
+
+func getFeedIDByItem(db *sql.DB, itemID int64) (int64, error) {
+	var feedID int64
+	if err := db.QueryRow("SELECT feed_id FROM items WHERE id = ?", itemID).Scan(&feedID); err != nil {
+		return 0, err
+	}
+	return feedID, nil
 }
 
 func scanItemView(rows *sql.Rows) (ItemView, error) {

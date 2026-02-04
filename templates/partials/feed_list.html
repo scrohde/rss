@@ -8,7 +8,7 @@
       <li>
         <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
           <span class="feed-title">{{.Title}}</span>
-          <span class="feed-count">{{.ItemCount}}</span>
+          <span class="feed-count">{{.UnreadCount}}</span>
         </button>
       </li>
     {{else}}

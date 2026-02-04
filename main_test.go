@@ -142,6 +142,119 @@ func TestSubscribeAndList(t *testing.T) {
 	}
 }
 
+func TestListFeedsUnreadCount(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Unread Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Unread A",
+		Link:            "http://example.com/a",
+		GUID:            "a",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}, {
+		Title:           "Unread B",
+		Link:            "http://example.com/b",
+		GUID:            "b",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+
+	feeds, err := listFeeds(app.db)
+	if err != nil {
+		t.Fatalf("listFeeds: %v", err)
+	}
+	if len(feeds) != 1 {
+		t.Fatalf("expected 1 feed, got %d", len(feeds))
+	}
+	if feeds[0].ItemCount != 2 {
+		t.Fatalf("expected 2 items, got %d", feeds[0].ItemCount)
+	}
+	if feeds[0].UnreadCount != 2 {
+		t.Fatalf("expected 2 unread items, got %d", feeds[0].UnreadCount)
+	}
+
+	items, err := listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems: %v", err)
+	}
+	if err := toggleRead(app.db, items[0].ID); err != nil {
+		t.Fatalf("toggleRead: %v", err)
+	}
+
+	feeds, err = listFeeds(app.db)
+	if err != nil {
+		t.Fatalf("listFeeds again: %v", err)
+	}
+	if feeds[0].UnreadCount != 1 {
+		t.Fatalf("expected 1 unread item, got %d", feeds[0].UnreadCount)
+	}
+}
+
+func TestToggleReadUpdatesFeedList(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Toggle Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "One",
+		Link:            "http://example.com/1",
+		GUID:            "1",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}, {
+		Title:           "Two",
+		Link:            "http://example.com/2",
+		GUID:            "2",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+
+	items, err := listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	form := url.Values{}
+	form.Set("view", "compact")
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/items/%d/toggle", items[0].ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle read status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="feed-list"`) {
+		t.Fatalf("expected feed list OOB update")
+	}
+	if !strings.Contains(body, `hx-swap-oob="innerHTML"`) {
+		t.Fatalf("expected OOB innerHTML swap for feed list")
+	}
+	if strings.Contains(body, `feed-count">2`) {
+		t.Fatalf("expected unread count to decrease")
+	}
+	if !strings.Contains(body, `feed-count">1`) {
+		t.Fatalf("expected unread count to be 1")
+	}
+}
+
 func TestToggleReadAndCleanup(t *testing.T) {
 	app := newTestApp(t)
 
