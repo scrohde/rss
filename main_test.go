@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"html/template"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -22,16 +23,33 @@ type feedServer struct {
 	feedXML string
 }
 
-func newFeedServer(t *testing.T, feedXML string) (*feedServer, *httptest.Server) {
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newFeedServer(t *testing.T, feedXML string) (*feedServer, string) {
 	t.Helper()
 	fs := &feedServer{feedXML: feedXML}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	feedURL := "https://feed.test/" + url.PathEscape(t.Name())
+	prevTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != feedURL {
+			return nil, fmt.Errorf("unexpected feed url: %s", req.URL.String())
+		}
 		fs.mu.RLock()
 		defer fs.mu.RUnlock()
-		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(fs.feedXML))
-	}))
-	return fs, server
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body:       io.NopCloser(strings.NewReader(fs.feedXML)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = prevTransport })
+	return fs, feedURL
 }
 
 func (f *feedServer) setFeedXML(xml string) {
@@ -107,13 +125,12 @@ func TestSubscribeAndList(t *testing.T) {
 			Description: "<p>Beta summary</p>",
 		},
 	}
-	_, server := newFeedServer(t, rssXML("Test Feed", items))
-	defer server.Close()
+	_, feedURL := newFeedServer(t, rssXML("Test Feed", items))
 
 	app := newTestApp(t)
 
 	form := url.Values{}
-	form.Set("url", server.URL)
+	form.Set("url", feedURL)
 	req := httptest.NewRequest(http.MethodPost, "/feeds", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -759,21 +776,21 @@ WHERE feed_id = ? AND guid = ?
 }
 
 func TestComputeBackoffInterval(t *testing.T) {
-	base := refreshInterval
-	cases := []struct {
-		count int
-		want  time.Duration
-	}{
-		{0, base},
-		{1, base * 2},
-		{2, base * 4},
-		{3, base * 8},
-		{4, refreshBackoffMax},
-		{8, refreshBackoffMax},
-	}
-	for _, tc := range cases {
-		if got := computeBackoffInterval(tc.count); got != tc.want {
-			t.Fatalf("count %d: expected %v, got %v", tc.count, tc.want, got)
+	cases := []int{0, 1, 2, 3, 4, 8}
+	for _, count := range cases {
+		want := refreshInterval
+		for i := 0; i < count; i++ {
+			want *= 2
+			if want >= refreshBackoffMax {
+				want = refreshBackoffMax
+				break
+			}
+		}
+		if want > refreshBackoffMax {
+			want = refreshBackoffMax
+		}
+		if got := computeBackoffInterval(count); got != want {
+			t.Fatalf("count %d: expected %v, got %v", count, want, got)
 		}
 	}
 }
