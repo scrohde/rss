@@ -198,6 +198,39 @@ func TestListFeedsUnreadCount(t *testing.T) {
 	}
 }
 
+func TestRenameFeedOverridesSourceTitle(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Source Title")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if err := updateFeedTitle(app.db, feedID, "Custom Title"); err != nil {
+		t.Fatalf("updateFeedTitle: %v", err)
+	}
+
+	feeds, err := listFeeds(app.db)
+	if err != nil {
+		t.Fatalf("listFeeds: %v", err)
+	}
+	if feeds[0].Title != "Custom Title" {
+		t.Fatalf("expected custom title, got %q", feeds[0].Title)
+	}
+
+	if _, err := upsertFeed(app.db, "http://example.com/rss", "Updated Source"); err != nil {
+		t.Fatalf("upsertFeed update: %v", err)
+	}
+
+	feeds, err = listFeeds(app.db)
+	if err != nil {
+		t.Fatalf("listFeeds again: %v", err)
+	}
+	if feeds[0].Title != "Custom Title" {
+		t.Fatalf("expected custom title after refresh, got %q", feeds[0].Title)
+	}
+}
+
 func TestToggleReadUpdatesFeedList(t *testing.T) {
 	app := newTestApp(t)
 

@@ -1,0 +1,11 @@
+{{define "feed_rename_response"}}
+  <div class="feed-rename-form" id="feed-rename-form-{{.FeedID}}"></div>
+  {{if .ItemList}}
+    <div id="main-content" hx-swap-oob="innerHTML">
+      {{template "item_list" .ItemList}}
+    </div>
+  {{end}}
+  <div id="feed-list" hx-swap-oob="innerHTML">
+    {{template "feed_list" .}}
+  </div>
+{{end}}

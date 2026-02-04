@@ -1,0 +1,37 @@
+{{define "feed_rename_form"}}
+  {{if .Show}}
+    <div class="feed-rename-form" id="feed-rename-form-{{.Feed.ID}}">
+      <form
+        class="feed-rename-fields"
+        hx-post="/feeds/{{.Feed.ID}}/rename"
+        hx-target="#feed-rename-form-{{.Feed.ID}}"
+        hx-swap="outerHTML"
+        hx-include="#selected-feed-id"
+      >
+        <label class="sr-only" for="feed-rename-input-{{.Feed.ID}}">Rename feed</label>
+        <input
+          id="feed-rename-input-{{.Feed.ID}}"
+          type="text"
+          name="title"
+          value="{{.Feed.Title}}"
+          maxlength="140"
+          required
+        >
+        <div class="feed-rename-actions">
+          <button class="chip" type="submit">Save</button>
+          <button
+            class="chip ghost"
+            type="button"
+            hx-get="/feeds/{{.Feed.ID}}/rename?cancel=1"
+            hx-target="#feed-rename-form-{{.Feed.ID}}"
+            hx-swap="outerHTML"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  {{else}}
+    <div class="feed-rename-form" id="feed-rename-form-{{.Feed.ID}}"></div>
+  {{end}}
+{{end}}

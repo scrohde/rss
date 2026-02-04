@@ -27,11 +27,11 @@ import (
 
 const (
 	maxItemsPerFeed         = 200
-	readRetention           = 2 * time.Hour
-	refreshInterval         = 15 * time.Minute
+	readRetention           = 30 * time.Minute
+	refreshInterval         = 20 * time.Minute
 	refreshLoopInterval     = 30 * time.Second
 	refreshBatchSize        = 5
-	refreshBackoffMax       = 3 * time.Hour
+	refreshBackoffMax       = 12 * time.Hour
 	refreshJitterMin        = 0.10
 	refreshJitterMax        = 0.20
 	feedFetchTimeout        = 15 * time.Second
@@ -145,6 +145,19 @@ type DeleteFeedConfirmData struct {
 	Show bool
 }
 
+type RenameFeedFormData struct {
+	Feed FeedView
+	Show bool
+}
+
+type RenameFeedResponseData struct {
+	FeedID            int64
+	ItemList          *ItemListData
+	Feeds             []FeedView
+	SelectedFeedID    int64
+	SkipDeleteWarning bool
+}
+
 func main() {
 	setupLogging()
 	db, err := openDB("rss.db")
@@ -227,6 +240,7 @@ CREATE TABLE IF NOT EXISTS feeds (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	url TEXT NOT NULL UNIQUE,
 	title TEXT NOT NULL,
+	custom_title TEXT,
 	created_at DATETIME NOT NULL,
 	etag TEXT,
 	last_modified TEXT,
@@ -316,6 +330,24 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			a.handleDeleteFeed(w, r, feedID)
+			return
+		}
+		if r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "rename" {
+			feedID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			a.handleRenameFeedForm(w, r, feedID)
+			return
+		}
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "rename" {
+			feedID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			a.handleRenameFeed(w, r, feedID)
 			return
 		}
 		if len(parts) >= 3 && parts[2] == "items" {
@@ -723,6 +755,69 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID in
 	a.renderTemplate(w, "delete_feed_response", data)
 }
 
+func (a *App) handleRenameFeedForm(w http.ResponseWriter, r *http.Request, feedID int64) {
+	if r.URL.Query().Get("cancel") == "1" {
+		data := RenameFeedFormData{Feed: FeedView{ID: feedID}, Show: false}
+		a.renderTemplate(w, "feed_rename_form", data)
+		return
+	}
+
+	feed, err := getFeed(a.db, feedID)
+	if err != nil {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+
+	data := RenameFeedFormData{Feed: feed, Show: true}
+	a.renderTemplate(w, "feed_rename_form", data)
+}
+
+func (a *App) handleRenameFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	title := strings.TrimSpace(r.FormValue("title"))
+
+	if err := updateFeedTitle(a.db, feedID, title); err != nil {
+		http.Error(w, "failed to rename feed", http.StatusInternalServerError)
+		return
+	}
+	slog.Info("feed renamed", "feed_id", feedID, "title", title)
+
+	var selectedFeedID int64
+	if selected := r.FormValue("selected_feed_id"); selected != "" {
+		if parsed, err := strconv.ParseInt(selected, 10, 64); err == nil {
+			selectedFeedID = parsed
+		}
+	}
+
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	var itemList *ItemListData
+	if selectedFeedID == feedID && selectedFeedID != 0 {
+		itemList, err = loadItemList(a.db, selectedFeedID)
+		if err != nil {
+			http.Error(w, "failed to load items", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	data := RenameFeedResponseData{
+		FeedID:            feedID,
+		ItemList:          itemList,
+		Feeds:             feeds,
+		SelectedFeedID:    selectedFeedID,
+		SkipDeleteWarning: deleteWarningSkipped(r),
+	}
+	a.renderTemplate(w, "feed_rename_response", data)
+}
+
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1094,6 +1189,11 @@ ON CONFLICT(url) DO UPDATE SET title = excluded.title
 	return id, nil
 }
 
+func updateFeedTitle(db *sql.DB, feedID int64, title string) error {
+	_, err := db.Exec("UPDATE feeds SET custom_title = ? WHERE id = ?", nullString(title), feedID)
+	return err
+}
+
 func deleteFeed(db *sql.DB, feedID int64) error {
 	_, err := db.Exec("DELETE FROM feeds WHERE id = ?", feedID)
 	return err
@@ -1204,13 +1304,13 @@ WHERE feed_id = ?
 
 func listFeeds(db *sql.DB) ([]FeedView, error) {
 	rows, err := db.Query(`
-SELECT f.id, f.title, f.url,
+SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
        f.last_error
 FROM feeds f
-ORDER BY f.title COLLATE NOCASE
+ORDER BY display_title COLLATE NOCASE
 `)
 	if err != nil {
 		return nil, err
@@ -1274,7 +1374,7 @@ func loadItemList(db *sql.DB, feedID int64) (*ItemListData, error) {
 
 func getFeed(db *sql.DB, feedID int64) (FeedView, error) {
 	row := db.QueryRow(`
-SELECT f.id, f.title, f.url,
+SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,

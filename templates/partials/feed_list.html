@@ -30,10 +30,21 @@
         >
           <img class="icon" src="/static/icons/remove-circle.svg" alt="">
         </button>
+        <button
+          class="feed-rename-button"
+          type="button"
+          aria-label="Rename feed {{.Title}}"
+          hx-get="/feeds/{{.ID}}/rename"
+          hx-target="#feed-rename-form-{{.ID}}"
+          hx-swap="outerHTML"
+        >
+          Rename
+        </button>
         <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
           <span class="feed-title">{{.Title}}</span>
           <span class="feed-count">{{.UnreadCount}}</span>
         </button>
+        <div class="feed-rename-form" id="feed-rename-form-{{.ID}}"></div>
         <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
       </li>
     {{else}}
