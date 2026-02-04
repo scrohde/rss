@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,9 +28,12 @@ import (
 const (
 	maxItemsPerFeed         = 200
 	readRetention           = 2 * time.Hour
-	refreshInterval         = 10 * time.Minute
+	refreshInterval         = 15 * time.Minute
 	refreshLoopInterval     = 30 * time.Second
 	refreshBatchSize        = 5
+	refreshBackoffMax       = 3 * time.Hour
+	refreshJitterMin        = 0.10
+	refreshJitterMax        = 0.20
 	feedFetchTimeout        = 15 * time.Second
 	imageProxyPath          = "/image-proxy"
 	maxImageProxyURLLength  = 4096
@@ -37,6 +41,10 @@ const (
 	imageProxyCacheFallback = "public, max-age=86400"
 	maxErrorLength          = 300
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 var imageProxyClient = &http.Client{
 	Timeout: imageProxyTimeout,
@@ -198,6 +206,7 @@ CREATE TABLE IF NOT EXISTS feeds (
 	last_refreshed_at DATETIME,
 	last_error TEXT,
 	last_duration_ms INTEGER,
+	unchanged_count INTEGER NOT NULL DEFAULT 0,
 	next_refresh_at DATETIME
 );
 
@@ -232,6 +241,9 @@ BEGIN
 END;
 `
 	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	if err := ensureFeedColumns(db); err != nil {
 		return err
 	}
 	return nil
@@ -382,13 +394,15 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	duration := time.Since(start).Milliseconds()
+	checkedAt := time.Now().UTC()
 	if err := updateFeedRefreshMeta(a.db, feedID, FeedRefreshMeta{
 		ETag:           chooseHeader(result.ETag, ""),
 		LastModified:   chooseHeader(result.LastModified, ""),
-		LastCheckedAt:  time.Now().UTC(),
+		LastCheckedAt:  checkedAt,
 		LastDurationMs: duration,
 		LastError:      "",
-		NextRefreshAt:  time.Now().UTC().Add(refreshInterval),
+		UnchangedCount: 0,
+		NextRefreshAt:  nextRefreshAt(checkedAt, 0),
 	}); err != nil {
 		log.Printf("refresh meta update failed: %v", err)
 	}
@@ -751,11 +765,12 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 	meta := FeedRefreshMeta{
 		LastCheckedAt:  checkedAt,
 		LastDurationMs: duration,
-		NextRefreshAt:  checkedAt.Add(refreshInterval),
 	}
 
 	if err != nil {
 		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		meta.UnchangedCount = 0
+		meta.NextRefreshAt = nextRefreshAt(checkedAt, meta.UnchangedCount)
 		_ = updateFeedRefreshMeta(db, feedID, meta)
 		slog.Error("refresh feed fetch failed",
 			"feed_id", feedID,
@@ -771,6 +786,8 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 	meta.LastModified = chooseHeader(result.LastModified, cache.LastModified)
 
 	if result.NotModified {
+		meta.UnchangedCount = cache.UnchangedCount + 1
+		meta.NextRefreshAt = nextRefreshAt(checkedAt, meta.UnchangedCount)
 		if err := updateFeedRefreshMeta(db, feedID, meta); err != nil {
 			return 0, err
 		}
@@ -785,6 +802,8 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 
 	if result.Feed == nil {
 		meta.LastError = "feed returned no content"
+		meta.UnchangedCount = 0
+		meta.NextRefreshAt = nextRefreshAt(checkedAt, meta.UnchangedCount)
 		_ = updateFeedRefreshMeta(db, feedID, meta)
 		slog.Warn("refresh feed returned no content",
 			"feed_id", feedID,
@@ -810,6 +829,8 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 	inserted, err := upsertItems(db, updatedID, result.Feed.Items)
 	if err != nil {
 		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		meta.UnchangedCount = 0
+		meta.NextRefreshAt = nextRefreshAt(checkedAt, meta.UnchangedCount)
 		_ = updateFeedRefreshMeta(db, feedID, meta)
 		slog.Error("refresh upsert items failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		return 0, err
@@ -817,11 +838,19 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 
 	if err := enforceItemLimit(db, updatedID); err != nil {
 		meta.LastError = truncateString(err.Error(), maxErrorLength)
+		meta.UnchangedCount = 0
+		meta.NextRefreshAt = nextRefreshAt(checkedAt, meta.UnchangedCount)
 		_ = updateFeedRefreshMeta(db, feedID, meta)
 		slog.Error("refresh enforce item limit failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
 		return 0, err
 	}
 
+	if inserted == 0 {
+		meta.UnchangedCount = cache.UnchangedCount + 1
+	} else {
+		meta.UnchangedCount = 0
+	}
+	meta.NextRefreshAt = nextRefreshAt(checkedAt, meta.UnchangedCount)
 	if err := updateFeedRefreshMeta(db, updatedID, meta); err != nil {
 		return 0, err
 	}
@@ -839,8 +868,9 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 }
 
 type FeedCacheMeta struct {
-	ETag         string
-	LastModified string
+	ETag           string
+	LastModified   string
+	UnchangedCount int
 }
 
 type FeedRefreshMeta struct {
@@ -849,24 +879,27 @@ type FeedRefreshMeta struct {
 	LastCheckedAt  time.Time
 	LastDurationMs int64
 	LastError      string
+	UnchangedCount int
 	NextRefreshAt  time.Time
 }
 
 func getFeedCacheMeta(db *sql.DB, feedID int64) (FeedCacheMeta, error) {
 	var (
-		etag         sql.NullString
-		lastModified sql.NullString
+		etag           sql.NullString
+		lastModified   sql.NullString
+		unchangedCount sql.NullInt64
 	)
 	if err := db.QueryRow(`
-SELECT etag, last_modified
+SELECT etag, last_modified, unchanged_count
 FROM feeds
 WHERE id = ?
-`, feedID).Scan(&etag, &lastModified); err != nil {
+`, feedID).Scan(&etag, &lastModified, &unchangedCount); err != nil {
 		return FeedCacheMeta{}, err
 	}
 	return FeedCacheMeta{
-		ETag:         strings.TrimSpace(etag.String),
-		LastModified: strings.TrimSpace(lastModified.String),
+		ETag:           strings.TrimSpace(etag.String),
+		LastModified:   strings.TrimSpace(lastModified.String),
+		UnchangedCount: int(unchangedCount.Int64),
 	}, nil
 }
 
@@ -874,8 +907,11 @@ func updateFeedRefreshMeta(db *sql.DB, feedID int64, meta FeedRefreshMeta) error
 	if meta.LastCheckedAt.IsZero() {
 		meta.LastCheckedAt = time.Now().UTC()
 	}
+	if meta.UnchangedCount < 0 {
+		meta.UnchangedCount = 0
+	}
 	if meta.NextRefreshAt.IsZero() {
-		meta.NextRefreshAt = meta.LastCheckedAt.Add(refreshInterval)
+		meta.NextRefreshAt = nextRefreshAt(meta.LastCheckedAt, meta.UnchangedCount)
 	}
 	_, err := db.Exec(`
 UPDATE feeds
@@ -884,6 +920,7 @@ SET etag = COALESCE(?, etag),
     last_refreshed_at = ?,
     last_error = ?,
     last_duration_ms = ?,
+    unchanged_count = ?,
     next_refresh_at = ?
 WHERE id = ?
 `,
@@ -892,6 +929,7 @@ WHERE id = ?
 		meta.LastCheckedAt,
 		nullString(meta.LastError),
 		nullInt64(meta.LastDurationMs),
+		meta.UnchangedCount,
 		meta.NextRefreshAt,
 		feedID,
 	)
@@ -1600,4 +1638,67 @@ func formatDurationMs(ms int64) string {
 	}
 	seconds := float64(ms) / 1000.0
 	return fmt.Sprintf("%.1fs", seconds)
+}
+
+func ensureFeedColumns(db *sql.DB) error {
+	return ensureColumn(db, "feeds", "unchanged_count", "INTEGER NOT NULL DEFAULT 0")
+}
+
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	exists, err := columnExists(db, table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", table)
+	var count int
+	if err := db.QueryRow(query, column).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func nextRefreshAt(checkedAt time.Time, unchangedCount int) time.Time {
+	interval := computeBackoffInterval(unchangedCount)
+	interval = applyJitter(interval)
+	if interval > refreshBackoffMax {
+		interval = refreshBackoffMax
+	}
+	return checkedAt.Add(interval)
+}
+
+func computeBackoffInterval(unchangedCount int) time.Duration {
+	if unchangedCount < 0 {
+		unchangedCount = 0
+	}
+	interval := refreshInterval
+	for i := 0; i < unchangedCount; i++ {
+		interval *= 2
+		if interval >= refreshBackoffMax {
+			return refreshBackoffMax
+		}
+	}
+	if interval > refreshBackoffMax {
+		return refreshBackoffMax
+	}
+	return interval
+}
+
+func applyJitter(base time.Duration) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	magnitude := refreshJitterMin + rand.Float64()*(refreshJitterMax-refreshJitterMin)
+	if rand.Intn(2) == 0 {
+		magnitude = -magnitude
+	}
+	adjusted := float64(base) * (1 + magnitude)
+	return time.Duration(adjusted)
 }

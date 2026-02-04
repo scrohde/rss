@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"html/template"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -578,4 +579,37 @@ WHERE feed_id = ? AND guid = ?
 		t.Fatalf("existsInTombstones: %v", err)
 	}
 	return count > 0
+}
+
+func TestComputeBackoffInterval(t *testing.T) {
+	base := refreshInterval
+	cases := []struct {
+		count int
+		want  time.Duration
+	}{
+		{0, base},
+		{1, base * 2},
+		{2, base * 4},
+		{3, base * 8},
+		{4, refreshBackoffMax},
+		{8, refreshBackoffMax},
+	}
+	for _, tc := range cases {
+		if got := computeBackoffInterval(tc.count); got != tc.want {
+			t.Fatalf("count %d: expected %v, got %v", tc.count, tc.want, got)
+		}
+	}
+}
+
+func TestApplyJitterRange(t *testing.T) {
+	rand.Seed(1)
+	base := refreshInterval
+	min := time.Duration(float64(base) * (1 - refreshJitterMax))
+	max := time.Duration(float64(base) * (1 + refreshJitterMax))
+	for i := 0; i < 10; i++ {
+		got := applyJitter(base)
+		if got < min || got > max {
+			t.Fatalf("jittered value %v out of range (%v-%v)", got, min, max)
+		}
+	}
 }
