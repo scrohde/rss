@@ -496,6 +496,15 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	if !strings.Contains(pollRec.Body.String(), "New items (0)") {
 		t.Fatalf("expected banner to show zero new items")
 	}
+	if !strings.Contains(pollRec.Body.String(), `id="feed-list"`) {
+		t.Fatalf("expected feed list OOB update")
+	}
+	if !strings.Contains(pollRec.Body.String(), `hx-swap-oob="innerHTML"`) {
+		t.Fatalf("expected OOB innerHTML swap for feed list")
+	}
+	if !strings.Contains(pollRec.Body.String(), `feed-count">2`) {
+		t.Fatalf("expected unread count to be 2")
+	}
 
 	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Third",
@@ -515,6 +524,9 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	}
 	if !strings.Contains(pollRec.Body.String(), "New items (1)") {
 		t.Fatalf("expected banner to show new items")
+	}
+	if !strings.Contains(pollRec.Body.String(), `feed-count">3`) {
+		t.Fatalf("expected unread count to be 3")
 	}
 
 	newReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/new?after_id=%d", feedID, list.NewestID), nil)

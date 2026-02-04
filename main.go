@@ -119,6 +119,12 @@ type NewItemsResponseData struct {
 	Banner   NewItemsData
 }
 
+type PollResponseData struct {
+	Banner         NewItemsData
+	Feeds          []FeedView
+	SelectedFeedID int64
+}
+
 type ItemListResponseData struct {
 	ItemList       *ItemListData
 	Feeds          []FeedView
@@ -465,8 +471,18 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID
 		return
 	}
 
-	data := NewItemsData{FeedID: feedID, Count: count}
-	a.renderTemplate(w, "new_items_banner", data)
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := PollResponseData{
+		Banner:         NewItemsData{FeedID: feedID, Count: count},
+		Feeds:          feeds,
+		SelectedFeedID: feedID,
+	}
+	a.renderTemplate(w, "poll_response", data)
 }
 
 func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request, feedID int64) {
