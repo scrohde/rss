@@ -3,9 +3,8 @@
     <div class="items-header">
       <div>
         <div class="items-title">{{.Feed.Title}}</div>
-        <div class="items-meta">{{.Feed.ItemCount}} items - Latest updates first</div>
         <div class="items-observability">
-          <span>Last checked: {{.Feed.LastCheckedDisplay}}{{if .Feed.LastDurationDisplay}} ({{.Feed.LastDurationDisplay}}){{end}}</span>
+          <span>Last refresh: {{.Feed.LastRefreshDisplay}}</span>
           {{if .Feed.LastError}}
             <span class="items-error">Last error: {{.Feed.LastError}}</span>
           {{end}}

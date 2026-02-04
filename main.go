@@ -43,10 +43,6 @@ const (
 	skipDeleteWarningCookie = "pulse_rss_skip_delete_warning"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 var imageProxyClient = &http.Client{
 	Timeout: imageProxyTimeout,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -67,14 +63,13 @@ type App struct {
 }
 
 type FeedView struct {
-	ID                  int64
-	Title               string
-	URL                 string
-	ItemCount           int
-	UnreadCount         int
-	LastCheckedDisplay  string
-	LastDurationDisplay string
-	LastError           string
+	ID                 int64
+	Title              string
+	URL                string
+	ItemCount          int
+	UnreadCount        int
+	LastRefreshDisplay string
+	LastError          string
 }
 
 type ItemView struct {
@@ -237,7 +232,6 @@ CREATE TABLE IF NOT EXISTS feeds (
 	last_modified TEXT,
 	last_refreshed_at DATETIME,
 	last_error TEXT,
-	last_duration_ms INTEGER,
 	unchanged_count INTEGER NOT NULL DEFAULT 0,
 	next_refresh_at DATETIME
 );
@@ -273,9 +267,6 @@ BEGIN
 END;
 `
 	if _, err := db.Exec(schema); err != nil {
-		return err
-	}
-	if err := ensureFeedColumns(db); err != nil {
 		return err
 	}
 	return nil
@@ -472,7 +463,6 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		ETag:           chooseHeader(result.ETag, ""),
 		LastModified:   chooseHeader(result.LastModified, ""),
 		LastCheckedAt:  checkedAt,
-		LastDurationMs: duration,
 		LastError:      "",
 		UnchangedCount: 0,
 		NextRefreshAt:  nextRefreshAt(checkedAt, 0),
@@ -918,8 +908,7 @@ func refreshFeed(db *sql.DB, feedID int64) (int64, error) {
 	checkedAt := time.Now().UTC()
 
 	meta := FeedRefreshMeta{
-		LastCheckedAt:  checkedAt,
-		LastDurationMs: duration,
+		LastCheckedAt: checkedAt,
 	}
 
 	if err != nil {
@@ -1032,7 +1021,6 @@ type FeedRefreshMeta struct {
 	ETag           string
 	LastModified   string
 	LastCheckedAt  time.Time
-	LastDurationMs int64
 	LastError      string
 	UnchangedCount int
 	NextRefreshAt  time.Time
@@ -1074,7 +1062,6 @@ SET etag = COALESCE(?, etag),
     last_modified = COALESCE(?, last_modified),
     last_refreshed_at = ?,
     last_error = ?,
-    last_duration_ms = ?,
     unchanged_count = ?,
     next_refresh_at = ?
 WHERE id = ?
@@ -1083,7 +1070,6 @@ WHERE id = ?
 		nullString(meta.LastModified),
 		meta.LastCheckedAt,
 		nullString(meta.LastError),
-		nullInt64(meta.LastDurationMs),
 		meta.UnchangedCount,
 		meta.NextRefreshAt,
 		feedID,
@@ -1222,8 +1208,7 @@ SELECT f.id, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
-       f.last_error,
-       f.last_duration_ms
+       f.last_error
 FROM feeds f
 ORDER BY f.title COLLATE NOCASE
 `)
@@ -1235,19 +1220,18 @@ ORDER BY f.title COLLATE NOCASE
 	var feeds []FeedView
 	for rows.Next() {
 		var (
-			id           int64
-			title        string
-			url          string
-			itemCount    int
-			unreadCount  int
-			lastChecked  sql.NullTime
-			lastError    sql.NullString
-			lastDuration sql.NullInt64
+			id          int64
+			title       string
+			url         string
+			itemCount   int
+			unreadCount int
+			lastChecked sql.NullTime
+			lastError   sql.NullString
 		)
-		if err := rows.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError, &lastDuration); err != nil {
+		if err := rows.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError); err != nil {
 			return nil, err
 		}
-		feeds = append(feeds, buildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError, lastDuration))
+		feeds = append(feeds, buildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1294,26 +1278,24 @@ SELECT f.id, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
-       f.last_error,
-       f.last_duration_ms
+       f.last_error
 FROM feeds f
 WHERE f.id = ?
 `, feedID)
 	var (
-		id           int64
-		title        string
-		url          string
-		itemCount    int
-		unreadCount  int
-		lastChecked  sql.NullTime
-		lastError    sql.NullString
-		lastDuration sql.NullInt64
+		id          int64
+		title       string
+		url         string
+		itemCount   int
+		unreadCount int
+		lastChecked sql.NullTime
+		lastError   sql.NullString
 	)
-	if err := row.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError, &lastDuration); err != nil {
+	if err := row.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError); err != nil {
 		return FeedView{}, err
 	}
 	slog.Info("db get feed", "feed_id", feedID)
-	return buildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError, lastDuration), nil
+	return buildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError), nil
 }
 
 func getFeedURL(db *sql.DB, feedID int64) (string, error) {
@@ -1326,12 +1308,12 @@ func getFeedURL(db *sql.DB, feedID int64) (string, error) {
 
 func listDueFeeds(db *sql.DB, now time.Time, limit int) ([]int64, error) {
 	rows, err := db.Query(`
-SELECT id
-FROM feeds
-WHERE next_refresh_at IS NULL OR next_refresh_at <= ?
-ORDER BY COALESCE(next_refresh_at, created_at) ASC
-LIMIT ?
-`, now, limit)
+	SELECT id
+	FROM feeds
+	WHERE next_refresh_at IS NULL OR next_refresh_at <= ?
+	ORDER BY COALESCE(next_refresh_at, created_at)
+	LIMIT ?
+	`, now, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1425,28 +1407,23 @@ func maxItemID(items []ItemView) int64 {
 	return maxID
 }
 
-func buildFeedView(id int64, title, url string, itemCount, unreadCount int, lastChecked sql.NullTime, lastError sql.NullString, lastDuration sql.NullInt64) FeedView {
-	checkedDisplay := "Never"
+func buildFeedView(id int64, title, url string, itemCount, unreadCount int, lastChecked sql.NullTime, lastError sql.NullString) FeedView {
+	refreshDisplay := "Never"
 	if lastChecked.Valid {
-		checkedDisplay = formatTime(lastChecked.Time)
-	}
-	durationDisplay := ""
-	if lastDuration.Valid && lastDuration.Int64 > 0 {
-		durationDisplay = formatDurationMs(lastDuration.Int64)
+		refreshDisplay = formatTime(lastChecked.Time)
 	}
 	errText := ""
 	if lastError.Valid {
 		errText = lastError.String
 	}
 	return FeedView{
-		ID:                  id,
-		Title:               title,
-		URL:                 url,
-		ItemCount:           itemCount,
-		UnreadCount:         unreadCount,
-		LastCheckedDisplay:  checkedDisplay,
-		LastDurationDisplay: durationDisplay,
-		LastError:           errText,
+		ID:                 id,
+		Title:              title,
+		URL:                url,
+		ItemCount:          itemCount,
+		UnreadCount:        unreadCount,
+		LastRefreshDisplay: refreshDisplay,
+		LastError:          errText,
 	}
 }
 
@@ -1810,13 +1787,6 @@ func nullString(value string) any {
 	return value
 }
 
-func nullInt64(value int64) any {
-	if value <= 0 {
-		return nil
-	}
-	return value
-}
-
 func chooseHeader(preferred, fallback string) string {
 	if strings.TrimSpace(preferred) != "" {
 		return preferred
@@ -1829,39 +1799,6 @@ func truncateString(value string, max int) string {
 		return value
 	}
 	return value[:max]
-}
-
-func formatDurationMs(ms int64) string {
-	if ms < 1000 {
-		return fmt.Sprintf("%dms", ms)
-	}
-	seconds := float64(ms) / 1000.0
-	return fmt.Sprintf("%.1fs", seconds)
-}
-
-func ensureFeedColumns(db *sql.DB) error {
-	return ensureColumn(db, "feeds", "unchanged_count", "INTEGER NOT NULL DEFAULT 0")
-}
-
-func ensureColumn(db *sql.DB, table, column, definition string) error {
-	exists, err := columnExists(db, table, column)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
-	return err
-}
-
-func columnExists(db *sql.DB, table, column string) (bool, error) {
-	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", table)
-	var count int
-	if err := db.QueryRow(query, column).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func nextRefreshAt(checkedAt time.Time, unchangedCount int) time.Time {
