@@ -9,3 +9,13 @@ script = ""
 name = "Run"
 icon = "run"
 command = "go run ."
+
+[[actions]]
+name = "Test"
+icon = "test"
+command = "go test ./..."
+
+[[actions]]
+name = "gofmt"
+icon = "tool"
+command = "go fmt ./..."
