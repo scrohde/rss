@@ -818,6 +818,116 @@ func TestDeleteFeedSkipCookie(t *testing.T) {
 	}
 }
 
+func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
+	app := newTestApp(t)
+
+	if _, err := upsertFeed(app.db, "http://example.com/a-empty", "Aardvark Empty"); err != nil {
+		t.Fatalf("upsertFeed empty: %v", err)
+	}
+	alphaID, err := upsertFeed(app.db, "http://example.com/b-alpha", "Alpha Active")
+	if err != nil {
+		t.Fatalf("upsertFeed alpha: %v", err)
+	}
+	betaID, err := upsertFeed(app.db, "http://example.com/c-beta", "Beta Active")
+	if err != nil {
+		t.Fatalf("upsertFeed beta: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, alphaID, []*gofeed.Item{{
+		Title:           "Alpha item",
+		Link:            "http://example.com/alpha-item",
+		GUID:            "alpha-item",
+		Description:     "<p>Alpha item</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems alpha: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, betaID, []*gofeed.Item{{
+		Title:           "Beta item",
+		Link:            "http://example.com/beta-item",
+		GUID:            "beta-item",
+		Description:     "<p>Beta item</p>",
+		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems beta: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("index status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="feed-more-button"`) {
+		t.Fatalf("expected more button when zero-item feeds exist")
+	}
+	if !strings.Contains(body, `class="feed-zero-list"`) {
+		t.Fatalf("expected collapsed zero-item feed section")
+	}
+
+	alphaIdx := strings.Index(body, "Alpha Active")
+	betaIdx := strings.Index(body, "Beta Active")
+	moreIdx := strings.Index(body, `class="feed-more-button"`)
+	emptyIdx := strings.Index(body, "Aardvark Empty")
+	if alphaIdx == -1 || betaIdx == -1 || moreIdx == -1 || emptyIdx == -1 {
+		t.Fatalf("expected alpha, beta, more button, and empty feed in output")
+	}
+	if alphaIdx > betaIdx {
+		t.Fatalf("expected non-zero feeds to remain alphabetical")
+	}
+	if betaIdx > moreIdx || moreIdx > emptyIdx {
+		t.Fatalf("expected zero-item feeds below non-zero feeds behind the more section")
+	}
+}
+
+func TestFeedListHidesMoreButtonWithoutZeroItemFeeds(t *testing.T) {
+	app := newTestApp(t)
+
+	alphaID, err := upsertFeed(app.db, "http://example.com/a-alpha", "Alpha Active")
+	if err != nil {
+		t.Fatalf("upsertFeed alpha: %v", err)
+	}
+	betaID, err := upsertFeed(app.db, "http://example.com/b-beta", "Beta Active")
+	if err != nil {
+		t.Fatalf("upsertFeed beta: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, alphaID, []*gofeed.Item{{
+		Title:           "Alpha item",
+		Link:            "http://example.com/alpha-item",
+		GUID:            "alpha-item",
+		Description:     "<p>Alpha item</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems alpha: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, betaID, []*gofeed.Item{{
+		Title:           "Beta item",
+		Link:            "http://example.com/beta-item",
+		GUID:            "beta-item",
+		Description:     "<p>Beta item</p>",
+		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems beta: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("index status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, `class="feed-more-button"`) {
+		t.Fatalf("expected more button to be hidden when all feeds have items")
+	}
+}
+
 func TestRewriteSummaryImages(t *testing.T) {
 	input := `<p>Hello</p><img src="https://example.com/image.jpg" alt="x">`
 	output := rewriteSummaryImages(input)

@@ -10,45 +10,104 @@
     </div>
   </div>
   <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
+  {{$hasEmptyFeeds := false}}
+  {{range .Feeds}}
+    {{if eq .ItemCount 0}}
+      {{$hasEmptyFeeds = true}}
+    {{end}}
+  {{end}}
   <ul class="feed-list">
-    {{range .Feeds}}
-      <li class="feed-row">
-        <button
-          class="feed-remove"
-          type="button"
-          aria-label="Remove feed {{.Title}}"
-          {{if $.SkipDeleteWarning}}
-            hx-post="/feeds/{{.ID}}/delete"
-            hx-target="#main-content"
-            hx-swap="innerHTML"
-            hx-include="#selected-feed-id"
-          {{else}}
-            hx-get="/feeds/{{.ID}}/delete/confirm"
-            hx-target="#feed-remove-confirm-{{.ID}}"
-            hx-swap="outerHTML"
-          {{end}}
-        >
-          <img class="icon" src="/static/icons/remove-circle.svg" alt="">
-        </button>
-        <button
-          class="feed-rename-button"
-          type="button"
-          aria-label="Rename feed {{.Title}}"
-          hx-get="/feeds/{{.ID}}/rename"
-          hx-target="#feed-rename-form-{{.ID}}"
-          hx-swap="outerHTML"
-        >
-          Rename
-        </button>
-        <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
-          <span class="feed-title">{{.Title}}</span>
-          <span class="feed-count">{{.UnreadCount}}</span>
-        </button>
-        <div class="feed-rename-form" id="feed-rename-form-{{.ID}}"></div>
-        <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
-      </li>
-    {{else}}
+    {{if eq (len .Feeds) 0}}
       <li class="feed-empty">No feeds yet.</li>
+    {{end}}
+    {{range .Feeds}}
+      {{if gt .ItemCount 0}}
+        <li class="feed-row">
+          <button
+            class="feed-remove"
+            type="button"
+            aria-label="Remove feed {{.Title}}"
+            {{if $.SkipDeleteWarning}}
+              hx-post="/feeds/{{.ID}}/delete"
+              hx-target="#main-content"
+              hx-swap="innerHTML"
+              hx-include="#selected-feed-id"
+            {{else}}
+              hx-get="/feeds/{{.ID}}/delete/confirm"
+              hx-target="#feed-remove-confirm-{{.ID}}"
+              hx-swap="outerHTML"
+            {{end}}
+          >
+            <img class="icon" src="/static/icons/remove-circle.svg" alt="">
+          </button>
+          <button
+            class="feed-rename-button"
+            type="button"
+            aria-label="Rename feed {{.Title}}"
+            hx-get="/feeds/{{.ID}}/rename"
+            hx-target="#feed-rename-form-{{.ID}}"
+            hx-swap="outerHTML"
+          >
+            Rename
+          </button>
+          <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
+            <span class="feed-title">{{.Title}}</span>
+            <span class="feed-count">{{.UnreadCount}}</span>
+          </button>
+          <div class="feed-rename-form" id="feed-rename-form-{{.ID}}"></div>
+          <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
+        </li>
+      {{end}}
+    {{end}}
+    {{if $hasEmptyFeeds}}
+      <li class="feed-more-section">
+        <input class="sr-only feed-more-toggle" type="checkbox" id="feed-more-toggle">
+        <label class="feed-more-button" for="feed-more-toggle">
+          <span class="feed-more-label-collapsed">More</span>
+          <span class="feed-more-label-expanded">Less</span>
+        </label>
+        <ul class="feed-zero-list">
+          {{range .Feeds}}
+            {{if eq .ItemCount 0}}
+              <li class="feed-row">
+                <button
+                  class="feed-remove"
+                  type="button"
+                  aria-label="Remove feed {{.Title}}"
+                  {{if $.SkipDeleteWarning}}
+                    hx-post="/feeds/{{.ID}}/delete"
+                    hx-target="#main-content"
+                    hx-swap="innerHTML"
+                    hx-include="#selected-feed-id"
+                  {{else}}
+                    hx-get="/feeds/{{.ID}}/delete/confirm"
+                    hx-target="#feed-remove-confirm-{{.ID}}"
+                    hx-swap="outerHTML"
+                  {{end}}
+                >
+                  <img class="icon" src="/static/icons/remove-circle.svg" alt="">
+                </button>
+                <button
+                  class="feed-rename-button"
+                  type="button"
+                  aria-label="Rename feed {{.Title}}"
+                  hx-get="/feeds/{{.ID}}/rename"
+                  hx-target="#feed-rename-form-{{.ID}}"
+                  hx-swap="outerHTML"
+                >
+                  Rename
+                </button>
+                <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
+                  <span class="feed-title">{{.Title}}</span>
+                  <span class="feed-count">{{.UnreadCount}}</span>
+                </button>
+                <div class="feed-rename-form" id="feed-rename-form-{{.ID}}"></div>
+                <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
+              </li>
+            {{end}}
+          {{end}}
+        </ul>
+      </li>
     {{end}}
   </ul>
 {{end}}

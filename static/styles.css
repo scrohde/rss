@@ -527,6 +527,55 @@ body {
   padding: 12px;
 }
 
+.feed-more-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-more-button {
+  align-self: flex-start;
+  border: 1px solid rgba(15, 118, 110, 0.3);
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.feed-more-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.12);
+}
+
+.feed-more-label-expanded {
+  display: none;
+}
+
+.feed-zero-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-more-toggle:checked + .feed-more-button .feed-more-label-collapsed {
+  display: none;
+}
+
+.feed-more-toggle:checked + .feed-more-button .feed-more-label-expanded {
+  display: inline;
+}
+
+.feed-more-toggle:checked + .feed-more-button + .feed-zero-list {
+  display: flex;
+}
+
 .content {
   background: var(--surface);
   border-radius: 24px;
