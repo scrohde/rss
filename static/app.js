@@ -61,6 +61,30 @@
     return target;
   };
 
+  const isTextEntryTarget = (target) => {
+    if (!target || !target.closest) {
+      return false;
+    }
+    return Boolean(
+      target.closest("input, textarea, select, [contenteditable=\"true\"]")
+    );
+  };
+
+  const focusItemList = () => {
+    const list = getItemList();
+    if (!list) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active === list || (active && list.contains(active))) {
+      return;
+    }
+    if (isTextEntryTarget(active)) {
+      return;
+    }
+    list.focus({ preventScroll: true });
+  };
+
   const moveActive = (delta) => {
     const cards = getItemCards();
     if (!cards.length) {
@@ -219,9 +243,7 @@
     if (!event.target) {
       return false;
     }
-    return Boolean(
-      event.target.closest("input, textarea, select, [contenteditable=\"true\"]")
-    );
+    return isTextEntryTarget(event.target);
   };
 
   document.addEventListener("click", (event) => {
@@ -240,15 +262,6 @@
       return;
     }
     if (!getItemList()) {
-      return;
-    }
-    const main = document.getElementById("main-content");
-    if (
-      main &&
-      event.target &&
-      event.target !== document.body &&
-      !main.contains(event.target)
-    ) {
       return;
     }
 
@@ -279,10 +292,23 @@
         toggleExpanded(false);
         break;
       case "o":
-      case "enter":
         prevent();
         openActiveLink();
         break;
+      case "enter": {
+        const main = document.getElementById("main-content");
+        if (
+          main &&
+          event.target &&
+          event.target !== document.body &&
+          !main.contains(event.target)
+        ) {
+          break;
+        }
+        prevent();
+        openActiveLink();
+        break;
+      }
       case "r":
         prevent();
         toggleRead();
@@ -295,6 +321,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     syncTopbarShortcuts();
     ensureActive();
+    focusItemList();
   });
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
@@ -305,9 +332,10 @@
         isPendingReadSwap(event, state.pendingReadShortcut)
       ) {
         applyPendingReadShortcut();
-        return;
+      } else {
+        ensureActive();
       }
-      ensureActive();
+      focusItemList();
     } else {
       state.activeId = null;
       state.pendingReadShortcut = null;

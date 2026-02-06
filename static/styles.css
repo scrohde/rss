@@ -499,6 +499,10 @@ body {
   gap: 12px;
 }
 
+.item-list:focus {
+  outline: none;
+}
+
 .new-items-banner {
   display: flex;
   justify-content: center;
