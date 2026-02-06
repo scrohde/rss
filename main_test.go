@@ -139,6 +139,9 @@ func TestSubscribeAndList(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
+	if strings.Contains(rec.Body.String(), "Subscribed to ") {
+		t.Fatalf("expected subscribe success message to be omitted")
+	}
 
 	feeds, err := listFeeds(app.db)
 	if err != nil {
@@ -303,6 +306,49 @@ func TestToggleReadUpdatesFeedList(t *testing.T) {
 	}
 	if !strings.Contains(body, `feed-count">1`) {
 		t.Fatalf("expected unread count to be 1")
+	}
+}
+
+func TestToggleReadExpandedView(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Toggle Expanded Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Expanded",
+		Link:            "http://example.com/expanded",
+		GUID:            "expanded",
+		Description:     "<p>Expanded summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+
+	items, err := listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	form := url.Values{}
+	form.Set("view", "expanded")
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/items/%d/toggle", items[0].ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle read status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "item-card expanded") {
+		t.Fatalf("expected expanded item response")
 	}
 }
 

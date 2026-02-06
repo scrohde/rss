@@ -522,8 +522,6 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := SubscribeResponseData{
-		Message:           fmt.Sprintf("Subscribed to %s", feedTitle),
-		MessageClass:      "success",
 		Feeds:             feeds,
 		SelectedFeedID:    feedID,
 		ItemList:          itemList,

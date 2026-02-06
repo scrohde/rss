@@ -3,6 +3,7 @@
 
   const state = {
     activeId: null,
+    pendingReadShortcut: null,
   };
 
   const getItemList = () => document.getElementById("item-list");
@@ -92,6 +93,78 @@
     }
   };
 
+  const cardItemID = (card) => {
+    if (!card || !card.id) {
+      return null;
+    }
+    const match = card.id.match(/^item-(\d+)$/);
+    if (!match) {
+      return null;
+    }
+    return match[1];
+  };
+
+  const nextCard = (card) => {
+    const cards = getItemCards();
+    const index = cards.indexOf(card);
+    if (index < 0 || index >= cards.length - 1) {
+      return null;
+    }
+    return cards[index + 1];
+  };
+
+  const requestToggleRead = (card, view) => {
+    const itemID = cardItemID(card);
+    if (!itemID || typeof htmx === "undefined" || !htmx.ajax) {
+      return false;
+    }
+    htmx.ajax("POST", `/items/${itemID}/toggle`, {
+      target: `#${card.id}`,
+      swap: "outerHTML",
+      values: { view },
+    });
+    return true;
+  };
+
+  const applyPendingReadShortcut = () => {
+    const pending = state.pendingReadShortcut;
+    if (!pending) {
+      return false;
+    }
+    state.pendingReadShortcut = null;
+
+    if (!pending.nextId) {
+      ensureActive();
+      return true;
+    }
+
+    const list = getItemList();
+    const next = document.getElementById(pending.nextId);
+    if (!list || !next || !list.contains(next)) {
+      ensureActive();
+      return true;
+    }
+
+    setActive(next, { scroll: true });
+    if (pending.expandNext && !next.classList.contains("expanded")) {
+      next.click();
+    }
+    return true;
+  };
+
+  const isPendingReadSwap = (event, pending) => {
+    if (!event || !event.detail || !pending) {
+      return false;
+    }
+    const detail = event.detail;
+    const target = detail.target;
+    if (target && target.id === pending.sourceId) {
+      return true;
+    }
+    const elt = detail.elt;
+    return Boolean(elt && elt.id === pending.sourceId);
+  };
+
   const openActiveLink = () => {
     const current = ensureActive();
     if (!current) {
@@ -108,6 +181,28 @@
     if (!current) {
       return;
     }
+
+    const isRead = current.classList.contains("is-read");
+    const isExpanded = current.classList.contains("expanded");
+
+    if (isRead) {
+      state.pendingReadShortcut = null;
+      const view = isExpanded ? "expanded" : "compact";
+      if (requestToggleRead(current, view)) {
+        return;
+      }
+    } else {
+      const next = nextCard(current);
+      state.pendingReadShortcut = {
+        sourceId: current.id,
+        nextId: next ? next.id : null,
+        expandNext: isExpanded,
+      };
+      if (requestToggleRead(current, "compact")) {
+        return;
+      }
+    }
+
     const button = current.querySelector('button[hx-post*="/toggle"]');
     if (button) {
       button.click();
@@ -202,12 +297,20 @@
     ensureActive();
   });
 
-  document.body.addEventListener("htmx:afterSwap", () => {
+  document.body.addEventListener("htmx:afterSwap", (event) => {
     syncTopbarShortcuts();
     if (getItemList()) {
+      if (
+        state.pendingReadShortcut &&
+        isPendingReadSwap(event, state.pendingReadShortcut)
+      ) {
+        applyPendingReadShortcut();
+        return;
+      }
       ensureActive();
     } else {
       state.activeId = null;
+      state.pendingReadShortcut = null;
     }
   });
 })();
