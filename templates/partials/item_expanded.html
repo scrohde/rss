@@ -1,5 +1,5 @@
 {{define "item_expanded"}}
-  <article class="item-card expanded {{if .IsRead}}is-read{{end}}" id="item-{{.ID}}">
+  <article class="item-card expanded {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}" id="item-{{.ID}}">
     <div
       class="item-row clickable"
       hx-get="/items/{{.ID}}/compact"

@@ -285,6 +285,7 @@ func TestToggleReadUpdatesFeedList(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("view", "compact")
+	form.Set("selected_item_id", fmt.Sprintf("item-%d", items[0].ID))
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/items/%d/toggle", items[0].ID), strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -306,6 +307,9 @@ func TestToggleReadUpdatesFeedList(t *testing.T) {
 	}
 	if !strings.Contains(body, `feed-count">1`) {
 		t.Fatalf("expected unread count to be 1")
+	}
+	if !strings.Contains(body, "is-active") {
+		t.Fatalf("expected toggled item to stay active")
 	}
 }
 
@@ -337,6 +341,7 @@ func TestToggleReadExpandedView(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("view", "expanded")
+	form.Set("selected_item_id", fmt.Sprintf("%d", items[0].ID))
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/items/%d/toggle", items[0].ID), strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -349,6 +354,47 @@ func TestToggleReadExpandedView(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "item-card expanded") {
 		t.Fatalf("expected expanded item response")
+	}
+	if !strings.Contains(body, "is-active") {
+		t.Fatalf("expected expanded toggled item to stay active")
+	}
+}
+
+func TestItemExpandedKeepsActiveClass(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Expanded Active Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Expanded",
+		Link:            "http://example.com/expanded",
+		GUID:            "expanded-active",
+		Description:     "<p>Expanded summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+
+	items, err := listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/items/%d?selected_item_id=item-%d", items[0].ID, items[0].ID), nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expanded status: %d", rec.Code)
+	}
+
+	if !strings.Contains(rec.Body.String(), "is-active") {
+		t.Fatalf("expected expanded item to include active class")
 	}
 }
 
@@ -788,6 +834,34 @@ func TestRewriteSummaryImagesSrcset(t *testing.T) {
 	expectedB := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/b.jpg")
 	if !strings.Contains(output, expectedA) || !strings.Contains(output, expectedB) {
 		t.Fatalf("expected proxied srcset urls, got %q", output)
+	}
+}
+
+func TestParseSelectedItemID(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int64
+	}{
+		{name: "empty", raw: "", want: 0},
+		{name: "plain id", raw: "42", want: 42},
+		{name: "prefixed id", raw: "item-42", want: 42},
+		{name: "invalid", raw: "item-abc", want: 0},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			q := req.URL.Query()
+			if tc.raw != "" {
+				q.Set("selected_item_id", tc.raw)
+			}
+			req.URL.RawQuery = q.Encode()
+			if got := parseSelectedItemID(req); got != tc.want {
+				t.Fatalf("expected %d, got %d", tc.want, got)
+			}
+		})
 	}
 }
 

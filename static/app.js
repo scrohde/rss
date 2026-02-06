@@ -185,15 +185,16 @@
     return cards[index + 1];
   };
 
-  const requestToggleRead = (card, view) => {
+  const requestToggleRead = (card, view, selectedItemId) => {
     const itemID = cardItemID(card);
     if (!itemID || typeof htmx === "undefined" || !htmx.ajax) {
       return false;
     }
+    const selected = selectedItemId || state.activeId;
     htmx.ajax("POST", `/items/${itemID}/toggle`, {
       target: `#${card.id}`,
       swap: "outerHTML",
-      values: { view },
+      values: { view, selected_item_id: selected },
     });
     return true;
   };
@@ -260,17 +261,18 @@
     if (isRead) {
       state.pendingReadShortcut = null;
       const view = isExpanded ? "expanded" : "compact";
-      if (requestToggleRead(current, view)) {
+      if (requestToggleRead(current, view, current.id)) {
         return;
       }
     } else {
       const next = nextCard(current);
+      const selectedAfterToggle = next ? next.id : current.id;
       state.pendingReadShortcut = {
         sourceId: current.id,
         nextId: next ? next.id : null,
         expandNext: isExpanded,
       };
-      if (requestToggleRead(current, "compact")) {
+      if (requestToggleRead(current, "compact", selectedAfterToggle)) {
         return;
       }
     }
@@ -393,6 +395,15 @@
     } else {
       state.activeId = null;
       state.pendingReadShortcut = null;
+    }
+  });
+
+  document.body.addEventListener("htmx:configRequest", (event) => {
+    if (!state.activeId || !event || !event.detail || !event.detail.parameters) {
+      return;
+    }
+    if (!event.detail.parameters.selected_item_id) {
+      event.detail.parameters.selected_item_id = state.activeId;
     }
   });
 })();

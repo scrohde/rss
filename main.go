@@ -80,6 +80,7 @@ type ItemView struct {
 	PublishedDisplay string
 	PublishedCompact string
 	IsRead           bool
+	IsActive         bool
 }
 
 type ItemListData struct {
@@ -604,6 +605,7 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request, itemID 
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
+	item.IsActive = parseSelectedItemID(r) == item.ID
 	a.renderTemplate(w, "item_expanded", item)
 }
 
@@ -613,6 +615,7 @@ func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request, itemID i
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
+	item.IsActive = parseSelectedItemID(r) == item.ID
 	a.renderTemplate(w, "item_compact", item)
 }
 
@@ -640,6 +643,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
+	item.IsActive = parseSelectedItemID(r) == item.ID
 
 	feeds, err := listFeeds(a.db)
 	if err != nil {
@@ -907,6 +911,24 @@ func parseAfterID(r *http.Request) int64 {
 	raw := strings.TrimSpace(r.FormValue("after_id"))
 	if raw == "" {
 		return 0
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+func parseSelectedItemID(r *http.Request) int64 {
+	if err := r.ParseForm(); err != nil {
+		return 0
+	}
+	raw := strings.TrimSpace(r.FormValue("selected_item_id"))
+	if raw == "" {
+		return 0
+	}
+	if strings.HasPrefix(raw, "item-") {
+		raw = strings.TrimPrefix(raw, "item-")
 	}
 	parsed, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
