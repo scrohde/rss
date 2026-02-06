@@ -1703,12 +1703,12 @@ func pickSummaryHTML(summary, content sql.NullString) template.HTML {
 	if text == "" {
 		text = "<p>No summary available.</p>"
 	}
-	text = rewriteSummaryImages(text)
+	text = rewriteSummaryHTML(text)
 	return template.HTML(text)
 }
 
-func rewriteSummaryImages(text string) string {
-	if !strings.Contains(text, "<img") && !strings.Contains(text, "<source") {
+func rewriteSummaryHTML(text string) string {
+	if !strings.Contains(text, "<img") && !strings.Contains(text, "<source") && !strings.Contains(text, "<a") {
 		return text
 	}
 	root := &html.Node{Type: html.ElementNode, DataAtom: atom.Div, Data: "div"}
@@ -1718,7 +1718,7 @@ func rewriteSummaryImages(text string) string {
 	}
 	changed := false
 	for _, node := range nodes {
-		if rewriteImageNode(node) {
+		if rewriteSummaryNode(node) {
 			changed = true
 		}
 	}
@@ -1732,7 +1732,7 @@ func rewriteSummaryImages(text string) string {
 	return b.String()
 }
 
-func rewriteImageNode(node *html.Node) bool {
+func rewriteSummaryNode(node *html.Node) bool {
 	changed := false
 	if node.Type == html.ElementNode {
 		switch node.Data {
@@ -1747,10 +1747,17 @@ func rewriteImageNode(node *html.Node) bool {
 			if rewriteAttr(node, "srcset", rewriteSrcset) {
 				changed = true
 			}
+		case "a":
+			if upsertAttr(node, "target", "_blank") {
+				changed = true
+			}
+			if ensureRelTokens(node, "noopener", "noreferrer") {
+				changed = true
+			}
 		}
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if rewriteImageNode(child) {
+		if rewriteSummaryNode(child) {
 			changed = true
 		}
 	}
@@ -1769,6 +1776,60 @@ func rewriteAttr(node *html.Node, key string, rewrite func(string) (string, bool
 		return false
 	}
 	return false
+}
+
+func upsertAttr(node *html.Node, key, value string) bool {
+	for i, attr := range node.Attr {
+		if attr.Key != key {
+			continue
+		}
+		if attr.Val == value {
+			return false
+		}
+		node.Attr[i].Val = value
+		return true
+	}
+	node.Attr = append(node.Attr, html.Attribute{Key: key, Val: value})
+	return true
+}
+
+func ensureRelTokens(node *html.Node, required ...string) bool {
+	index := -1
+	tokens := []string{}
+	existing := map[string]bool{}
+	for i, attr := range node.Attr {
+		if attr.Key != "rel" {
+			continue
+		}
+		index = i
+		for _, token := range strings.Fields(attr.Val) {
+			tokens = append(tokens, token)
+			existing[strings.ToLower(token)] = true
+		}
+		break
+	}
+
+	changed := false
+	for _, token := range required {
+		normalized := strings.ToLower(token)
+		if existing[normalized] {
+			continue
+		}
+		tokens = append(tokens, token)
+		existing[normalized] = true
+		changed = true
+	}
+
+	if index >= 0 {
+		if !changed {
+			return false
+		}
+		node.Attr[index].Val = strings.Join(tokens, " ")
+		return true
+	}
+
+	node.Attr = append(node.Attr, html.Attribute{Key: "rel", Val: strings.Join(required, " ")})
+	return true
 }
 
 func rewriteSrcset(value string) (string, bool) {
