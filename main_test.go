@@ -553,6 +553,82 @@ func TestMarkAllRead(t *testing.T) {
 	}
 }
 
+func TestSweepReadItems(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Sweep Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+	otherFeedID, err := upsertFeed(app.db, "http://example.com/other", "Other Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed other: %v", err)
+	}
+
+	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Keep me",
+		Link:            "http://example.com/1",
+		GUID:            "1",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}, {
+		Title:           "Sweep me A",
+		Link:            "http://example.com/2",
+		GUID:            "2",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+	}, {
+		Title:           "Sweep me B",
+		Link:            "http://example.com/3",
+		GUID:            "3",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-3 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems: %v", err)
+	}
+	if _, err := upsertItems(app.db, otherFeedID, []*gofeed.Item{{
+		Title:           "Other Feed Item",
+		Link:            "http://example.com/4",
+		GUID:            "4",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("upsertItems other: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := app.db.Exec("UPDATE items SET read_at = ? WHERE feed_id = ? AND guid IN (?, ?)", now, feedID, "2", "3"); err != nil {
+		t.Fatalf("set read_at feed: %v", err)
+	}
+	if _, err := app.db.Exec("UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?", now, otherFeedID, "4"); err != nil {
+		t.Fatalf("set read_at other feed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/items/sweep", feedID), nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sweep read status: %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), fmt.Sprintf(`hx-post="/feeds/%d/items/sweep"`, feedID)) {
+		t.Fatalf("expected sweep action to remain in response")
+	}
+
+	if !existsByGUID(t, app.db, feedID, "1") {
+		t.Fatalf("expected unread item to remain")
+	}
+	if existsByGUID(t, app.db, feedID, "2") || existsByGUID(t, app.db, feedID, "3") {
+		t.Fatalf("expected read items to be deleted from selected feed")
+	}
+	if !existsInTombstones(t, app.db, feedID, "2") || !existsInTombstones(t, app.db, feedID, "3") {
+		t.Fatalf("expected deleted read items to be tombstoned")
+	}
+
+	if !existsByGUID(t, app.db, otherFeedID, "4") {
+		t.Fatalf("expected other feed to be unchanged")
+	}
+}
+
 func TestManualFeedRefresh(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
 	feed := rssXML("Manual Refresh Feed", []rssItem{

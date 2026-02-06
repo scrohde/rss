@@ -380,6 +380,9 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 			case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "read":
 				a.handleMarkAllRead(w, r, feedID)
 				return
+			case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "sweep":
+				a.handleSweepRead(w, r, feedID)
+				return
 			}
 		}
 	case "items":
@@ -686,6 +689,35 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 		return
 	}
 	slog.Info("feed items marked read", "feed_id", feedID)
+
+	itemList, err := loadItemList(a.db, feedID)
+	if err != nil {
+		http.Error(w, "failed to load items", http.StatusInternalServerError)
+		return
+	}
+
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := ItemListResponseData{
+		ItemList:          itemList,
+		Feeds:             feeds,
+		SelectedFeedID:    feedID,
+		SkipDeleteWarning: deleteWarningSkipped(r),
+	}
+	a.renderTemplate(w, "item_list_response", data)
+}
+
+func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request, feedID int64) {
+	deleted, err := sweepReadItems(a.db, feedID)
+	if err != nil {
+		http.Error(w, "failed to remove read items", http.StatusInternalServerError)
+		return
+	}
+	slog.Info("feed read items swept", "feed_id", feedID, "deleted", deleted)
 
 	itemList, err := loadItemList(a.db, feedID)
 	if err != nil {
@@ -1859,6 +1891,42 @@ SET read_at = ?
 WHERE feed_id = ? AND read_at IS NULL
 `, time.Now().UTC(), feedID)
 	return err
+}
+
+func sweepReadItems(db *sql.DB, feedID int64) (int64, error) {
+	now := time.Now().UTC()
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err = tx.Exec(`
+INSERT OR IGNORE INTO tombstones (feed_id, guid, deleted_at)
+SELECT feed_id, guid, ?
+FROM items
+WHERE feed_id = ? AND read_at IS NOT NULL
+`, now, feedID); err != nil {
+		return 0, err
+	}
+	deleteResult, err := tx.Exec(`
+DELETE FROM items
+WHERE feed_id = ? AND read_at IS NOT NULL
+`, feedID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	deleted, err := deleteResult.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
 }
 
 func (a *App) cleanupLoop() {

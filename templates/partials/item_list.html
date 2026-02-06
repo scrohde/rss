@@ -27,6 +27,17 @@
         <button class="chip ghost" hx-post="/feeds/{{.Feed.ID}}/items/read" hx-target="closest section" hx-swap="outerHTML">
           Mark all read
         </button>
+        <button
+          class="items-sweep-button"
+          type="button"
+          aria-label="Clear read items"
+          title="Clear read items"
+          hx-post="/feeds/{{.Feed.ID}}/items/sweep"
+          hx-target="closest section"
+          hx-swap="outerHTML"
+        >
+          <img class="icon" src="/static/icons/broom.svg" alt="" aria-hidden="true">
+        </button>
       </div>
     </div>
     {{template "new_items_banner" .NewItems}}
