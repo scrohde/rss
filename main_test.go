@@ -975,6 +975,35 @@ func TestParseSelectedItemID(t *testing.T) {
 	}
 }
 
+func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
+	feed := buildFeedView(1, "Feed", "https://example.com", 0, 0, sql.NullTime{}, sql.NullString{})
+	if feed.LastRefreshDisplay != "Never" {
+		t.Fatalf("expected Never, got %q", feed.LastRefreshDisplay)
+	}
+
+	cases := []struct {
+		name     string
+		age      time.Duration
+		wantUnit string
+	}{
+		{name: "seconds", age: 3 * time.Second, wantUnit: "s"},
+		{name: "minutes", age: 3 * time.Minute, wantUnit: "m"},
+		{name: "hours", age: 3 * time.Hour, wantUnit: "h"},
+		{name: "days", age: 72 * time.Hour, wantUnit: "d"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			checked := sql.NullTime{Time: time.Now().Add(-tc.age), Valid: true}
+			got := buildFeedView(1, "Feed", "https://example.com", 0, 0, checked, sql.NullString{}).LastRefreshDisplay
+			if !strings.HasSuffix(got, tc.wantUnit) {
+				t.Fatalf("expected unit %q in %q", tc.wantUnit, got)
+			}
+		})
+	}
+}
+
 func timePtr(t time.Time) *time.Time {
 	return &t
 }

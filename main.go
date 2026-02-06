@@ -1530,7 +1530,7 @@ func maxItemID(items []ItemView) int64 {
 func buildFeedView(id int64, title, url string, itemCount, unreadCount int, lastChecked sql.NullTime, lastError sql.NullString) FeedView {
 	refreshDisplay := "Never"
 	if lastChecked.Valid {
-		refreshDisplay = formatTime(lastChecked.Time)
+		refreshDisplay = formatRelativeShort(lastChecked.Time, time.Now())
 	}
 	errText := ""
 	if lastError.Valid {
