@@ -351,6 +351,15 @@ func (a *App) route(w http.ResponseWriter, r *http.Request) {
 			a.handleRenameFeed(w, r, feedID)
 			return
 		}
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "refresh" {
+			feedID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			a.handleRefreshFeed(w, r, feedID)
+			return
+		}
 		if len(parts) >= 3 && parts[2] == "items" {
 			feedID, err := strconv.ParseInt(parts[1], 10, 64)
 			if err != nil {
@@ -667,6 +676,35 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 		return
 	}
 	slog.Info("feed items marked read", "feed_id", feedID)
+
+	itemList, err := loadItemList(a.db, feedID)
+	if err != nil {
+		http.Error(w, "failed to load items", http.StatusInternalServerError)
+		return
+	}
+
+	feeds, err := listFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := ItemListResponseData{
+		ItemList:          itemList,
+		Feeds:             feeds,
+		SelectedFeedID:    feedID,
+		SkipDeleteWarning: deleteWarningSkipped(r),
+	}
+	a.renderTemplate(w, "item_list_response", data)
+}
+
+func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+	a.refreshMu.Lock()
+	_, err := refreshFeed(a.db, feedID)
+	a.refreshMu.Unlock()
+	if err != nil {
+		slog.Warn("manual refresh failed", "feed_id", feedID, "err", err)
+	}
 
 	itemList, err := loadItemList(a.db, feedID)
 	if err != nil {

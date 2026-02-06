@@ -4,7 +4,20 @@
       <div>
         <div class="items-title">{{.Feed.Title}}</div>
         <div class="items-observability">
-          <span>Last refresh: {{.Feed.LastRefreshDisplay}}</span>
+          <span class="items-refresh-meta">
+            <span>Last refresh: {{.Feed.LastRefreshDisplay}}</span>
+            <button
+              class="items-refresh-button"
+              type="button"
+              aria-label="Refresh feed {{.Feed.Title}}"
+              title="Refresh feed"
+              hx-post="/feeds/{{.Feed.ID}}/refresh"
+              hx-target="closest section"
+              hx-swap="outerHTML"
+            >
+              <img class="icon" src="/static/icons/refresh-circle.svg" alt="" aria-hidden="true">
+            </button>
+          </span>
           {{if .Feed.LastError}}
             <span class="items-error">Last error: {{.Feed.LastError}}</span>
           {{end}}

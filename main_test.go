@@ -553,6 +553,76 @@ func TestMarkAllRead(t *testing.T) {
 	}
 }
 
+func TestManualFeedRefresh(t *testing.T) {
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	feed := rssXML("Manual Refresh Feed", []rssItem{
+		{
+			Title:       "First",
+			Link:        "http://example.com/1",
+			GUID:        "1",
+			PubDate:     base.Format(time.RFC1123Z),
+			Description: "<p>First summary</p>",
+		},
+	})
+	fs, feedURL := newFeedServer(t, feed)
+	app := newTestApp(t)
+
+	feedID, err := upsertFeed(app.db, feedURL, "Manual Refresh Feed")
+	if err != nil {
+		t.Fatalf("upsertFeed: %v", err)
+	}
+
+	if _, err := refreshFeed(app.db, feedID); err != nil {
+		t.Fatalf("refreshFeed initial: %v", err)
+	}
+
+	fs.setFeedXML(rssXML("Manual Refresh Feed", []rssItem{
+		{
+			Title:       "Second",
+			Link:        "http://example.com/2",
+			GUID:        "2",
+			PubDate:     base.Add(time.Minute).Format(time.RFC1123Z),
+			Description: "<p>Second summary</p>",
+		},
+		{
+			Title:       "First",
+			Link:        "http://example.com/1",
+			GUID:        "1",
+			PubDate:     base.Format(time.RFC1123Z),
+			Description: "<p>First summary</p>",
+		},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/refresh", feedID), nil)
+	rec := httptest.NewRecorder()
+	app.route(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manual refresh status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Second") {
+		t.Fatalf("expected refreshed item in response")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`hx-post="/feeds/%d/refresh"`, feedID)) {
+		t.Fatalf("expected manual refresh button in response")
+	}
+	if !strings.Contains(body, `id="feed-list"`) {
+		t.Fatalf("expected feed list OOB update")
+	}
+	if !strings.Contains(body, `hx-swap-oob="innerHTML"`) {
+		t.Fatalf("expected OOB innerHTML swap for feed list")
+	}
+
+	items, err := listItems(app.db, feedID)
+	if err != nil {
+		t.Fatalf("listItems: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items after manual refresh, got %d", len(items))
+	}
+}
+
 func TestDeleteFeedRemovesData(t *testing.T) {
 	app := newTestApp(t)
 

@@ -611,6 +611,43 @@ body {
   margin-top: 4px;
 }
 
+.items-refresh-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.items-refresh-button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.items-refresh-button .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.items-refresh-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+}
+
+.items-refresh-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
+
 .items-error {
   color: #b42318;
   font-weight: 600;
