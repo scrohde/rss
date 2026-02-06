@@ -27,14 +27,47 @@
         <button type="submit">Subscribe</button>
       </form>
       <div class="topbar-side">
-        <div class="topbar-shortcuts" id="topbar-shortcuts" role="note" aria-label="Keyboard shortcuts" hidden>
-          <span class="topbar-shortcuts-title">Keys</span>
-          <span class="topbar-shortcuts-entry"><kbd>j</kbd>/<kbd>Down</kbd> next</span>
-          <span class="topbar-shortcuts-entry"><kbd>k</kbd>/<kbd>Up</kbd> prev</span>
-          <span class="topbar-shortcuts-entry"><kbd>l</kbd>/<kbd>Right</kbd> expand</span>
-          <span class="topbar-shortcuts-entry"><kbd>h</kbd>/<kbd>Left</kbd> collapse</span>
-          <span class="topbar-shortcuts-entry"><kbd>o</kbd> open</span>
-          <span class="topbar-shortcuts-entry"><kbd>r</kbd> read</span>
+        <div class="topbar-shortcuts" id="topbar-shortcuts">
+          <button
+            class="topbar-shortcuts-button"
+            id="topbar-shortcuts-button"
+            type="button"
+            aria-label="Show keyboard shortcuts"
+            aria-controls="topbar-shortcuts-panel"
+            aria-expanded="false"
+          >
+            ?
+          </button>
+          <section class="topbar-shortcuts-panel" id="topbar-shortcuts-panel" aria-label="Keyboard shortcuts" hidden>
+            <div class="topbar-shortcuts-title">Keyboard shortcuts</div>
+            <div class="topbar-shortcuts-subtitle">Browse and manage items without leaving the keyboard.</div>
+            <div class="topbar-shortcuts-grid">
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Next item</span>
+                <span class="topbar-shortcuts-keys"><kbd>j</kbd><kbd>Down</kbd></span>
+              </div>
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Previous item</span>
+                <span class="topbar-shortcuts-keys"><kbd>k</kbd><kbd>Up</kbd></span>
+              </div>
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Expand item</span>
+                <span class="topbar-shortcuts-keys"><kbd>l</kbd><kbd>Right</kbd></span>
+              </div>
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Collapse item</span>
+                <span class="topbar-shortcuts-keys"><kbd>h</kbd><kbd>Left</kbd></span>
+              </div>
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Open article</span>
+                <span class="topbar-shortcuts-keys"><kbd>o</kbd><kbd>Enter</kbd></span>
+              </div>
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Toggle read state</span>
+                <span class="topbar-shortcuts-keys"><kbd>r</kbd></span>
+              </div>
+            </div>
+          </section>
         </div>
         <div id="subscribe-message" class="message"></div>
       </div>

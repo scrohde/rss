@@ -8,13 +8,61 @@
 
   const getItemList = () => document.getElementById("item-list");
   const getTopbarShortcuts = () => document.getElementById("topbar-shortcuts");
+  const getTopbarShortcutsButton = () =>
+    document.getElementById("topbar-shortcuts-button");
+  const getTopbarShortcutsPanel = () =>
+    document.getElementById("topbar-shortcuts-panel");
+
+  const isTopbarShortcutsOpen = () => {
+    const button = getTopbarShortcutsButton();
+    return Boolean(button && button.getAttribute("aria-expanded") === "true");
+  };
+
+  const setTopbarShortcutsOpen = (isOpen) => {
+    const button = getTopbarShortcutsButton();
+    const panel = getTopbarShortcutsPanel();
+    if (!button || !panel) {
+      return;
+    }
+    button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    button.setAttribute(
+      "aria-label",
+      isOpen ? "Hide keyboard shortcuts" : "Show keyboard shortcuts"
+    );
+    panel.hidden = !isOpen;
+  };
+
+  const bindTopbarShortcuts = () => {
+    const shortcuts = getTopbarShortcuts();
+    const button = getTopbarShortcutsButton();
+    const panel = getTopbarShortcutsPanel();
+    if (!shortcuts || !button || !panel || button.dataset.bound === "true") {
+      return;
+    }
+    button.dataset.bound = "true";
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      setTopbarShortcutsOpen(!isTopbarShortcutsOpen());
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!isTopbarShortcutsOpen()) {
+        return;
+      }
+      if (shortcuts.contains(event.target)) {
+        return;
+      }
+      setTopbarShortcutsOpen(false);
+    });
+  };
 
   const syncTopbarShortcuts = () => {
     const shortcuts = getTopbarShortcuts();
     if (!shortcuts) {
       return;
     }
-    shortcuts.hidden = !Boolean(getItemList());
+    shortcuts.hidden = false;
   };
 
   const getItemCards = () => {
@@ -258,6 +306,10 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isTopbarShortcutsOpen()) {
+      setTopbarShortcutsOpen(false);
+      return;
+    }
     if (shouldIgnore(event)) {
       return;
     }
@@ -319,12 +371,14 @@
   });
 
   document.addEventListener("DOMContentLoaded", () => {
+    bindTopbarShortcuts();
     syncTopbarShortcuts();
     ensureActive();
     focusItemList();
   });
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
+    bindTopbarShortcuts();
     syncTopbarShortcuts();
     if (getItemList()) {
       if (
