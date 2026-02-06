@@ -777,6 +777,9 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	if !strings.Contains(pollRec.Body.String(), `hx-swap-oob="innerHTML"`) {
 		t.Fatalf("expected OOB innerHTML swap for feed list")
 	}
+	if !strings.Contains(pollRec.Body.String(), `id="item-last-refresh"`) {
+		t.Fatalf("expected last refresh OOB update")
+	}
 	if !strings.Contains(pollRec.Body.String(), `feed-count">2`) {
 		t.Fatalf("expected unread count to be 2")
 	}

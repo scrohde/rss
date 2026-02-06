@@ -1,5 +1,6 @@
 {{define "poll_response"}}
   {{template "new_items_banner" .Banner}}
+  <span id="item-last-refresh" hx-swap-oob="innerHTML">Last refresh: {{.RefreshDisplay}}</span>
   <div id="feed-list" hx-swap-oob="innerHTML">
     {{template "feed_list" .}}
   </div>

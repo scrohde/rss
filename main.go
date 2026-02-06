@@ -122,6 +122,7 @@ type NewItemsResponseData struct {
 type PollResponseData struct {
 	Banner            NewItemsData
 	Feeds             []FeedView
+	RefreshDisplay    string
 	SelectedFeedID    int64
 	SkipDeleteWarning bool
 }
@@ -575,9 +576,18 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID
 		return
 	}
 
+	refreshDisplay := "Never"
+	for _, feed := range feeds {
+		if feed.ID == feedID {
+			refreshDisplay = feed.LastRefreshDisplay
+			break
+		}
+	}
+
 	data := PollResponseData{
 		Banner:            NewItemsData{FeedID: feedID, Count: count},
 		Feeds:             feeds,
+		RefreshDisplay:    refreshDisplay,
 		SelectedFeedID:    feedID,
 		SkipDeleteWarning: deleteWarningSkipped(r),
 	}
