@@ -34,7 +34,7 @@ body {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(200px, 1.2fr) minmax(320px, 2fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(190px, 1fr) minmax(320px, 1.8fr) minmax(300px, 2fr);
   gap: 16px;
   align-items: center;
   padding: 20px 28px;
@@ -101,10 +101,73 @@ body {
   cursor: pointer;
 }
 
+.topbar-side {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.topbar-shortcuts {
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 14px;
+  padding: 8px 10px;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(15, 23, 42, 0.04));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+  min-height: 40px;
+}
+
+.topbar-shortcuts-title {
+  font-family: "Space Grotesk", "DM Sans", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.topbar-shortcuts-entry {
+  font-size: 11px;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topbar-shortcuts kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .message {
+  max-width: 180px;
   font-size: 13px;
   color: var(--muted);
   text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message:empty {
+  display: none;
 }
 
 .message.success {
@@ -467,6 +530,7 @@ body {
   padding: 14px 16px;
   background: #fff;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
+  scroll-margin-top: 140px;
 }
 
 .item-card.compact {
@@ -480,6 +544,12 @@ body {
 .item-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+}
+
+.item-card.is-active {
+  border-color: rgba(15, 118, 110, 0.6);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.16), 0 12px 26px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
 }
 
 .item-card.is-read {
@@ -669,8 +739,20 @@ body {
     text-align: left;
   }
 
+  .topbar-side {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .topbar-shortcuts {
+    width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
   .message {
     text-align: left;
+    max-width: 100%;
   }
 
   .app {

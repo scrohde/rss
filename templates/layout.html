@@ -10,6 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
   <script src="https://unpkg.com/htmx.org@1.9.10" defer></script>
+  <script src="/static/app.js" defer></script>
 </head>
 <body>
   <div class="page">
@@ -25,7 +26,18 @@
         <input type="url" name="url" placeholder="https://example.com/rss" required>
         <button type="submit">Subscribe</button>
       </form>
-      <div id="subscribe-message" class="message"></div>
+      <div class="topbar-side">
+        <div class="topbar-shortcuts" id="topbar-shortcuts" role="note" aria-label="Keyboard shortcuts" hidden>
+          <span class="topbar-shortcuts-title">Keys</span>
+          <span class="topbar-shortcuts-entry"><kbd>j</kbd>/<kbd>Down</kbd> next</span>
+          <span class="topbar-shortcuts-entry"><kbd>k</kbd>/<kbd>Up</kbd> prev</span>
+          <span class="topbar-shortcuts-entry"><kbd>l</kbd>/<kbd>Right</kbd> expand</span>
+          <span class="topbar-shortcuts-entry"><kbd>h</kbd>/<kbd>Left</kbd> collapse</span>
+          <span class="topbar-shortcuts-entry"><kbd>o</kbd> open</span>
+          <span class="topbar-shortcuts-entry"><kbd>r</kbd> read</span>
+        </div>
+        <div id="subscribe-message" class="message"></div>
+      </div>
     </header>
 
     <div class="app">
