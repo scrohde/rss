@@ -58,7 +58,7 @@ func TestSubscribeAndList(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -213,7 +213,7 @@ func TestToggleReadUpdatesFeedList(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("toggle read status: %d", rec.Code)
 	}
@@ -269,7 +269,7 @@ func TestToggleReadExpandedView(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("toggle read status: %d", rec.Code)
 	}
@@ -311,7 +311,7 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/items/%d?selected_item_id=item-%d", items[0].ID, items[0].ID), nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expanded status: %d", rec.Code)
 	}
@@ -452,7 +452,7 @@ func TestMarkAllRead(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/items/read", feedID), nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("mark all read status: %d", rec.Code)
 	}
@@ -529,7 +529,7 @@ func TestSweepReadItems(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/items/sweep", feedID), nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sweep read status: %d", rec.Code)
 	}
@@ -594,7 +594,7 @@ func TestManualFeedRefresh(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/refresh", feedID), nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("manual refresh status: %d", rec.Code)
 	}
@@ -655,7 +655,7 @@ func TestDeleteFeedRemovesData(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete feed status: %d", rec.Code)
 	}
@@ -763,7 +763,7 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 
 	pollReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
 	pollRec := httptest.NewRecorder()
-	app.route(pollRec, pollReq)
+	app.Routes().ServeHTTP(pollRec, pollReq)
 	if pollRec.Code != http.StatusOK {
 		t.Fatalf("poll status: %d", pollRec.Code)
 	}
@@ -795,7 +795,7 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 
 	pollReq = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
 	pollRec = httptest.NewRecorder()
-	app.route(pollRec, pollReq)
+	app.Routes().ServeHTTP(pollRec, pollReq)
 	if pollRec.Code != http.StatusOK {
 		t.Fatalf("poll status: %d", pollRec.Code)
 	}
@@ -808,7 +808,7 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 
 	newReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/new?after_id=%d", feedID, list.NewestID), nil)
 	newRec := httptest.NewRecorder()
-	app.route(newRec, newReq)
+	app.Routes().ServeHTTP(newRec, newReq)
 	if newRec.Code != http.StatusOK {
 		t.Fatalf("new items status: %d", newRec.Code)
 	}
@@ -831,7 +831,7 @@ func TestDeleteFeedConfirmEndpoint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm", feedID), nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("confirm status: %d", rec.Code)
 	}
@@ -848,7 +848,7 @@ func TestDeleteFeedConfirmEndpoint(t *testing.T) {
 
 	cancelReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm?cancel=1", feedID), nil)
 	cancelRec := httptest.NewRecorder()
-	app.route(cancelRec, cancelReq)
+	app.Routes().ServeHTTP(cancelRec, cancelReq)
 	if cancelRec.Code != http.StatusOK {
 		t.Fatalf("cancel status: %d", cancelRec.Code)
 	}
@@ -871,7 +871,7 @@ func TestDeleteFeedSkipCookie(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	body := rec.Body.String()
 	if !strings.Contains(body, fmt.Sprintf("hx-get=\"/feeds/%d/delete/confirm\"", feedID)) {
 		t.Fatalf("expected confirm flow when cookie is not set")
@@ -880,13 +880,53 @@ func TestDeleteFeedSkipCookie(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: skipDeleteWarningCookie, Value: "1"})
 	rec = httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	body = rec.Body.String()
 	if !strings.Contains(body, fmt.Sprintf("hx-post=\"/feeds/%d/delete\"", feedID)) {
 		t.Fatalf("expected direct delete when cookie is set")
 	}
 	if strings.Contains(body, fmt.Sprintf("hx-get=\"/feeds/%d/delete/confirm\"", feedID)) {
 		t.Fatalf("expected confirm flow to be skipped when cookie is set")
+	}
+}
+
+func TestRoutesMethodMismatchReturns405(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds", nil)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+	allow := rec.Header().Get("Allow")
+	if !strings.Contains(allow, http.MethodPost) {
+		t.Fatalf("expected Allow header to include POST, got %q", allow)
+	}
+}
+
+func TestRoutesInvalidFeedIDReturns404(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/feeds/not-a-number/items", nil)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestRoutesInvalidItemIDReturns404(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/items/not-a-number/toggle", nil)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
 
@@ -927,7 +967,7 @@ func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("index status: %d", rec.Code)
 	}
@@ -989,7 +1029,7 @@ func TestFeedListHidesMoreButtonWithoutZeroItemFeeds(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	app.route(rec, req)
+	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("index status: %d", rec.Code)
 	}

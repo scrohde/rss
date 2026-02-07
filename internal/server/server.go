@@ -40,143 +40,29 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	mux.HandleFunc("/", a.route)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.HandleFunc("GET /{$}", a.handleIndex)
+	mux.HandleFunc("POST /feeds", a.handleSubscribe)
+	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
+	mux.HandleFunc("GET /feeds/{feedID}/delete/confirm", a.handleDeleteFeedConfirm)
+	mux.HandleFunc("POST /feeds/{feedID}/delete", a.handleDeleteFeed)
+	mux.HandleFunc("GET /feeds/{feedID}/rename", a.handleRenameFeedForm)
+	mux.HandleFunc("POST /feeds/{feedID}/rename", a.handleRenameFeed)
+	mux.HandleFunc("POST /feeds/{feedID}/refresh", a.handleRefreshFeed)
+	mux.HandleFunc("GET /feeds/{feedID}/items", a.handleFeedItems)
+	mux.HandleFunc("GET /feeds/{feedID}/items/new", a.handleFeedItemsNew)
+	mux.HandleFunc("GET /feeds/{feedID}/items/poll", a.handleFeedItemsPoll)
+	mux.HandleFunc("POST /feeds/{feedID}/items/read", a.handleMarkAllRead)
+	mux.HandleFunc("POST /feeds/{feedID}/items/sweep", a.handleSweepRead)
+	mux.HandleFunc("GET /items/{itemID}", a.handleItemExpanded)
+	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)
+	mux.HandleFunc("POST /items/{itemID}/toggle", a.handleToggleRead)
 	return mux
 }
 
 func (a *App) StartBackgroundLoops() {
 	go a.cleanupLoop()
 	go a.refreshLoop()
-}
-
-func (a *App) route(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/static/") {
-		http.NotFound(w, r)
-		return
-	}
-
-	if r.URL.Path == "/" && r.Method == http.MethodGet {
-		a.handleIndex(w, r)
-		return
-	}
-
-	if r.URL.Path == content.ImageProxyPath {
-		a.handleImageProxy(w, r)
-		return
-	}
-
-	parts := pathParts(r.URL.Path)
-	if len(parts) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-
-	switch parts[0] {
-	case "feeds":
-		if r.Method == http.MethodPost && len(parts) == 1 {
-			a.handleSubscribe(w, r)
-			return
-		}
-		if r.Method == http.MethodGet && len(parts) == 4 && parts[2] == "delete" && parts[3] == "confirm" {
-			feedID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			a.handleDeleteFeedConfirm(w, r, feedID)
-			return
-		}
-		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "delete" {
-			feedID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			a.handleDeleteFeed(w, r, feedID)
-			return
-		}
-		if r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "rename" {
-			feedID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			a.handleRenameFeedForm(w, r, feedID)
-			return
-		}
-		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "rename" {
-			feedID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			a.handleRenameFeed(w, r, feedID)
-			return
-		}
-		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "refresh" {
-			feedID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			a.handleRefreshFeed(w, r, feedID)
-			return
-		}
-		if len(parts) >= 3 && parts[2] == "items" {
-			feedID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			switch {
-			case r.Method == http.MethodGet && len(parts) == 3:
-				a.handleFeedItems(w, r, feedID)
-				return
-			case r.Method == http.MethodGet && len(parts) == 4 && parts[3] == "new":
-				a.handleFeedItemsNew(w, r, feedID)
-				return
-			case r.Method == http.MethodGet && len(parts) == 4 && parts[3] == "poll":
-				a.handleFeedItemsPoll(w, r, feedID)
-				return
-			case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "read":
-				a.handleMarkAllRead(w, r, feedID)
-				return
-			case r.Method == http.MethodPost && len(parts) == 4 && parts[3] == "sweep":
-				a.handleSweepRead(w, r, feedID)
-				return
-			}
-		}
-	case "items":
-		if len(parts) >= 2 {
-			itemID, err := strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			switch {
-			case r.Method == http.MethodGet && len(parts) == 2:
-				a.handleItemExpanded(w, r, itemID)
-				return
-			case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "compact":
-				a.handleItemCompact(w, r, itemID)
-				return
-			case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "toggle":
-				a.handleToggleRead(w, r, itemID)
-				return
-			}
-		}
-	}
-
-	http.NotFound(w, r)
-}
-
-func pathParts(path string) []string {
-	trimmed := strings.Trim(path, "/")
-	if trimmed == "" {
-		return nil
-	}
-	return strings.Split(trimmed, "/")
 }
 
 func deleteWarningSkipped(r *http.Request) bool {
@@ -317,7 +203,13 @@ func (a *App) renderSubscribeError(w http.ResponseWriter, err error) {
 	a.renderTemplate(w, "subscribe_response", data)
 }
 
-func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	itemList, err := store.LoadItemList(a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to load items", http.StatusInternalServerError)
@@ -326,7 +218,13 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request, feedID int
 	a.renderTemplate(w, "item_list", itemList)
 }
 
-func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	afterID := parseAfterID(r)
 
 	count, err := store.CountItemsAfter(a.db, feedID, afterID)
@@ -359,7 +257,13 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request, feedID
 	a.renderTemplate(w, "poll_response", data)
 }
 
-func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	afterID := parseAfterID(r)
 
 	items, err := store.ListItemsAfter(a.db, feedID, afterID)
@@ -383,7 +287,13 @@ func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request, feedID 
 	a.renderTemplate(w, "item_new_response", data)
 }
 
-func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request, itemID int64) {
+func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := parsePathInt64(r, "itemID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	item, err := store.GetItem(a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
@@ -393,7 +303,13 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request, itemID 
 	a.renderTemplate(w, "item_expanded", item)
 }
 
-func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request, itemID int64) {
+func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := parsePathInt64(r, "itemID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	item, err := store.GetItem(a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
@@ -403,7 +319,13 @@ func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request, itemID i
 	a.renderTemplate(w, "item_compact", item)
 }
 
-func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID int64) {
+func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := parsePathInt64(r, "itemID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -445,7 +367,13 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request, itemID in
 	a.renderTemplate(w, "item_toggle_response", data)
 }
 
-func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	if err := store.MarkAllRead(a.db, feedID); err != nil {
 		http.Error(w, "failed to update items", http.StatusInternalServerError)
 		return
@@ -473,7 +401,13 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request, feedID i
 	a.renderTemplate(w, "item_list_response", data)
 }
 
-func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	deleted, err := store.SweepReadItems(a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to remove read items", http.StatusInternalServerError)
@@ -502,7 +436,13 @@ func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request, feedID int
 	a.renderTemplate(w, "item_list_response", data)
 }
 
-func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	a.refreshMu.Lock()
 	_, err := feed.Refresh(a.db, feedID)
 	a.refreshMu.Unlock()
@@ -531,7 +471,13 @@ func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request, feedID i
 	a.renderTemplate(w, "item_list_response", data)
 }
 
-func (a *App) handleDeleteFeedConfirm(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleDeleteFeedConfirm(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	if deleteWarningSkipped(r) || r.URL.Query().Get("cancel") == "1" {
 		data := view.DeleteFeedConfirmData{Feed: view.FeedView{ID: feedID}, Show: false}
 		a.renderTemplate(w, "feed_remove_confirm", data)
@@ -548,7 +494,13 @@ func (a *App) handleDeleteFeedConfirm(w http.ResponseWriter, r *http.Request, fe
 	a.renderTemplate(w, "feed_remove_confirm", data)
 }
 
-func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -599,7 +551,13 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request, feedID in
 	a.renderTemplate(w, "delete_feed_response", data)
 }
 
-func (a *App) handleRenameFeedForm(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleRenameFeedForm(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	if r.URL.Query().Get("cancel") == "1" {
 		data := view.RenameFeedFormData{Feed: view.FeedView{ID: feedID}, Show: false}
 		a.renderTemplate(w, "feed_rename_form", data)
@@ -616,7 +574,13 @@ func (a *App) handleRenameFeedForm(w http.ResponseWriter, r *http.Request, feedI
 	a.renderTemplate(w, "feed_rename_form", data)
 }
 
-func (a *App) handleRenameFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+func (a *App) handleRenameFeed(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
@@ -741,6 +705,18 @@ func (a *App) renderTemplate(w http.ResponseWriter, name string, data any) {
 		log.Printf("template %s: %v", name, err)
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
+}
+
+func parsePathInt64(r *http.Request, key string) (int64, bool) {
+	raw := strings.TrimSpace(r.PathValue(key))
+	if raw == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func parseAfterID(r *http.Request) int64 {
