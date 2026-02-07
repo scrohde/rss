@@ -3,7 +3,7 @@
 Project: Pulse RSS
 
 ## Stack
-- Go 1.22
+- Go 1.25
 - SQLite (modernc.org/sqlite)
 - htmx + HTML templates
 - CSS (no framework)
@@ -21,13 +21,22 @@ go test ./...
 ```
 
 ## Project layout
-- `main.go` server, routes, DB, feed refresh
+- `main.go` thin entrypoint (logging, wiring, server startup)
+- `internal/server/` HTTP routes, handlers, template rendering, background loops
+- `internal/store/` SQLite open/init and data access logic
+- `internal/feed/` feed fetch/refresh and refresh scheduling
+- `internal/content/` summary HTML rewriting and image proxy helpers
+- `internal/view/` template-facing view models and formatting builders
+- `internal/testutil/` shared test helpers
 - `templates/` HTML templates and htmx partials
-- `static/styles.css` UI styles
-- `main_test.go` unit tests (feed simulation + polling)
+- `static/` frontend assets
+- `internal/server/handlers_test.go` integration-style handler tests
+- `internal/content/rewrite_test.go` HTML rewrite tests
+- `internal/feed/*.go` refresh + scheduling tests
+- `internal/store/store_test.go` DB/store tests
 
 ## Conventions
 - Keep Go formatting via `gofmt`.
 - Prefer server-rendered partials + htmx swaps.
-- For new features, add tests under `main_test.go`.
+- Add tests in the package closest to the change (`internal/server`, `internal/store`, `internal/feed`, `internal/content`).
 - Avoid non-ASCII text in files unless already present.

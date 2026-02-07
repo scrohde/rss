@@ -1,115 +1,38 @@
-package main
+package server
 
 import (
 	"database/sql"
 	"fmt"
 	"html/template"
-	"io"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	feedpkg "rss/internal/feed"
+	"rss/internal/store"
+	"rss/internal/testutil"
+	"rss/internal/view"
 )
-
-type feedServer struct {
-	mu      sync.RWMutex
-	feedXML string
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
-func newFeedServer(t *testing.T, feedXML string) (*feedServer, string) {
-	t.Helper()
-	fs := &feedServer{feedXML: feedXML}
-	feedURL := "https://feed.test/" + url.PathEscape(t.Name())
-	prevTransport := http.DefaultTransport
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.String() != feedURL {
-			return nil, fmt.Errorf("unexpected feed url: %s", req.URL.String())
-		}
-		fs.mu.RLock()
-		defer fs.mu.RUnlock()
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Status:     "200 OK",
-			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
-			Body:       io.NopCloser(strings.NewReader(fs.feedXML)),
-			Request:    req,
-		}, nil
-	})
-	t.Cleanup(func() { http.DefaultTransport = prevTransport })
-	return fs, feedURL
-}
-
-func (f *feedServer) setFeedXML(xml string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.feedXML = xml
-}
-
-func rssXML(title string, items []rssItem) string {
-	var b strings.Builder
-	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	b.WriteString("<rss version=\"2.0\"><channel>")
-	b.WriteString(fmt.Sprintf("<title>%s</title>", title))
-	b.WriteString("<link>http://example.com</link>")
-	b.WriteString("<description>Test feed</description>")
-	for _, item := range items {
-		b.WriteString("<item>")
-		b.WriteString(fmt.Sprintf("<title>%s</title>", item.Title))
-		b.WriteString(fmt.Sprintf("<link>%s</link>", item.Link))
-		b.WriteString(fmt.Sprintf("<guid>%s</guid>", item.GUID))
-		b.WriteString(fmt.Sprintf("<pubDate>%s</pubDate>", item.PubDate))
-		b.WriteString(fmt.Sprintf("<description><![CDATA[%s]]></description>", item.Description))
-		b.WriteString("</item>")
-	}
-	b.WriteString("</channel></rss>")
-	return b.String()
-}
-
-type rssItem struct {
-	Title       string
-	Link        string
-	GUID        string
-	PubDate     string
-	Description string
-}
 
 func newTestApp(t *testing.T) *App {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := openDB(path)
-	if err != nil {
-		t.Fatalf("openDB: %v", err)
-	}
-	if err := initDB(db); err != nil {
-		_ = db.Close()
-		t.Fatalf("initDB: %v", err)
-	}
+	db := testutil.OpenTestDB(t)
 	tmpl := templateMust()
-	app := &App{db: db, tmpl: tmpl}
-	t.Cleanup(func() { _ = db.Close() })
-	return app
+	return New(db, tmpl)
 }
 
 func templateMust() *template.Template {
-	tmpl := template.Must(template.ParseGlob("templates/*.html"))
-	return template.Must(tmpl.ParseGlob("templates/partials/*.html"))
+	tmpl := template.Must(template.ParseGlob(filepath.Join("..", "..", "templates", "*.html")))
+	return template.Must(tmpl.ParseGlob(filepath.Join("..", "..", "templates", "partials", "*.html")))
 }
 
 func TestSubscribeAndList(t *testing.T) {
-	items := []rssItem{
+	items := []testutil.RSSItem{
 		{
 			Title:       "Alpha",
 			Link:        "http://example.com/alpha",
@@ -125,7 +48,7 @@ func TestSubscribeAndList(t *testing.T) {
 			Description: "<p>Beta summary</p>",
 		},
 	}
-	_, feedURL := newFeedServer(t, rssXML("Test Feed", items))
+	_, feedURL := testutil.NewFeedServer(t, testutil.RSSXML("Test Feed", items))
 
 	app := newTestApp(t)
 
@@ -143,9 +66,9 @@ func TestSubscribeAndList(t *testing.T) {
 		t.Fatalf("expected subscribe success message to be omitted")
 	}
 
-	feeds, err := listFeeds(app.db)
+	feeds, err := store.ListFeeds(app.db)
 	if err != nil {
-		t.Fatalf("listFeeds: %v", err)
+		t.Fatalf("store.ListFeeds: %v", err)
 	}
 	if len(feeds) != 1 {
 		t.Fatalf("expected 1 feed, got %d", len(feeds))
@@ -154,9 +77,9 @@ func TestSubscribeAndList(t *testing.T) {
 		t.Fatalf("expected feed title, got %q", feeds[0].Title)
 	}
 
-	itemsInDB, err := listItems(app.db, feeds[0].ID)
+	itemsInDB, err := store.ListItems(app.db, feeds[0].ID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(itemsInDB) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(itemsInDB))
@@ -166,30 +89,30 @@ func TestSubscribeAndList(t *testing.T) {
 func TestListFeedsUnreadCount(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Unread Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Unread Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Unread A",
 		Link:            "http://example.com/a",
 		GUID:            "a",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}, {
 		Title:           "Unread B",
 		Link:            "http://example.com/b",
 		GUID:            "b",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	feeds, err := listFeeds(app.db)
+	feeds, err := store.ListFeeds(app.db)
 	if err != nil {
-		t.Fatalf("listFeeds: %v", err)
+		t.Fatalf("store.ListFeeds: %v", err)
 	}
 	if len(feeds) != 1 {
 		t.Fatalf("expected 1 feed, got %d", len(feeds))
@@ -201,17 +124,17 @@ func TestListFeedsUnreadCount(t *testing.T) {
 		t.Fatalf("expected 2 unread items, got %d", feeds[0].UnreadCount)
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
-	if err := toggleRead(app.db, items[0].ID); err != nil {
-		t.Fatalf("toggleRead: %v", err)
+	if err := store.ToggleRead(app.db, items[0].ID); err != nil {
+		t.Fatalf("store.ToggleRead: %v", err)
 	}
 
-	feeds, err = listFeeds(app.db)
+	feeds, err = store.ListFeeds(app.db)
 	if err != nil {
-		t.Fatalf("listFeeds again: %v", err)
+		t.Fatalf("store.ListFeeds again: %v", err)
 	}
 	if feeds[0].UnreadCount != 1 {
 		t.Fatalf("expected 1 unread item, got %d", feeds[0].UnreadCount)
@@ -221,30 +144,30 @@ func TestListFeedsUnreadCount(t *testing.T) {
 func TestRenameFeedOverridesSourceTitle(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Source Title")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Source Title")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if err := updateFeedTitle(app.db, feedID, "Custom Title"); err != nil {
-		t.Fatalf("updateFeedTitle: %v", err)
+	if err := store.UpdateFeedTitle(app.db, feedID, "Custom Title"); err != nil {
+		t.Fatalf("store.UpdateFeedTitle: %v", err)
 	}
 
-	feeds, err := listFeeds(app.db)
+	feeds, err := store.ListFeeds(app.db)
 	if err != nil {
-		t.Fatalf("listFeeds: %v", err)
+		t.Fatalf("store.ListFeeds: %v", err)
 	}
 	if feeds[0].Title != "Custom Title" {
 		t.Fatalf("expected custom title, got %q", feeds[0].Title)
 	}
 
-	if _, err := upsertFeed(app.db, "http://example.com/rss", "Updated Source"); err != nil {
-		t.Fatalf("upsertFeed update: %v", err)
+	if _, err := store.UpsertFeed(app.db, "http://example.com/rss", "Updated Source"); err != nil {
+		t.Fatalf("store.UpsertFeed update: %v", err)
 	}
 
-	feeds, err = listFeeds(app.db)
+	feeds, err = store.ListFeeds(app.db)
 	if err != nil {
-		t.Fatalf("listFeeds again: %v", err)
+		t.Fatalf("store.ListFeeds again: %v", err)
 	}
 	if feeds[0].Title != "Custom Title" {
 		t.Fatalf("expected custom title after refresh, got %q", feeds[0].Title)
@@ -254,30 +177,30 @@ func TestRenameFeedOverridesSourceTitle(t *testing.T) {
 func TestToggleReadUpdatesFeedList(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Toggle Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Toggle Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "One",
 		Link:            "http://example.com/1",
 		GUID:            "1",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}, {
 		Title:           "Two",
 		Link:            "http://example.com/2",
 		GUID:            "2",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
@@ -316,24 +239,24 @@ func TestToggleReadUpdatesFeedList(t *testing.T) {
 func TestToggleReadExpandedView(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Toggle Expanded Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Toggle Expanded Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Expanded",
 		Link:            "http://example.com/expanded",
 		GUID:            "expanded",
 		Description:     "<p>Expanded summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
@@ -363,24 +286,24 @@ func TestToggleReadExpandedView(t *testing.T) {
 func TestItemExpandedKeepsActiveClass(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Expanded Active Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Expanded Active Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Expanded",
 		Link:            "http://example.com/expanded",
 		GUID:            "expanded-active",
 		Description:     "<p>Expanded summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
@@ -401,34 +324,34 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 func TestToggleReadAndCleanup(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	_, err = upsertItems(app.db, feedID, []*gofeed.Item{{
+	_, err = store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item",
 		Link:            "http://example.com/1",
 		GUID:            "1",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
-		UpdatedParsed:   timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+		UpdatedParsed:   testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}})
 	if err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
 	}
 
 	itemID := items[0].ID
-	if err := toggleRead(app.db, itemID); err != nil {
-		t.Fatalf("toggleRead: %v", err)
+	if err := store.ToggleRead(app.db, itemID); err != nil {
+		t.Fatalf("store.ToggleRead: %v", err)
 	}
 
 	var readAt sql.NullTime
@@ -439,8 +362,8 @@ func TestToggleReadAndCleanup(t *testing.T) {
 		t.Fatalf("expected read_at to be set")
 	}
 
-	if err := toggleRead(app.db, itemID); err != nil {
-		t.Fatalf("toggleRead again: %v", err)
+	if err := store.ToggleRead(app.db, itemID); err != nil {
+		t.Fatalf("store.ToggleRead again: %v", err)
 	}
 
 	if err := app.db.QueryRow("SELECT read_at FROM items WHERE id = ?", itemID).Scan(&readAt); err != nil {
@@ -455,13 +378,13 @@ func TestToggleReadAndCleanup(t *testing.T) {
 	if _, err := app.db.Exec("UPDATE items SET read_at = ? WHERE id = ?", past, itemID); err != nil {
 		t.Fatalf("set read_at: %v", err)
 	}
-	if err := cleanupReadItems(app.db); err != nil {
-		t.Fatalf("cleanupReadItems: %v", err)
+	if err := store.CleanupReadItems(app.db); err != nil {
+		t.Fatalf("store.CleanupReadItems: %v", err)
 	}
 
-	items, err = listItems(app.db, feedID)
+	items, err = store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems after cleanup: %v", err)
+		t.Fatalf("store.ListItems after cleanup: %v", err)
 	}
 	if len(items) != 0 {
 		t.Fatalf("expected item to be deleted, got %d", len(items))
@@ -470,19 +393,19 @@ func TestToggleReadAndCleanup(t *testing.T) {
 		t.Fatalf("expected tombstone to be recorded")
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item",
 		Link:            "http://example.com/1",
 		GUID:            "1",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
-		UpdatedParsed:   timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+		UpdatedParsed:   testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems after cleanup: %v", err)
+		t.Fatalf("store.UpsertItems after cleanup: %v", err)
 	}
-	items, err = listItems(app.db, feedID)
+	items, err = store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems after reinserting: %v", err)
+		t.Fatalf("store.ListItems after reinserting: %v", err)
 	}
 	if len(items) != 0 {
 		t.Fatalf("expected item to stay deleted, got %d", len(items))
@@ -492,31 +415,31 @@ func TestToggleReadAndCleanup(t *testing.T) {
 func TestMarkAllRead(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	_, err = upsertItems(app.db, feedID, []*gofeed.Item{{
+	_, err = store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item A",
 		Link:            "http://example.com/1",
 		GUID:            "1",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}, {
 		Title:           "Item B",
 		Link:            "http://example.com/2",
 		GUID:            "2",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
 	}})
 	if err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
@@ -556,44 +479,44 @@ func TestMarkAllRead(t *testing.T) {
 func TestSweepReadItems(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Sweep Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Sweep Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
-	otherFeedID, err := upsertFeed(app.db, "http://example.com/other", "Other Feed")
+	otherFeedID, err := store.UpsertFeed(app.db, "http://example.com/other", "Other Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed other: %v", err)
+		t.Fatalf("store.UpsertFeed other: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Keep me",
 		Link:            "http://example.com/1",
 		GUID:            "1",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}, {
 		Title:           "Sweep me A",
 		Link:            "http://example.com/2",
 		GUID:            "2",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
 	}, {
 		Title:           "Sweep me B",
 		Link:            "http://example.com/3",
 		GUID:            "3",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-3 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-3 * time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
-	if _, err := upsertItems(app.db, otherFeedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, otherFeedID, []*gofeed.Item{{
 		Title:           "Other Feed Item",
 		Link:            "http://example.com/4",
 		GUID:            "4",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems other: %v", err)
+		t.Fatalf("store.UpsertItems other: %v", err)
 	}
 
 	now := time.Now().UTC()
@@ -631,7 +554,7 @@ func TestSweepReadItems(t *testing.T) {
 
 func TestManualFeedRefresh(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
-	feed := rssXML("Manual Refresh Feed", []rssItem{
+	feedXML := testutil.RSSXML("Manual Refresh Feed", []testutil.RSSItem{
 		{
 			Title:       "First",
 			Link:        "http://example.com/1",
@@ -640,19 +563,19 @@ func TestManualFeedRefresh(t *testing.T) {
 			Description: "<p>First summary</p>",
 		},
 	})
-	fs, feedURL := newFeedServer(t, feed)
+	fs, feedURL := testutil.NewFeedServer(t, feedXML)
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, feedURL, "Manual Refresh Feed")
+	feedID, err := store.UpsertFeed(app.db, feedURL, "Manual Refresh Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := refreshFeed(app.db, feedID); err != nil {
-		t.Fatalf("refreshFeed initial: %v", err)
+	if _, err := feedpkg.Refresh(app.db, feedID); err != nil {
+		t.Fatalf("feedpkg.Refresh initial: %v", err)
 	}
 
-	fs.setFeedXML(rssXML("Manual Refresh Feed", []rssItem{
+	fs.SetFeedXML(testutil.RSSXML("Manual Refresh Feed", []testutil.RSSItem{
 		{
 			Title:       "Second",
 			Link:        "http://example.com/2",
@@ -690,9 +613,9 @@ func TestManualFeedRefresh(t *testing.T) {
 		t.Fatalf("expected OOB innerHTML swap for feed list")
 	}
 
-	items, err := listItems(app.db, feedID)
+	items, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items after manual refresh, got %d", len(items))
@@ -702,19 +625,19 @@ func TestManualFeedRefresh(t *testing.T) {
 func TestDeleteFeedRemovesData(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Delete Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Delete Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Item A",
 		Link:            "http://example.com/a",
 		GUID:            "a",
 		Description:     "<p>Summary</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
 	if _, err := app.db.Exec(
@@ -764,9 +687,9 @@ func TestDeleteFeedRemovesData(t *testing.T) {
 
 func TestItemLimit(t *testing.T) {
 	app := newTestApp(t)
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
 	base := time.Now().UTC().Add(-210 * time.Minute)
@@ -782,19 +705,19 @@ func TestItemLimit(t *testing.T) {
 		})
 	}
 
-	if _, err := upsertItems(app.db, feedID, items); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+	if _, err := store.UpsertItems(app.db, feedID, items); err != nil {
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
-	if err := enforceItemLimit(app.db, feedID); err != nil {
-		t.Fatalf("enforceItemLimit: %v", err)
+	if err := store.EnforceItemLimit(app.db, feedID); err != nil {
+		t.Fatalf("store.EnforceItemLimit: %v", err)
 	}
 
-	itemsInDB, err := listItems(app.db, feedID)
+	itemsInDB, err := store.ListItems(app.db, feedID)
 	if err != nil {
-		t.Fatalf("listItems: %v", err)
+		t.Fatalf("store.ListItems: %v", err)
 	}
-	if len(itemsInDB) != maxItemsPerFeed {
-		t.Fatalf("expected %d items, got %d", maxItemsPerFeed, len(itemsInDB))
+	if len(itemsInDB) != 200 {
+		t.Fatalf("expected %d items, got %d", 200, len(itemsInDB))
 	}
 
 	// Oldest 10 items should have been removed (guid-000 through guid-009).
@@ -813,29 +736,29 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Poll Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Poll Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "First",
 		Link:            "http://example.com/1",
 		GUID:            "1",
 		Description:     "<p>First summary</p>",
-		PublishedParsed: timePtr(base),
+		PublishedParsed: testutil.TimePtr(base),
 	}, {
 		Title:           "Second",
 		Link:            "http://example.com/2",
 		GUID:            "2",
 		Description:     "<p>Second summary</p>",
-		PublishedParsed: timePtr(base.Add(time.Minute)),
+		PublishedParsed: testutil.TimePtr(base.Add(time.Minute)),
 	}}); err != nil {
-		t.Fatalf("upsertItems: %v", err)
+		t.Fatalf("store.UpsertItems: %v", err)
 	}
 
-	list, err := loadItemList(app.db, feedID)
+	list, err := store.LoadItemList(app.db, feedID)
 	if err != nil {
-		t.Fatalf("loadItemList: %v", err)
+		t.Fatalf("store.LoadItemList: %v", err)
 	}
 
 	pollReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
@@ -860,14 +783,14 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 		t.Fatalf("expected unread count to be 2")
 	}
 
-	if _, err := upsertItems(app.db, feedID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
 		Title:           "Third",
 		Link:            "http://example.com/3",
 		GUID:            "3",
 		Description:     "<p>Third summary</p>",
-		PublishedParsed: timePtr(base.Add(2 * time.Minute)),
+		PublishedParsed: testutil.TimePtr(base.Add(2 * time.Minute)),
 	}}); err != nil {
-		t.Fatalf("upsertItems new: %v", err)
+		t.Fatalf("store.UpsertItems new: %v", err)
 	}
 
 	pollReq = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
@@ -901,9 +824,9 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 func TestDeleteFeedConfirmEndpoint(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Delete Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Delete Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm", feedID), nil)
@@ -941,9 +864,9 @@ func TestDeleteFeedConfirmEndpoint(t *testing.T) {
 func TestDeleteFeedSkipCookie(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := upsertFeed(app.db, "http://example.com/rss", "Skip Cookie Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Skip Cookie Feed")
 	if err != nil {
-		t.Fatalf("upsertFeed: %v", err)
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -970,36 +893,36 @@ func TestDeleteFeedSkipCookie(t *testing.T) {
 func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
 	app := newTestApp(t)
 
-	if _, err := upsertFeed(app.db, "http://example.com/a-empty", "Aardvark Empty"); err != nil {
-		t.Fatalf("upsertFeed empty: %v", err)
+	if _, err := store.UpsertFeed(app.db, "http://example.com/a-empty", "Aardvark Empty"); err != nil {
+		t.Fatalf("store.UpsertFeed empty: %v", err)
 	}
-	alphaID, err := upsertFeed(app.db, "http://example.com/b-alpha", "Alpha Active")
+	alphaID, err := store.UpsertFeed(app.db, "http://example.com/b-alpha", "Alpha Active")
 	if err != nil {
-		t.Fatalf("upsertFeed alpha: %v", err)
+		t.Fatalf("store.UpsertFeed alpha: %v", err)
 	}
-	betaID, err := upsertFeed(app.db, "http://example.com/c-beta", "Beta Active")
+	betaID, err := store.UpsertFeed(app.db, "http://example.com/c-beta", "Beta Active")
 	if err != nil {
-		t.Fatalf("upsertFeed beta: %v", err)
+		t.Fatalf("store.UpsertFeed beta: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, alphaID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, alphaID, []*gofeed.Item{{
 		Title:           "Alpha item",
 		Link:            "http://example.com/alpha-item",
 		GUID:            "alpha-item",
 		Description:     "<p>Alpha item</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems alpha: %v", err)
+		t.Fatalf("store.UpsertItems alpha: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, betaID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, betaID, []*gofeed.Item{{
 		Title:           "Beta item",
 		Link:            "http://example.com/beta-item",
 		GUID:            "beta-item",
 		Description:     "<p>Beta item</p>",
-		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems beta: %v", err)
+		t.Fatalf("store.UpsertItems beta: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1035,33 +958,33 @@ func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
 func TestFeedListHidesMoreButtonWithoutZeroItemFeeds(t *testing.T) {
 	app := newTestApp(t)
 
-	alphaID, err := upsertFeed(app.db, "http://example.com/a-alpha", "Alpha Active")
+	alphaID, err := store.UpsertFeed(app.db, "http://example.com/a-alpha", "Alpha Active")
 	if err != nil {
-		t.Fatalf("upsertFeed alpha: %v", err)
+		t.Fatalf("store.UpsertFeed alpha: %v", err)
 	}
-	betaID, err := upsertFeed(app.db, "http://example.com/b-beta", "Beta Active")
+	betaID, err := store.UpsertFeed(app.db, "http://example.com/b-beta", "Beta Active")
 	if err != nil {
-		t.Fatalf("upsertFeed beta: %v", err)
+		t.Fatalf("store.UpsertFeed beta: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, alphaID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, alphaID, []*gofeed.Item{{
 		Title:           "Alpha item",
 		Link:            "http://example.com/alpha-item",
 		GUID:            "alpha-item",
 		Description:     "<p>Alpha item</p>",
-		PublishedParsed: timePtr(time.Now().Add(-time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems alpha: %v", err)
+		t.Fatalf("store.UpsertItems alpha: %v", err)
 	}
 
-	if _, err := upsertItems(app.db, betaID, []*gofeed.Item{{
+	if _, err := store.UpsertItems(app.db, betaID, []*gofeed.Item{{
 		Title:           "Beta item",
 		Link:            "http://example.com/beta-item",
 		GUID:            "beta-item",
 		Description:     "<p>Beta item</p>",
-		PublishedParsed: timePtr(time.Now().Add(-2 * time.Hour)),
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
 	}}); err != nil {
-		t.Fatalf("upsertItems beta: %v", err)
+		t.Fatalf("store.UpsertItems beta: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1074,52 +997,6 @@ func TestFeedListHidesMoreButtonWithoutZeroItemFeeds(t *testing.T) {
 	body := rec.Body.String()
 	if strings.Contains(body, `class="feed-more-button"`) {
 		t.Fatalf("expected more button to be hidden when all feeds have items")
-	}
-}
-
-func TestRewriteSummaryHTMLImages(t *testing.T) {
-	input := `<p>Hello</p><img src="https://example.com/image.jpg" alt="x">`
-	output := rewriteSummaryHTML(input)
-	expected := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/image.jpg")
-	if !strings.Contains(output, expected) {
-		t.Fatalf("expected proxied image url, got %q", output)
-	}
-}
-
-func TestRewriteSummaryHTMLSrcset(t *testing.T) {
-	input := `<img srcset="https://example.com/a.jpg 1x, https://example.com/b.jpg 2x" src="https://example.com/a.jpg">`
-	output := rewriteSummaryHTML(input)
-	expectedA := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/a.jpg")
-	expectedB := imageProxyPath + "?url=" + url.QueryEscape("https://example.com/b.jpg")
-	if !strings.Contains(output, expectedA) || !strings.Contains(output, expectedB) {
-		t.Fatalf("expected proxied srcset urls, got %q", output)
-	}
-}
-
-func TestRewriteSummaryHTMLAnchorTargetAndRel(t *testing.T) {
-	input := `<a href="https://example.com">Example</a>`
-	output := rewriteSummaryHTML(input)
-	if !strings.Contains(output, `target="_blank"`) {
-		t.Fatalf("expected target _blank, got %q", output)
-	}
-	if !strings.Contains(output, `rel="noopener noreferrer"`) {
-		t.Fatalf("expected rel noopener noreferrer, got %q", output)
-	}
-}
-
-func TestRewriteSummaryHTMLAnchorRelPreservesExistingTokens(t *testing.T) {
-	input := `<a href="https://example.com" rel="author">Example</a>`
-	output := rewriteSummaryHTML(input)
-	if !strings.Contains(output, `rel="author noopener noreferrer"`) {
-		t.Fatalf("expected existing rel token plus noopener noreferrer, got %q", output)
-	}
-}
-
-func TestRewriteSummaryHTMLAnchorTargetOverwritesNonBlank(t *testing.T) {
-	input := `<a href="https://example.com" target="_self">Example</a>`
-	output := rewriteSummaryHTML(input)
-	if !strings.Contains(output, `target="_blank"`) {
-		t.Fatalf("expected target _blank, got %q", output)
 	}
 }
 
@@ -1152,7 +1029,7 @@ func TestParseSelectedItemID(t *testing.T) {
 }
 
 func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
-	feed := buildFeedView(1, "Feed", "https://example.com", 0, 0, sql.NullTime{}, sql.NullString{})
+	feed := view.BuildFeedView(1, "Feed", "https://example.com", 0, 0, sql.NullTime{}, sql.NullString{})
 	if feed.LastRefreshDisplay != "Never" {
 		t.Fatalf("expected Never, got %q", feed.LastRefreshDisplay)
 	}
@@ -1172,16 +1049,12 @@ func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			checked := sql.NullTime{Time: time.Now().Add(-tc.age), Valid: true}
-			got := buildFeedView(1, "Feed", "https://example.com", 0, 0, checked, sql.NullString{}).LastRefreshDisplay
+			got := view.BuildFeedView(1, "Feed", "https://example.com", 0, 0, checked, sql.NullString{}).LastRefreshDisplay
 			if !strings.HasSuffix(got, tc.wantUnit) {
 				t.Fatalf("expected unit %q in %q", tc.wantUnit, got)
 			}
 		})
 	}
-}
-
-func timePtr(t time.Time) *time.Time {
-	return &t
 }
 
 func existsByGUID(t *testing.T, db *sql.DB, feedID int64, guid string) bool {
@@ -1208,37 +1081,4 @@ WHERE feed_id = ? AND guid = ?
 		t.Fatalf("existsInTombstones: %v", err)
 	}
 	return count > 0
-}
-
-func TestComputeBackoffInterval(t *testing.T) {
-	cases := []int{0, 1, 2, 3, 4, 8}
-	for _, count := range cases {
-		want := refreshInterval
-		for i := 0; i < count; i++ {
-			want *= 2
-			if want >= refreshBackoffMax {
-				want = refreshBackoffMax
-				break
-			}
-		}
-		if want > refreshBackoffMax {
-			want = refreshBackoffMax
-		}
-		if got := computeBackoffInterval(count); got != want {
-			t.Fatalf("count %d: expected %v, got %v", count, want, got)
-		}
-	}
-}
-
-func TestApplyJitterRange(t *testing.T) {
-	rand.Seed(1)
-	base := refreshInterval
-	min := time.Duration(float64(base) * (1 - refreshJitterMax))
-	max := time.Duration(float64(base) * (1 + refreshJitterMax))
-	for i := 0; i < 10; i++ {
-		got := applyJitter(base)
-		if got < min || got > max {
-			t.Fatalf("jittered value %v out of range (%v-%v)", got, min, max)
-		}
-	}
 }
