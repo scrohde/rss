@@ -380,25 +380,7 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("feed items marked read", "feed_id", feedID)
 
-	itemList, err := store.LoadItemList(a.db, feedID)
-	if err != nil {
-		http.Error(w, "failed to load items", http.StatusInternalServerError)
-		return
-	}
-
-	feeds, err := store.ListFeeds(a.db)
-	if err != nil {
-		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
-		return
-	}
-
-	data := view.ItemListResponseData{
-		ItemList:          itemList,
-		Feeds:             feeds,
-		SelectedFeedID:    feedID,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-	}
-	a.renderTemplate(w, "item_list_response", data)
+	a.renderItemListResponse(w, r, feedID)
 }
 
 func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
@@ -415,25 +397,7 @@ func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("feed read items swept", "feed_id", feedID, "deleted", deleted)
 
-	itemList, err := store.LoadItemList(a.db, feedID)
-	if err != nil {
-		http.Error(w, "failed to load items", http.StatusInternalServerError)
-		return
-	}
-
-	feeds, err := store.ListFeeds(a.db)
-	if err != nil {
-		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
-		return
-	}
-
-	data := view.ItemListResponseData{
-		ItemList:          itemList,
-		Feeds:             feeds,
-		SelectedFeedID:    feedID,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-	}
-	a.renderTemplate(w, "item_list_response", data)
+	a.renderItemListResponse(w, r, feedID)
 }
 
 func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
@@ -450,6 +414,10 @@ func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("manual refresh failed", "feed_id", feedID, "err", err)
 	}
 
+	a.renderItemListResponse(w, r, feedID)
+}
+
+func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
 	itemList, err := store.LoadItemList(a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to load items", http.StatusInternalServerError)
