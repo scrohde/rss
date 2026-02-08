@@ -1022,7 +1022,7 @@ func TestRoutesInvalidItemIDReturns404(t *testing.T) {
 	}
 }
 
-func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
+func TestFeedListCollapsesZeroUnreadFeeds(t *testing.T) {
 	app := newTestApp(t)
 
 	if _, err := store.UpsertFeed(app.db, "http://example.com/a-empty", "Aardvark Empty"); err != nil {
@@ -1056,6 +1056,22 @@ func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("store.UpsertItems beta: %v", err)
 	}
+	readOnlyID, err := store.UpsertFeed(app.db, "http://example.com/d-readonly", "Delta Read")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed read only: %v", err)
+	}
+	if _, err := store.UpsertItems(app.db, readOnlyID, []*gofeed.Item{{
+		Title:           "Delta item",
+		Link:            "http://example.com/delta-item",
+		GUID:            "delta-item",
+		Description:     "<p>Delta item</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-3 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems read only: %v", err)
+	}
+	if err := store.MarkAllRead(app.db, readOnlyID); err != nil {
+		t.Fatalf("store.MarkAllRead read only: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -1066,28 +1082,29 @@ func TestFeedListCollapsesZeroItemFeeds(t *testing.T) {
 
 	body := rec.Body.String()
 	if !strings.Contains(body, `class="feed-more-button"`) {
-		t.Fatalf("expected more button when zero-item feeds exist")
+		t.Fatalf("expected more button when zero-unread feeds exist")
 	}
 	if !strings.Contains(body, `class="feed-zero-list"`) {
-		t.Fatalf("expected collapsed zero-item feed section")
+		t.Fatalf("expected collapsed zero-unread feed section")
 	}
 
 	alphaIdx := strings.Index(body, "Alpha Active")
 	betaIdx := strings.Index(body, "Beta Active")
 	moreIdx := strings.Index(body, `class="feed-more-button"`)
 	emptyIdx := strings.Index(body, "Aardvark Empty")
-	if alphaIdx == -1 || betaIdx == -1 || moreIdx == -1 || emptyIdx == -1 {
-		t.Fatalf("expected alpha, beta, more button, and empty feed in output")
+	readOnlyIdx := strings.Index(body, "Delta Read")
+	if alphaIdx == -1 || betaIdx == -1 || moreIdx == -1 || emptyIdx == -1 || readOnlyIdx == -1 {
+		t.Fatalf("expected alpha, beta, more button, empty feed, and read-only feed in output")
 	}
 	if alphaIdx > betaIdx {
-		t.Fatalf("expected non-zero feeds to remain alphabetical")
+		t.Fatalf("expected unread feeds to remain alphabetical")
 	}
-	if betaIdx > moreIdx || moreIdx > emptyIdx {
-		t.Fatalf("expected zero-item feeds below non-zero feeds behind the more section")
+	if betaIdx > moreIdx || moreIdx > emptyIdx || moreIdx > readOnlyIdx {
+		t.Fatalf("expected zero-unread feeds below unread feeds behind the more section")
 	}
 }
 
-func TestFeedListHidesMoreButtonWithoutZeroItemFeeds(t *testing.T) {
+func TestFeedListHidesMoreButtonWithoutZeroUnreadFeeds(t *testing.T) {
 	app := newTestApp(t)
 
 	alphaID, err := store.UpsertFeed(app.db, "http://example.com/a-alpha", "Alpha Active")
@@ -1128,7 +1145,7 @@ func TestFeedListHidesMoreButtonWithoutZeroItemFeeds(t *testing.T) {
 
 	body := rec.Body.String()
 	if strings.Contains(body, `class="feed-more-button"`) {
-		t.Fatalf("expected more button to be hidden when all feeds have items")
+		t.Fatalf("expected more button to be hidden when all feeds have unread items")
 	}
 }
 

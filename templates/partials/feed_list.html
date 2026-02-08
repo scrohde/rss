@@ -10,10 +10,10 @@
     </div>
   </div>
   <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
-  {{$hasEmptyFeeds := false}}
+  {{$hasNoUnreadFeeds := false}}
   {{range .Feeds}}
-    {{if eq .ItemCount 0}}
-      {{$hasEmptyFeeds = true}}
+    {{if eq .UnreadCount 0}}
+      {{$hasNoUnreadFeeds = true}}
     {{end}}
   {{end}}
   <ul class="feed-list">
@@ -21,7 +21,7 @@
       <li class="feed-empty">No feeds yet.</li>
     {{end}}
     {{range .Feeds}}
-      {{if gt .ItemCount 0}}
+      {{if gt .UnreadCount 0}}
         <li class="feed-row">
           <button
             class="feed-remove"
@@ -59,7 +59,7 @@
         </li>
       {{end}}
     {{end}}
-    {{if $hasEmptyFeeds}}
+    {{if $hasNoUnreadFeeds}}
       <li class="feed-more-section">
         <input class="sr-only feed-more-toggle" type="checkbox" id="feed-more-toggle">
         <label class="feed-more-button" for="feed-more-toggle">
@@ -68,7 +68,7 @@
         </label>
         <ul class="feed-zero-list">
           {{range .Feeds}}
-            {{if eq .ItemCount 0}}
+            {{if eq .UnreadCount 0}}
               <li class="feed-row">
                 <button
                   class="feed-remove"
