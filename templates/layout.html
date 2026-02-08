@@ -118,13 +118,17 @@
 
     <div class="app">
       <input class="sr-only feed-edit-toggle" type="checkbox" id="feed-edit-toggle">
-      <aside class="sidebar" id="feed-list">
-        {{template "feed_list" .}}
-      </aside>
+      <div class="sidebar-pane">
+        <aside class="sidebar" id="feed-list">
+          {{template "feed_list" .}}
+        </aside>
+      </div>
 
-      <main class="content" id="main-content">
-        {{template "main" .}}
-      </main>
+      <div class="content-pane">
+        <main class="content" id="main-content">
+          {{template "main" .}}
+        </main>
+      </div>
     </div>
   </div>
 </body>
