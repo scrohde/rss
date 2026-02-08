@@ -596,7 +596,16 @@ body {
   gap: 8px;
 }
 
+.feed-more-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .feed-more-button {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
   align-self: flex-start;
   border: 1px solid rgba(15, 118, 110, 0.3);
   background: transparent;
@@ -607,6 +616,10 @@ body {
   border-radius: 999px;
   cursor: pointer;
   transition: all 0.2s ease;
+}
+
+.feed-more-button::-webkit-details-marker {
+  display: none;
 }
 
 .feed-more-button:hover {
@@ -627,15 +640,15 @@ body {
   gap: 8px;
 }
 
-.feed-more-toggle:checked + .feed-more-button .feed-more-label-collapsed {
+.feed-more-details[open] .feed-more-label-collapsed {
   display: none;
 }
 
-.feed-more-toggle:checked + .feed-more-button .feed-more-label-expanded {
+.feed-more-details[open] .feed-more-label-expanded {
   display: inline;
 }
 
-.feed-more-toggle:checked + .feed-more-button + .feed-zero-list {
+.feed-more-details[open] .feed-zero-list {
   display: flex;
 }
 
