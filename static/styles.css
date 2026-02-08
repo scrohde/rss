@@ -123,8 +123,8 @@ body {
   border: none;
   background: transparent;
   color: var(--muted);
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
@@ -132,10 +132,6 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-family: "Space Grotesk", "DM Sans", sans-serif;
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1;
   box-shadow: none;
 }
 
@@ -152,6 +148,20 @@ body {
 .topbar-shortcuts-button[aria-expanded="true"] {
   color: var(--accent);
   background: rgba(15, 118, 110, 0.1);
+}
+
+.topbar-shortcuts-icon {
+  width: 14px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.topbar-shortcuts-icon span {
+  width: 14px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .topbar-shortcuts-panel {
@@ -194,6 +204,12 @@ body {
   gap: 8px;
 }
 
+.topbar-shortcuts-divider {
+  height: 1px;
+  margin: 12px 0 10px;
+  background: linear-gradient(90deg, rgba(15, 118, 110, 0.05), rgba(15, 118, 110, 0.28), rgba(15, 118, 110, 0.05));
+}
+
 .topbar-shortcuts-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -228,6 +244,48 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+}
+
+.topbar-shortcuts-title-secondary {
+  margin-bottom: 8px;
+}
+
+.topbar-shortcuts-import-form {
+  margin: 0;
+}
+
+.topbar-shortcuts-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  font-family: "Space Grotesk", "DM Sans", sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.topbar-shortcuts-control:hover {
+  background: rgba(15, 118, 110, 0.18);
+}
+
+.topbar-shortcuts-control:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
+
+.topbar-shortcuts-control-button {
+  appearance: none;
+  cursor: pointer;
 }
 
 .message {

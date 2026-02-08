@@ -27,7 +27,7 @@
     button.setAttribute("aria-expanded", isOpen ? "true" : "false");
     button.setAttribute(
       "aria-label",
-      isOpen ? "Hide keyboard shortcuts" : "Show keyboard shortcuts"
+      isOpen ? "Hide menu" : "Show menu"
     );
     panel.hidden = !isOpen;
   };

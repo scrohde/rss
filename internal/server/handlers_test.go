@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"html/template"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	feedpkg "rss/internal/feed"
+	"rss/internal/opml"
 	"rss/internal/store"
 	"rss/internal/testutil"
 	"rss/internal/view"
@@ -890,6 +893,95 @@ func TestDeleteFeedSkipCookie(t *testing.T) {
 	}
 }
 
+func TestIndexIncludesOPMLControls(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("index status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `href="/opml/export"`) {
+		t.Fatalf("expected OPML export control")
+	}
+	if !strings.Contains(body, `hx-post="/opml/import"`) {
+		t.Fatalf("expected OPML import control")
+	}
+}
+
+func TestExportOPML(t *testing.T) {
+	app := newTestApp(t)
+
+	if _, err := store.UpsertFeed(app.db, "https://example.com/alpha.xml", "Alpha"); err != nil {
+		t.Fatalf("store.UpsertFeed alpha: %v", err)
+	}
+	if _, err := store.UpsertFeed(app.db, "https://example.com/beta.xml", "Beta"); err != nil {
+		t.Fatalf("store.UpsertFeed beta: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/opml/export", nil)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export status: %d", rec.Code)
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "opml") {
+		t.Fatalf("expected OPML content type, got %q", contentType)
+	}
+	if contentDisposition := rec.Header().Get("Content-Disposition"); !strings.Contains(contentDisposition, ".opml") {
+		t.Fatalf("expected OPML attachment filename, got %q", contentDisposition)
+	}
+
+	subscriptions, err := opml.Parse(strings.NewReader(rec.Body.String()))
+	if err != nil {
+		t.Fatalf("opml.Parse export body: %v", err)
+	}
+	if len(subscriptions) != 2 {
+		t.Fatalf("expected 2 subscriptions, got %d", len(subscriptions))
+	}
+}
+
+func TestImportOPML(t *testing.T) {
+	app := newTestApp(t)
+
+	body, contentType := multipartOPMLRequestBody(t, `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>Imports</title></head>
+  <body>
+    <outline text="Alpha" xmlUrl="https://example.com/alpha.xml"/>
+    <outline text="Beta" xmlUrl="https://example.com/beta.xml"/>
+    <outline text="Invalid" xmlUrl="http://"/>
+  </body>
+</opml>`)
+
+	req := httptest.NewRequest(http.MethodPost, "/opml/import", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import status: %d", rec.Code)
+	}
+
+	responseBody := rec.Body.String()
+	if !strings.Contains(responseBody, "Imported 2 feeds (1 skipped)") {
+		t.Fatalf("expected import summary message, got %q", responseBody)
+	}
+	if !strings.Contains(responseBody, `id="feed-list"`) {
+		t.Fatalf("expected feed list OOB update")
+	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if len(feeds) != 2 {
+		t.Fatalf("expected 2 imported feeds, got %d", len(feeds))
+	}
+}
+
 func TestRoutesMethodMismatchReturns405(t *testing.T) {
 	app := newTestApp(t)
 
@@ -1121,4 +1213,22 @@ WHERE feed_id = ? AND guid = ?
 		t.Fatalf("existsInTombstones: %v", err)
 	}
 	return count > 0
+}
+
+func multipartOPMLRequestBody(t *testing.T, content string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("file", "subscriptions.opml")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := file.Write([]byte(content)); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close: %v", err)
+	}
+	return &body, writer.FormDataContentType()
 }

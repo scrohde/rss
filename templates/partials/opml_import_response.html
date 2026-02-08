@@ -1,0 +1,8 @@
+{{define "opml_import_response"}}
+  <div id="subscribe-message" class="message {{.MessageClass}}">{{.Message}}</div>
+  {{if .Update}}
+    <div id="feed-list" hx-swap-oob="innerHTML">
+      {{template "feed_list" .}}
+    </div>
+  {{end}}
+{{end}}

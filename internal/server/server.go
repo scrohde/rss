@@ -17,11 +17,14 @@ import (
 
 	"rss/internal/content"
 	"rss/internal/feed"
+	"rss/internal/opml"
 	"rss/internal/store"
 	"rss/internal/view"
 )
 
 const skipDeleteWarningCookie = "pulse_rss_skip_delete_warning"
+
+const maxOPMLUploadBytes int64 = 2 << 20
 
 type App struct {
 	db               *sql.DB
@@ -43,6 +46,8 @@ func (a *App) Routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.HandleFunc("GET /{$}", a.handleIndex)
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
+	mux.HandleFunc("GET /opml/export", a.handleExportOPML)
+	mux.HandleFunc("POST /opml/import", a.handleImportOPML)
 	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
 	mux.HandleFunc("GET /feeds/{feedID}/delete/confirm", a.handleDeleteFeedConfirm)
 	mux.HandleFunc("POST /feeds/{feedID}/delete", a.handleDeleteFeed)
@@ -201,6 +206,111 @@ func (a *App) renderSubscribeError(w http.ResponseWriter, err error) {
 		Update:       false,
 	}
 	a.renderTemplate(w, "subscribe_response", data)
+}
+
+func (a *App) handleExportOPML(w http.ResponseWriter, r *http.Request) {
+	feeds, err := store.ListFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	subscriptions := make([]opml.Subscription, 0, len(feeds))
+	for _, listedFeed := range feeds {
+		subscriptions = append(subscriptions, opml.Subscription{
+			Title: listedFeed.Title,
+			URL:   listedFeed.URL,
+		})
+	}
+
+	filename := "pulse-rss-subscriptions-" + time.Now().UTC().Format("20060102") + ".opml"
+	w.Header().Set("Content-Type", "text/x-opml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	if err := opml.Write(w, "Pulse RSS Subscriptions", subscriptions); err != nil {
+		http.Error(w, "failed to export opml", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (a *App) handleImportOPML(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOPMLUploadBytes)
+	if err := r.ParseMultipartForm(maxOPMLUploadBytes); err != nil {
+		a.renderOPMLImportResponse(w, r, 0, 0, false, "invalid OPML upload")
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		a.renderOPMLImportResponse(w, r, 0, 0, false, "missing OPML file")
+		return
+	}
+	defer file.Close()
+
+	subscriptions, err := opml.Parse(file)
+	if err != nil {
+		a.renderOPMLImportResponse(w, r, 0, 0, false, "invalid OPML file")
+		return
+	}
+
+	imported := 0
+	skipped := 0
+	for _, subscription := range subscriptions {
+		feedURL, normalizeErr := feed.NormalizeURL(subscription.URL)
+		if normalizeErr != nil {
+			skipped++
+			continue
+		}
+
+		feedTitle := strings.TrimSpace(subscription.Title)
+		if feedTitle == "" {
+			feedTitle = feedURL
+		}
+
+		if _, upsertErr := store.UpsertFeed(a.db, feedURL, feedTitle); upsertErr != nil {
+			skipped++
+			continue
+		}
+		imported++
+	}
+
+	if imported == 0 {
+		a.renderOPMLImportResponse(w, r, imported, skipped, false, "no valid feeds found in OPML")
+		return
+	}
+
+	a.renderOPMLImportResponse(w, r, imported, skipped, true, "")
+}
+
+func (a *App) renderOPMLImportResponse(w http.ResponseWriter, r *http.Request, imported, skipped int, update bool, fallbackMessage string) {
+	feeds, err := store.ListFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	messageClass := "success"
+	message := fallbackMessage
+	if message == "" {
+		message = "Imported " + strconv.Itoa(imported) + " feed"
+		if imported != 1 {
+			message += "s"
+		}
+	}
+	if skipped > 0 {
+		message += " (" + strconv.Itoa(skipped) + " skipped)"
+	}
+	if !update {
+		messageClass = "error"
+	}
+
+	data := view.SubscribeResponseData{
+		Message:           message,
+		MessageClass:      messageClass,
+		Feeds:             feeds,
+		Update:            update,
+		SkipDeleteWarning: deleteWarningSkipped(r),
+	}
+	a.renderTemplate(w, "opml_import_response", data)
 }
 
 func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {

@@ -33,11 +33,16 @@
             class="topbar-shortcuts-button"
             id="topbar-shortcuts-button"
             type="button"
-            aria-label="Show keyboard shortcuts"
+            aria-label="Show menu"
             aria-controls="topbar-shortcuts-panel"
             aria-expanded="false"
           >
-            ?
+            <span class="topbar-shortcuts-icon" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+            <span class="sr-only">Menu</span>
           </button>
           <section class="topbar-shortcuts-panel" id="topbar-shortcuts-panel" aria-label="Keyboard shortcuts" hidden>
             <div class="topbar-shortcuts-title">Keyboard shortcuts</div>
@@ -66,6 +71,43 @@
               <div class="topbar-shortcuts-row">
                 <span class="topbar-shortcuts-action">Toggle read state</span>
                 <span class="topbar-shortcuts-keys"><kbd>r</kbd></span>
+              </div>
+            </div>
+            <div class="topbar-shortcuts-divider"></div>
+            <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Subscriptions</div>
+            <div class="topbar-shortcuts-grid">
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Export feeds</span>
+                <span class="topbar-shortcuts-keys">
+                  <a class="topbar-shortcuts-control" href="/opml/export">Export OPML</a>
+                </span>
+              </div>
+              <div class="topbar-shortcuts-row">
+                <span class="topbar-shortcuts-action">Import feeds</span>
+                <span class="topbar-shortcuts-keys">
+                  <form
+                    class="topbar-shortcuts-import-form"
+                    hx-post="/opml/import"
+                    hx-target="#subscribe-message"
+                    hx-swap="outerHTML"
+                    hx-encoding="multipart/form-data"
+                  >
+                    <button
+                      class="topbar-shortcuts-control topbar-shortcuts-control-button"
+                      type="button"
+                      onclick="this.form.querySelector('input[type=file]').click();"
+                    >
+                      Import OPML
+                    </button>
+                    <input
+                      class="sr-only"
+                      type="file"
+                      name="file"
+                      accept=".opml,text/xml,application/xml"
+                      onchange="if (this.files && this.files.length) this.form.requestSubmit();"
+                    >
+                  </form>
+                </span>
               </div>
             </div>
           </section>
