@@ -31,7 +31,7 @@ func BuildFeedView(id int64, title, url string, itemCount, unreadCount int, last
 }
 
 func BuildItemView(id int64, title, link string, summary, contentText sql.NullString, published, readAt sql.NullTime) ItemView {
-	summaryHTML := pickSummaryHTML(summary, contentText)
+	summaryHTML := pickSummaryHTML(summary, contentText, link)
 	publishedDisplay := "Unpublished"
 	publishedCompact := "na"
 	if published.Valid {
@@ -75,7 +75,7 @@ func FormatRelativeShort(t time.Time, now time.Time) string {
 	}
 }
 
-func pickSummaryHTML(summary, contentText sql.NullString) template.HTML {
+func pickSummaryHTML(summary, contentText sql.NullString, baseURL string) template.HTML {
 	text := ""
 	if contentText.Valid && strings.TrimSpace(contentText.String) != "" {
 		text = contentText.String
@@ -85,6 +85,6 @@ func pickSummaryHTML(summary, contentText sql.NullString) template.HTML {
 	if text == "" {
 		text = "<p>No summary available.</p>"
 	}
-	text = content.RewriteSummaryHTML(text)
+	text = content.RewriteSummaryHTML(text, baseURL)
 	return template.HTML(text)
 }

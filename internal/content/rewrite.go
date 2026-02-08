@@ -35,7 +35,9 @@ func NewHTTPClient() *http.Client {
 	}
 }
 
-func RewriteSummaryHTML(text string) string {
+func RewriteSummaryHTML(text, baseRaw string) string {
+	base := parseRewriteBaseURL(baseRaw)
+
 	if !strings.Contains(text, "<img") && !strings.Contains(text, "<source") && !strings.Contains(text, "<a") {
 		return text
 	}
@@ -46,7 +48,7 @@ func RewriteSummaryHTML(text string) string {
 	}
 	changed := false
 	for _, node := range nodes {
-		if rewriteSummaryNode(node) {
+		if rewriteSummaryNode(node, base) {
 			changed = true
 		}
 	}
@@ -60,19 +62,25 @@ func RewriteSummaryHTML(text string) string {
 	return b.String()
 }
 
-func rewriteSummaryNode(node *html.Node) bool {
+func rewriteSummaryNode(node *html.Node, base *url.URL) bool {
 	changed := false
 	if node.Type == html.ElementNode {
 		switch node.Data {
 		case "img":
-			if rewriteAttr(node, "src", ProxyImageURL) {
+			if rewriteAttr(node, "src", func(value string) (string, bool) {
+				return ProxyImageURL(value, base)
+			}) {
 				changed = true
 			}
-			if rewriteAttr(node, "srcset", rewriteSrcset) {
+			if rewriteAttr(node, "srcset", func(value string) (string, bool) {
+				return rewriteSrcset(value, base)
+			}) {
 				changed = true
 			}
 		case "source":
-			if rewriteAttr(node, "srcset", rewriteSrcset) {
+			if rewriteAttr(node, "srcset", func(value string) (string, bool) {
+				return rewriteSrcset(value, base)
+			}) {
 				changed = true
 			}
 		case "a":
@@ -85,7 +93,7 @@ func rewriteSummaryNode(node *html.Node) bool {
 		}
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if rewriteSummaryNode(child) {
+		if rewriteSummaryNode(child, base) {
 			changed = true
 		}
 	}
@@ -160,7 +168,7 @@ func ensureRelTokens(node *html.Node, required ...string) bool {
 	return true
 }
 
-func rewriteSrcset(value string) (string, bool) {
+func rewriteSrcset(value string, base *url.URL) (string, bool) {
 	parts := strings.Split(value, ",")
 	changed := false
 	for i, part := range parts {
@@ -172,7 +180,7 @@ func rewriteSrcset(value string) (string, bool) {
 		if len(fields) == 0 {
 			continue
 		}
-		if updated, ok := ProxyImageURL(fields[0]); ok {
+		if updated, ok := ProxyImageURL(fields[0], base); ok {
 			fields[0] = updated
 			changed = true
 		}
@@ -184,7 +192,7 @@ func rewriteSrcset(value string) (string, bool) {
 	return strings.Join(parts, ", "), true
 }
 
-func ProxyImageURL(raw string) (string, bool) {
+func ProxyImageURL(raw string, base *url.URL) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return raw, false
@@ -196,7 +204,18 @@ func ProxyImageURL(raw string) (string, bool) {
 		return raw, false
 	}
 	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Host == "" {
+	if err != nil {
+		return raw, false
+	}
+	if parsed.Host == "" {
+		if base == nil {
+			return raw, false
+		}
+		parsed = base.ResolveReference(parsed)
+	} else if parsed.Scheme == "" && base != nil {
+		parsed.Scheme = base.Scheme
+	}
+	if parsed.Host == "" {
 		return raw, false
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
@@ -206,6 +225,21 @@ func ProxyImageURL(raw string) (string, bool) {
 		return raw, false
 	}
 	return ImageProxyPath + "?url=" + url.QueryEscape(parsed.String()), true
+}
+
+func parseRewriteBaseURL(raw string) *url.URL {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" {
+		return nil
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil
+	}
+	return parsed
 }
 
 func IsAllowedProxyURL(target *url.URL) bool {
