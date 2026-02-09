@@ -320,12 +320,7 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemList, err := store.LoadItemList(a.db, feedID)
-	if err != nil {
-		http.Error(w, "failed to load items", http.StatusInternalServerError)
-		return
-	}
-	a.renderTemplate(w, "item_list", itemList)
+	a.renderItemListResponse(w, r, feedID)
 }
 
 func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {

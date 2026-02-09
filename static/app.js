@@ -7,6 +7,8 @@
   };
 
   const getItemList = () => document.getElementById("item-list");
+  const getFeedList = () => document.getElementById("feed-list");
+  const getSelectedFeedInput = () => document.getElementById("selected-feed-id");
   const getTopbarShortcuts = () => document.getElementById("topbar-shortcuts");
   const getTopbarShortcutsButton = () =>
     document.getElementById("topbar-shortcuts-button");
@@ -296,6 +298,23 @@
     return isTextEntryTarget(event.target);
   };
 
+  const setSelectedFeed = (feedButton) => {
+    const list = getFeedList();
+    if (!list || !feedButton || !list.contains(feedButton)) {
+      return;
+    }
+    list.querySelectorAll(".feed-link.active").forEach((node) => {
+      node.classList.remove("active");
+    });
+    feedButton.classList.add("active");
+
+    const selectedFeedInput = getSelectedFeedInput();
+    const feedID = feedButton.dataset.feedId;
+    if (selectedFeedInput && feedID) {
+      selectedFeedInput.value = feedID;
+    }
+  };
+
   document.addEventListener("click", (event) => {
     const list = getItemList();
     if (!list) {
@@ -305,6 +324,14 @@
     if (card && list.contains(card)) {
       setActive(card);
     }
+  });
+
+  document.addEventListener("click", (event) => {
+    const feedButton = event.target.closest(".feed-link");
+    if (!feedButton) {
+      return;
+    }
+    setSelectedFeed(feedButton);
   });
 
   document.addEventListener("keydown", (event) => {
@@ -399,11 +426,21 @@
   });
 
   document.body.addEventListener("htmx:configRequest", (event) => {
-    if (!state.activeId || !event || !event.detail || !event.detail.parameters) {
+    if (!event || !event.detail || !event.detail.parameters) {
       return;
     }
     if (!event.detail.parameters.selected_item_id) {
-      event.detail.parameters.selected_item_id = state.activeId;
+      const source = event.detail.elt;
+      const sourceCard =
+        source && source.closest ? source.closest(".item-card") : null;
+      if (sourceCard && sourceCard.id) {
+        event.detail.parameters.selected_item_id = sourceCard.id;
+        state.activeId = sourceCard.id;
+        return;
+      }
+      if (state.activeId) {
+        event.detail.parameters.selected_item_id = state.activeId;
+      }
     }
   });
 })();

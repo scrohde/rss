@@ -3,6 +3,7 @@
     <div
       class="item-row clickable"
       hx-get="/items/{{.ID}}/compact"
+      hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
       hx-swap="outerHTML"
       hx-trigger="click[!((event.target.closest && event.target.closest('a, button')) || (event.target.parentElement && event.target.parentElement.closest('a, button')))]"

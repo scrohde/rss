@@ -144,6 +144,65 @@ func TestListFeedsUnreadCount(t *testing.T) {
 	}
 }
 
+func TestFeedItemsUpdatesFeedListSelection(t *testing.T) {
+	app := newTestApp(t)
+
+	otherFeedID, err := store.UpsertFeed(app.db, "http://example.com/rss-other", "Other Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed other: %v", err)
+	}
+	selectedFeedID, err := store.UpsertFeed(app.db, "http://example.com/rss-selected", "Selected Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed selected: %v", err)
+	}
+
+	if _, err := store.UpsertItems(app.db, otherFeedID, []*gofeed.Item{{
+		Title:           "Other Item",
+		Link:            "http://example.com/other",
+		GUID:            "other-item",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-2 * time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems other: %v", err)
+	}
+	if _, err := store.UpsertItems(app.db, selectedFeedID, []*gofeed.Item{{
+		Title:           "Selected Item",
+		Link:            "http://example.com/selected",
+		GUID:            "selected-item",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems selected: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items", selectedFeedID), nil)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("feed items status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Selected Item") {
+		t.Fatalf("expected selected feed items in response")
+	}
+	if !strings.Contains(body, `id="feed-list"`) {
+		t.Fatalf("expected feed list OOB update")
+	}
+	if !strings.Contains(body, `hx-swap-oob="innerHTML"`) {
+		t.Fatalf("expected OOB innerHTML swap for feed list")
+	}
+	selectedButton := fmt.Sprintf(`class="feed-link active" data-feed-id="%d" hx-get="/feeds/%d/items"`, selectedFeedID, selectedFeedID)
+	if !strings.Contains(body, selectedButton) {
+		t.Fatalf("expected selected feed to be active in feed list")
+	}
+	otherButton := fmt.Sprintf(`class="feed-link active" data-feed-id="%d" hx-get="/feeds/%d/items"`, otherFeedID, otherFeedID)
+	if strings.Contains(body, otherButton) {
+		t.Fatalf("expected non-selected feed not to be active")
+	}
+}
+
 func TestRenameFeedOverridesSourceTitle(t *testing.T) {
 	app := newTestApp(t)
 
@@ -321,6 +380,41 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "is-active") {
 		t.Fatalf("expected expanded item to include active class")
+	}
+	expectedVals := fmt.Sprintf(`hx-vals='{"selected_item_id":"item-%d"}'`, items[0].ID)
+	if !strings.Contains(rec.Body.String(), expectedVals) {
+		t.Fatalf("expected expanded item collapse request to include selected_item_id")
+	}
+}
+
+func TestItemCompactExpandRequestIncludesSelectedItemID(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Compact Selected Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Compact Item",
+		Link:            "http://example.com/compact",
+		GUID:            "compact-selected",
+		Description:     "<p>Compact summary</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items", feedID), nil)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("feed items status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `hx-vals='js:{selected_item_id:this.id}'`) {
+		t.Fatalf("expected compact item expand request to include selected_item_id")
 	}
 }
 
