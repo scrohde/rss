@@ -1048,6 +1048,9 @@ func TestEnterFeedEditMode(t *testing.T) {
 	if !strings.Contains(body, `name="feed_title_`) {
 		t.Fatalf("expected inline feed title input in edit mode")
 	}
+	if strings.Contains(body, `class="feed-title-revert"`) {
+		t.Fatalf("expected no revert controls when feeds have no custom title overrides")
+	}
 	if strings.Contains(body, "feed-rename-button") {
 		t.Fatalf("expected rename button to be removed in edit mode")
 	}
@@ -1102,6 +1105,9 @@ func TestCancelFeedEditModeEndpoint(t *testing.T) {
 	body := rec.Body.String()
 	if strings.Contains(body, `class="feed-list edit-mode"`) {
 		t.Fatalf("expected edit mode class to be cleared")
+	}
+	if strings.Contains(body, `class="feed-title-revert"`) {
+		t.Fatalf("expected no revert controls outside edit mode")
 	}
 	if !strings.Contains(body, `class="edit-feeds-button"`) {
 		t.Fatalf("expected pencil edit control after cancel")
@@ -1198,6 +1204,83 @@ func TestFeedEditModeSaveAppliesRenamesAndExits(t *testing.T) {
 	}
 	if feeds[0].Title != "New Title" {
 		t.Fatalf("expected rename to persist on save, got %q", feeds[0].Title)
+	}
+}
+
+func TestFeedEditModeShowsRevertToCanonicalTitle(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Source Title")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+	if err := store.UpdateFeedTitle(app.db, feedID, "Custom Title"); err != nil {
+		t.Fatalf("store.UpdateFeedTitle: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit mode status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, fmt.Sprintf(`data-feed-title-input="feed-title-%d"`, feedID)) {
+		t.Fatalf("expected revert control target for feed input")
+	}
+	if !strings.Contains(body, `data-original-title="Source Title"`) {
+		t.Fatalf("expected revert control to hold canonical source title")
+	}
+	if !strings.Contains(body, `value="Custom Title"`) {
+		t.Fatalf("expected editable value to remain the current custom title")
+	}
+}
+
+func TestFeedEditModeSaveCanonicalTitleClearsCustomOverride(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Source Title")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+	if err := store.UpdateFeedTitle(app.db, feedID, "Custom Title"); err != nil {
+		t.Fatalf("store.UpdateFeedTitle: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set(fmt.Sprintf("feed_title_%d", feedID), "Source Title")
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/save", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save status: %d", rec.Code)
+	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if feeds[0].Title != "Source Title" {
+		t.Fatalf("expected canonical title after save, got %q", feeds[0].Title)
+	}
+
+	if _, err := store.UpsertFeed(app.db, "http://example.com/rss", "Updated Source Title"); err != nil {
+		t.Fatalf("store.UpsertFeed update: %v", err)
+	}
+
+	feeds, err = store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds updated: %v", err)
+	}
+	if feeds[0].Title != "Updated Source Title" {
+		t.Fatalf("expected custom title override to be cleared, got %q", feeds[0].Title)
 	}
 }
 
@@ -1515,7 +1598,7 @@ func TestParseSelectedItemID(t *testing.T) {
 }
 
 func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
-	feed := view.BuildFeedView(1, "Feed", "https://example.com", 0, 0, sql.NullTime{}, sql.NullString{})
+	feed := view.BuildFeedView(1, "Feed", "Feed", "https://example.com", 0, 0, sql.NullTime{}, sql.NullString{})
 	if feed.LastRefreshDisplay != "Never" {
 		t.Fatalf("expected Never, got %q", feed.LastRefreshDisplay)
 	}
@@ -1535,7 +1618,7 @@ func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			checked := sql.NullTime{Time: time.Now().Add(-tc.age), Valid: true}
-			got := view.BuildFeedView(1, "Feed", "https://example.com", 0, 0, checked, sql.NullString{}).LastRefreshDisplay
+			got := view.BuildFeedView(1, "Feed", "Feed", "https://example.com", 0, 0, checked, sql.NullString{}).LastRefreshDisplay
 			if !strings.HasSuffix(got, tc.wantUnit) {
 				t.Fatalf("expected unit %q in %q", tc.wantUnit, got)
 			}

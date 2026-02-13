@@ -320,7 +320,7 @@ body {
 
 @media (min-width: 961px) {
   .app:has(#feed-list .feed-list.edit-mode) {
-    grid-template-columns: 360px 1fr;
+    grid-template-columns: 380px 1fr;
   }
 }
 
@@ -481,6 +481,39 @@ body {
 .feed-edit-title.active {
   background: rgba(15, 118, 110, 0.06);
   border-color: rgba(15, 118, 110, 0.2);
+}
+
+.feed-title-revert {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  transition: all 0.2s ease;
+}
+
+.feed-title-revert:hover {
+  background: var(--surface);
+  border-color: rgba(15, 118, 110, 0.2);
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+}
+
+.feed-title-revert:focus-visible {
+  outline: none;
+  background: var(--surface);
+  border-color: rgba(15, 118, 110, 0.25);
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+}
+
+.feed-title-revert .icon {
+  width: 18px;
+  height: 18px;
 }
 
 .feed-remove-message {

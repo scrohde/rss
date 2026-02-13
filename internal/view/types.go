@@ -5,6 +5,7 @@ import "html/template"
 type FeedView struct {
 	ID                 int64
 	Title              string
+	OriginalTitle      string
 	URL                string
 	ItemCount          int
 	UnreadCount        int

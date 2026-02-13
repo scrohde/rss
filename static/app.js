@@ -334,6 +334,24 @@
     setSelectedFeed(feedButton);
   });
 
+  document.addEventListener("click", (event) => {
+    const revertButton = event.target.closest(".feed-title-revert");
+    if (!revertButton) {
+      return;
+    }
+    const inputID = revertButton.dataset.feedTitleInput;
+    const originalTitle = revertButton.dataset.originalTitle || "";
+    if (!inputID) {
+      return;
+    }
+    const input = document.getElementById(inputID);
+    if (!input) {
+      return;
+    }
+    input.value = originalTitle;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isTopbarShortcutsOpen()) {
       setTopbarShortcutsOpen(false);

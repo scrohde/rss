@@ -216,7 +216,7 @@ WHERE feed_id = ?
 
 func ListFeeds(db *sql.DB) ([]view.FeedView, error) {
 	rows, err := db.Query(`
-SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.url,
+SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
@@ -232,18 +232,19 @@ ORDER BY display_title COLLATE NOCASE
 	var feeds []view.FeedView
 	for rows.Next() {
 		var (
-			id          int64
-			title       string
-			url         string
-			itemCount   int
-			unreadCount int
-			lastChecked sql.NullTime
-			lastError   sql.NullString
+			id            int64
+			title         string
+			originalTitle string
+			url           string
+			itemCount     int
+			unreadCount   int
+			lastChecked   sql.NullTime
+			lastError     sql.NullString
 		)
-		if err := rows.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError); err != nil {
+		if err := rows.Scan(&id, &title, &originalTitle, &url, &itemCount, &unreadCount, &lastChecked, &lastError); err != nil {
 			return nil, err
 		}
-		feeds = append(feeds, view.BuildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError))
+		feeds = append(feeds, view.BuildFeedView(id, title, originalTitle, url, itemCount, unreadCount, lastChecked, lastError))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -286,7 +287,7 @@ func LoadItemList(db *sql.DB, feedID int64) (*view.ItemListData, error) {
 
 func GetFeed(db *sql.DB, feedID int64) (view.FeedView, error) {
 	row := db.QueryRow(`
-SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.url,
+SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
@@ -295,19 +296,20 @@ FROM feeds f
 WHERE f.id = ?
 `, feedID)
 	var (
-		id          int64
-		title       string
-		url         string
-		itemCount   int
-		unreadCount int
-		lastChecked sql.NullTime
-		lastError   sql.NullString
+		id            int64
+		title         string
+		originalTitle string
+		url           string
+		itemCount     int
+		unreadCount   int
+		lastChecked   sql.NullTime
+		lastError     sql.NullString
 	)
-	if err := row.Scan(&id, &title, &url, &itemCount, &unreadCount, &lastChecked, &lastError); err != nil {
+	if err := row.Scan(&id, &title, &originalTitle, &url, &itemCount, &unreadCount, &lastChecked, &lastError); err != nil {
 		return view.FeedView{}, err
 	}
 	slog.Info("db get feed", "feed_id", feedID)
-	return view.BuildFeedView(id, title, url, itemCount, unreadCount, lastChecked, lastError), nil
+	return view.BuildFeedView(id, title, originalTitle, url, itemCount, unreadCount, lastChecked, lastError), nil
 }
 
 func GetFeedURL(db *sql.DB, feedID int64) (string, error) {

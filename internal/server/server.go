@@ -402,13 +402,22 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	currentTitles := make(map[int64]string, len(feeds))
+	originalTitles := make(map[int64]string, len(feeds))
 	for _, listedFeed := range feeds {
 		currentTitles[listedFeed.ID] = strings.TrimSpace(listedFeed.Title)
+		originalTitles[listedFeed.ID] = strings.TrimSpace(listedFeed.OriginalTitle)
 	}
 
 	updates := parseFeedTitleUpdates(r.PostForm)
 	for _, feedID := range updates.FeedIDs {
 		title := updates.TitlesByID[feedID]
+		if title == originalTitles[feedID] {
+			if err := store.UpdateFeedTitle(a.db, feedID, ""); err != nil {
+				http.Error(w, "failed to rename feed", http.StatusInternalServerError)
+				return
+			}
+			continue
+		}
 		if title == currentTitles[feedID] {
 			continue
 		}

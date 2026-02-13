@@ -10,7 +10,7 @@ import (
 	"rss/internal/content"
 )
 
-func BuildFeedView(id int64, title, url string, itemCount, unreadCount int, lastChecked sql.NullTime, lastError sql.NullString) FeedView {
+func BuildFeedView(id int64, title, originalTitle, url string, itemCount, unreadCount int, lastChecked sql.NullTime, lastError sql.NullString) FeedView {
 	refreshDisplay := "Never"
 	if lastChecked.Valid {
 		refreshDisplay = FormatRelativeShort(lastChecked.Time, time.Now())
@@ -22,6 +22,7 @@ func BuildFeedView(id int64, title, url string, itemCount, unreadCount int, last
 	return FeedView{
 		ID:                 id,
 		Title:              title,
+		OriginalTitle:      originalTitle,
 		URL:                url,
 		ItemCount:          itemCount,
 		UnreadCount:        unreadCount,

@@ -76,6 +76,18 @@
               value="{{.Title}}"
               maxlength="140"
             >
+            {{if ne .Title .OriginalTitle}}
+              <button
+                class="feed-title-revert"
+                type="button"
+                aria-label="Revert feed name for {{.Title}}"
+                title="Revert to original title"
+                data-feed-title-input="feed-title-{{.ID}}"
+                data-original-title="{{.OriginalTitle}}"
+              >
+                <img class="icon" src="/static/icons/revert-circle.svg" alt="" aria-hidden="true">
+              </button>
+            {{end}}
             <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
           </li>
         {{end}}
