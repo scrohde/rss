@@ -433,25 +433,8 @@ body {
   transform: scale(1.05);
 }
 
-.feed-rename-button {
-  display: none;
-  border: 1px solid rgba(15, 118, 110, 0.25);
-  background: transparent;
-  color: var(--accent);
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.feed-list.edit-mode .feed-rename-button {
-  display: inline-flex;
-}
-
-.feed-rename-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.12);
+.feed-edit-form {
+  margin: 0;
 }
 
 .feed-remove-confirm {
@@ -476,46 +459,28 @@ body {
   display: none;
 }
 
-.feed-rename-form {
-  display: none;
-  flex-basis: 100%;
-  margin-left: 28px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(15, 118, 110, 0.2);
-  background: rgba(15, 118, 110, 0.06);
-}
-
-.feed-list.edit-mode .feed-rename-form {
-  display: flex;
-}
-
-.feed-list.edit-mode .feed-rename-form:empty {
-  display: none;
-}
-
-.feed-rename-fields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-  align-items: center;
-}
-
-.feed-rename-fields input {
+.feed-edit-title {
   flex: 1;
-  min-width: 150px;
-  border: 1px solid rgba(15, 118, 110, 0.2);
-  background: var(--surface);
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  outline: none;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-2);
 }
 
-.feed-rename-actions {
-  display: flex;
-  gap: 6px;
+.feed-edit-title:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: rgba(15, 118, 110, 0.25);
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+}
+
+.feed-edit-title.active {
+  background: rgba(15, 118, 110, 0.06);
+  border-color: rgba(15, 118, 110, 0.2);
 }
 
 .feed-remove-message {

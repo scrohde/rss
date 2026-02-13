@@ -193,11 +193,11 @@ func TestFeedItemsUpdatesFeedListSelection(t *testing.T) {
 	if !strings.Contains(body, `hx-swap-oob="innerHTML"`) {
 		t.Fatalf("expected OOB innerHTML swap for feed list")
 	}
-	selectedButton := fmt.Sprintf(`class="feed-link active" data-feed-id="%d" hx-get="/feeds/%d/items"`, selectedFeedID, selectedFeedID)
+	selectedButton := fmt.Sprintf(`class="feed-link active" type="button" data-feed-id="%d" hx-get="/feeds/%d/items"`, selectedFeedID, selectedFeedID)
 	if !strings.Contains(body, selectedButton) {
 		t.Fatalf("expected selected feed to be active in feed list")
 	}
-	otherButton := fmt.Sprintf(`class="feed-link active" data-feed-id="%d" hx-get="/feeds/%d/items"`, otherFeedID, otherFeedID)
+	otherButton := fmt.Sprintf(`class="feed-link active" type="button" data-feed-id="%d" hx-get="/feeds/%d/items"`, otherFeedID, otherFeedID)
 	if strings.Contains(body, otherButton) {
 		t.Fatalf("expected non-selected feed not to be active")
 	}
@@ -918,6 +918,49 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	}
 }
 
+func TestPollingInFeedEditModeDoesNotSwapFeedList(t *testing.T) {
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Poll Edit Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "First",
+		Link:            "http://example.com/1",
+		GUID:            "1",
+		Description:     "<p>First summary</p>",
+		PublishedParsed: testutil.TimePtr(base),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems: %v", err)
+	}
+
+	list, err := store.LoadItemList(app.db, feedID)
+	if err != nil {
+		t.Fatalf("store.LoadItemList: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items/poll?after_id=%d", feedID, list.NewestID), nil)
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("poll status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, `id="feed-list"`) {
+		t.Fatalf("expected no feed list OOB update in edit mode")
+	}
+	if !strings.Contains(body, "New items (0)") {
+		t.Fatalf("expected banner to be present")
+	}
+	if !strings.Contains(body, `id="item-last-refresh"`) {
+		t.Fatalf("expected last refresh OOB update")
+	}
+}
+
 func TestDeleteFeedConfirmEndpoint(t *testing.T) {
 	app := newTestApp(t)
 
@@ -999,6 +1042,15 @@ func TestEnterFeedEditMode(t *testing.T) {
 	if !strings.Contains(body, `class="feed-edit-actions"`) {
 		t.Fatalf("expected edit actions in edit mode")
 	}
+	if !strings.Contains(body, `id="feed-edit-form"`) {
+		t.Fatalf("expected edit mode form")
+	}
+	if !strings.Contains(body, `name="feed_title_`) {
+		t.Fatalf("expected inline feed title input in edit mode")
+	}
+	if strings.Contains(body, "feed-rename-button") {
+		t.Fatalf("expected rename button to be removed in edit mode")
+	}
 	if !strings.Contains(body, `hx-post="/feeds/edit-mode/cancel"`) {
 		t.Fatalf("expected cancel action in edit mode")
 	}
@@ -1060,7 +1112,7 @@ func TestCancelFeedEditModeEndpoint(t *testing.T) {
 	}
 }
 
-func TestRenameFeedCancelExitsEditMode(t *testing.T) {
+func TestFeedEditModeCancelDiscardsPendingRenames(t *testing.T) {
 	app := newTestApp(t)
 
 	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Cancel Feed")
@@ -1068,18 +1120,19 @@ func TestRenameFeedCancelExitsEditMode(t *testing.T) {
 		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/rename?cancel=1&selected_feed_id=%d", feedID, feedID), nil)
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	form.Set(fmt.Sprintf("feed_title_%d", feedID), "Changed But Canceled")
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/cancel", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("rename cancel status: %d", rec.Code)
+		t.Fatalf("cancel status: %d", rec.Code)
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="feed-list"`) {
-		t.Fatalf("expected feed list OOB update on cancel")
-	}
 	if strings.Contains(body, `class="feed-list edit-mode"`) {
 		t.Fatalf("expected edit mode to be cleared on cancel")
 	}
@@ -1088,9 +1141,17 @@ func TestRenameFeedCancelExitsEditMode(t *testing.T) {
 	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
 		t.Fatalf("expected edit mode cookie to be cleared")
 	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if feeds[0].Title != "Cancel Feed" {
+		t.Fatalf("expected pending rename to be discarded, got %q", feeds[0].Title)
+	}
 }
 
-func TestRenameFeedSaveExitsEditMode(t *testing.T) {
+func TestFeedEditModeSaveAppliesRenamesAndExits(t *testing.T) {
 	app := newTestApp(t)
 
 	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Old Title")
@@ -1108,15 +1169,15 @@ func TestRenameFeedSaveExitsEditMode(t *testing.T) {
 	}
 
 	form := url.Values{}
-	form.Set("title", "New Title")
+	form.Set(fmt.Sprintf("feed_title_%d", feedID), "New Title")
 	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
-	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/rename", feedID), strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/save", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("rename save status: %d", rec.Code)
+		t.Fatalf("save status: %d", rec.Code)
 	}
 
 	body := rec.Body.String()
@@ -1129,6 +1190,14 @@ func TestRenameFeedSaveExitsEditMode(t *testing.T) {
 	setCookie := rec.Header().Get("Set-Cookie")
 	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
 		t.Fatalf("expected edit mode cookie to be cleared")
+	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if feeds[0].Title != "New Title" {
+		t.Fatalf("expected rename to persist on save, got %q", feeds[0].Title)
 	}
 }
 

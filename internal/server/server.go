@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", a.handleIndex)
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
 	mux.HandleFunc("POST /feeds/edit-mode", a.handleEnterFeedEditMode)
+	mux.HandleFunc("POST /feeds/edit-mode/save", a.handleSaveFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/cancel", a.handleCancelFeedEditMode)
 	mux.HandleFunc("GET /opml/export", a.handleExportOPML)
 	mux.HandleFunc("POST /opml/import", a.handleImportOPML)
@@ -373,6 +375,52 @@ func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	clearFeedEditModeCookie(w)
 
 	feeds, err := store.ListFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := view.ItemListResponseData{
+		Feeds:             feeds,
+		SelectedFeedID:    parseSelectedFeedID(r),
+		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      false,
+	}
+	a.renderTemplate(w, "feed_list", data)
+}
+
+func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	feeds, err := store.ListFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	currentTitles := make(map[int64]string, len(feeds))
+	for _, listedFeed := range feeds {
+		currentTitles[listedFeed.ID] = strings.TrimSpace(listedFeed.Title)
+	}
+
+	updates := parseFeedTitleUpdates(r.PostForm)
+	for _, feedID := range updates.FeedIDs {
+		title := updates.TitlesByID[feedID]
+		if title == currentTitles[feedID] {
+			continue
+		}
+		if err := store.UpdateFeedTitle(a.db, feedID, title); err != nil {
+			http.Error(w, "failed to rename feed", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	clearFeedEditModeCookie(w)
+
+	feeds, err = store.ListFeeds(a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
 		return
@@ -923,6 +971,44 @@ func parseSelectedItemID(r *http.Request) int64 {
 		return 0
 	}
 	return parsed
+}
+
+type feedTitleUpdates struct {
+	FeedIDs    []int64
+	TitlesByID map[int64]string
+}
+
+func parseFeedTitleUpdates(values url.Values) feedTitleUpdates {
+	result := feedTitleUpdates{
+		FeedIDs:    make([]int64, 0),
+		TitlesByID: make(map[int64]string),
+	}
+
+	for key, titles := range values {
+		if !strings.HasPrefix(key, "feed_title_") {
+			continue
+		}
+		rawID := strings.TrimPrefix(key, "feed_title_")
+		feedID, err := strconv.ParseInt(rawID, 10, 64)
+		if err != nil || feedID <= 0 {
+			continue
+		}
+
+		title := ""
+		if len(titles) > 0 {
+			title = strings.TrimSpace(titles[0])
+		}
+
+		if _, exists := result.TitlesByID[feedID]; !exists {
+			result.FeedIDs = append(result.FeedIDs, feedID)
+		}
+		result.TitlesByID[feedID] = title
+	}
+
+	sort.Slice(result.FeedIDs, func(i, j int) bool {
+		return result.FeedIDs[i] < result.FeedIDs[j]
+	})
+	return result
 }
 
 func (a *App) cleanupLoop() {
