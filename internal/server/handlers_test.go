@@ -1235,6 +1235,12 @@ func TestFeedEditModeShowsRevertToCanonicalTitle(t *testing.T) {
 	if !strings.Contains(body, `data-original-title="Source Title"`) {
 		t.Fatalf("expected revert control to hold canonical source title")
 	}
+	if !strings.Contains(body, `title="Revert to original feed title"`) {
+		t.Fatalf("expected revert control title text")
+	}
+	if !strings.Contains(body, `aria-label="Revert feed name to original title: Source Title"`) {
+		t.Fatalf("expected revert control aria label to include canonical title")
+	}
 	if !strings.Contains(body, `value="Custom Title"`) {
 		t.Fatalf("expected editable value to remain the current custom title")
 	}

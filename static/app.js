@@ -8,6 +8,7 @@
 
   const getItemList = () => document.getElementById("item-list");
   const getFeedList = () => document.getElementById("feed-list");
+  const getFeedEditForm = () => document.getElementById("feed-edit-form");
   const getSelectedFeedInput = () => document.getElementById("selected-feed-id");
   const getTopbarShortcuts = () => document.getElementById("topbar-shortcuts");
   const getTopbarShortcutsButton = () =>
@@ -65,6 +66,33 @@
       return;
     }
     shortcuts.hidden = false;
+  };
+
+  const isFeedEditMode = () => {
+    const feedList = getFeedList();
+    if (!feedList) {
+      return false;
+    }
+    return Boolean(feedList.querySelector(".feed-list.edit-mode"));
+  };
+
+  const focusFeedEditTitleInput = () => {
+    const feedList = getFeedList();
+    if (!feedList || !isFeedEditMode()) {
+      return;
+    }
+    const active = document.activeElement;
+    if (active && feedList.contains(active)) {
+      return;
+    }
+    const input =
+      feedList.querySelector(".feed-edit-title.active") ||
+      feedList.querySelector(".feed-edit-title");
+    if (!input) {
+      return;
+    }
+    input.focus({ preventScroll: true });
+    input.select();
   };
 
   const getItemCards = () => {
@@ -298,6 +326,60 @@
     return isTextEntryTarget(event.target);
   };
 
+  const submitFeedEditForm = () => {
+    const form = getFeedEditForm();
+    if (!form) {
+      return false;
+    }
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+      return true;
+    }
+    const submit =
+      form.querySelector('button[type="submit"]') ||
+      form.querySelector('input[type="submit"]');
+    if (submit && typeof submit.click === "function") {
+      submit.click();
+      return true;
+    }
+    return false;
+  };
+
+  const cancelFeedEditMode = () => {
+    const cancelButton = document.querySelector("#feed-list .feed-edit-cancel");
+    if (!cancelButton) {
+      return false;
+    }
+    cancelButton.click();
+    return true;
+  };
+
+  const handleFeedEditModeKeydown = (event) => {
+    if (!isFeedEditMode()) {
+      return false;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      return cancelFeedEditMode();
+    }
+
+    if (event.key !== "Enter") {
+      return false;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+      return false;
+    }
+
+    const target = event.target;
+    if (!target || !target.closest || !target.closest(".feed-edit-title")) {
+      return false;
+    }
+
+    event.preventDefault();
+    return submitFeedEditForm();
+  };
+
   const setSelectedFeed = (feedButton) => {
     const list = getFeedList();
     if (!list || !feedButton || !list.contains(feedButton)) {
@@ -355,6 +437,9 @@
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isTopbarShortcutsOpen()) {
       setTopbarShortcutsOpen(false);
+      return;
+    }
+    if (handleFeedEditModeKeydown(event)) {
       return;
     }
     if (shouldIgnore(event)) {
@@ -420,6 +505,10 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindTopbarShortcuts();
     syncTopbarShortcuts();
+    if (isFeedEditMode()) {
+      focusFeedEditTitleInput();
+      return;
+    }
     ensureActive();
     focusItemList();
   });
@@ -427,6 +516,11 @@
   document.body.addEventListener("htmx:afterSwap", (event) => {
     bindTopbarShortcuts();
     syncTopbarShortcuts();
+    const swapTarget = event && event.detail ? event.detail.target : null;
+    if (swapTarget && swapTarget.id === "feed-list" && isFeedEditMode()) {
+      focusFeedEditTitleInput();
+      return;
+    }
     if (getItemList()) {
       if (
         state.pendingReadShortcut &&
