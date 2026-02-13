@@ -35,6 +35,7 @@ type PageData struct {
 	SelectedFeedID    int64
 	ItemList          *ItemListData
 	SkipDeleteWarning bool
+	FeedEditMode      bool
 }
 
 type SubscribeResponseData struct {
@@ -45,6 +46,7 @@ type SubscribeResponseData struct {
 	ItemList          *ItemListData
 	Update            bool
 	SkipDeleteWarning bool
+	FeedEditMode      bool
 }
 
 type NewItemsData struct {
@@ -65,6 +67,7 @@ type PollResponseData struct {
 	RefreshDisplay    string
 	SelectedFeedID    int64
 	SkipDeleteWarning bool
+	FeedEditMode      bool
 }
 
 type ItemListResponseData struct {
@@ -72,6 +75,7 @@ type ItemListResponseData struct {
 	Feeds             []FeedView
 	SelectedFeedID    int64
 	SkipDeleteWarning bool
+	FeedEditMode      bool
 }
 
 type ToggleReadResponseData struct {
@@ -80,6 +84,7 @@ type ToggleReadResponseData struct {
 	SelectedFeedID    int64
 	View              string
 	SkipDeleteWarning bool
+	FeedEditMode      bool
 }
 
 type DeleteFeedConfirmData struct {
@@ -98,4 +103,5 @@ type RenameFeedResponseData struct {
 	Feeds             []FeedView
 	SelectedFeedID    int64
 	SkipDeleteWarning bool
+	FeedEditMode      bool
 }

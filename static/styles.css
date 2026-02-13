@@ -318,6 +318,12 @@ body {
   padding: 24px 28px 32px;
 }
 
+@media (min-width: 961px) {
+  .app:has(#feed-list .feed-list.edit-mode) {
+    grid-template-columns: 360px 1fr;
+  }
+}
+
 .sidebar-pane,
 .content-pane {
   min-height: 0;
@@ -346,6 +352,17 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.feed-edit-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feed-edit-actions .chip {
+  padding: 4px 10px;
+  font-size: 11px;
 }
 
 .sidebar-count {
@@ -379,10 +396,6 @@ body {
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .edit-feeds-button {
-  color: #b91c1c;
-}
-
 .feed-list {
   list-style: none;
   margin: 0;
@@ -412,7 +425,7 @@ body {
   transition: transform 0.2s ease;
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .feed-remove {
+.feed-list.edit-mode .feed-remove {
   display: inline-flex;
 }
 
@@ -432,7 +445,7 @@ body {
   transition: all 0.2s ease;
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .feed-rename-button {
+.feed-list.edit-mode .feed-rename-button {
   display: inline-flex;
 }
 
@@ -454,12 +467,12 @@ body {
   gap: 8px;
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .feed-remove-confirm {
+.feed-list.edit-mode .feed-remove-confirm {
   display: flex;
   flex-direction: column;
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .feed-remove-confirm:empty {
+.feed-list.edit-mode .feed-remove-confirm:empty {
   display: none;
 }
 
@@ -473,11 +486,11 @@ body {
   background: rgba(15, 118, 110, 0.06);
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .feed-rename-form {
+.feed-list.edit-mode .feed-rename-form {
   display: flex;
 }
 
-.feed-edit-toggle:checked ~ .sidebar-pane .sidebar .feed-rename-form:empty {
+.feed-list.edit-mode .feed-rename-form:empty {
   display: none;
 }
 

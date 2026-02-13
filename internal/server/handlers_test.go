@@ -958,6 +958,180 @@ func TestDeleteFeedConfirmEndpoint(t *testing.T) {
 	}
 }
 
+func TestEnterFeedEditMode(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Edit Mode Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Unread",
+		Link:            "http://example.com/unread",
+		GUID:            "unread",
+		Description:     "<p>Unread summary</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems: %v", err)
+	}
+	zeroFeedID, err := store.UpsertFeed(app.db, "http://example.com/zero", "Zero Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed zero: %v", err)
+	}
+	if zeroFeedID == 0 {
+		t.Fatalf("expected zero feed id to be set")
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("edit mode status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="feed-list edit-mode"`) {
+		t.Fatalf("expected edit mode class in feed list")
+	}
+	if !strings.Contains(body, `class="feed-edit-actions"`) {
+		t.Fatalf("expected edit actions in edit mode")
+	}
+	if !strings.Contains(body, `hx-post="/feeds/edit-mode/cancel"`) {
+		t.Fatalf("expected cancel action in edit mode")
+	}
+	if strings.Contains(body, "feed-more-button") {
+		t.Fatalf("expected no More section in edit mode")
+	}
+	if strings.Contains(body, `feed-count">`) {
+		t.Fatalf("expected unread counts to be hidden in edit mode")
+	}
+	if !strings.Contains(body, "Zero Feed") {
+		t.Fatalf("expected zero unread feeds to be visible in edit mode")
+	}
+	setCookie := rec.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, feedEditModeCookie+"=1") {
+		t.Fatalf("expected edit mode cookie to be set")
+	}
+
+	itemsReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/items", feedID), nil)
+	itemsReq.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	itemsRec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(itemsRec, itemsReq)
+	if itemsRec.Code != http.StatusOK {
+		t.Fatalf("feed items status: %d", itemsRec.Code)
+	}
+	if !strings.Contains(itemsRec.Body.String(), `class="feed-list edit-mode"`) {
+		t.Fatalf("expected edit mode to persist while cookie is set")
+	}
+}
+
+func TestCancelFeedEditModeEndpoint(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Cancel Edit Mode Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/cancel", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel edit mode status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, `class="feed-list edit-mode"`) {
+		t.Fatalf("expected edit mode class to be cleared")
+	}
+	if !strings.Contains(body, `class="edit-feeds-button"`) {
+		t.Fatalf("expected pencil edit control after cancel")
+	}
+	setCookie := rec.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
+		t.Fatalf("expected edit mode cookie to be cleared")
+	}
+}
+
+func TestRenameFeedCancelExitsEditMode(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Cancel Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/rename?cancel=1&selected_feed_id=%d", feedID, feedID), nil)
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename cancel status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="feed-list"`) {
+		t.Fatalf("expected feed list OOB update on cancel")
+	}
+	if strings.Contains(body, `class="feed-list edit-mode"`) {
+		t.Fatalf("expected edit mode to be cleared on cancel")
+	}
+
+	setCookie := rec.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
+		t.Fatalf("expected edit mode cookie to be cleared")
+	}
+}
+
+func TestRenameFeedSaveExitsEditMode(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Old Title")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
+	}
+	if _, err := store.UpsertItems(app.db, feedID, []*gofeed.Item{{
+		Title:           "Unread",
+		Link:            "http://example.com/unread",
+		GUID:            "unread",
+		Description:     "<p>Unread summary</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("title", "New Title")
+	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/feeds/%d/rename", feedID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename save status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "New Title") {
+		t.Fatalf("expected renamed title in response")
+	}
+	if strings.Contains(body, `class="feed-list edit-mode"`) {
+		t.Fatalf("expected edit mode to be cleared on save")
+	}
+	setCookie := rec.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
+		t.Fatalf("expected edit mode cookie to be cleared")
+	}
+}
+
 func TestDeleteFeedSkipCookie(t *testing.T) {
 	app := newTestApp(t)
 

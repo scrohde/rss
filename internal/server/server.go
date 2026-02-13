@@ -23,6 +23,7 @@ import (
 )
 
 const skipDeleteWarningCookie = "pulse_rss_skip_delete_warning"
+const feedEditModeCookie = "pulse_rss_feed_edit_mode"
 
 const maxOPMLUploadBytes int64 = 2 << 20
 
@@ -46,6 +47,8 @@ func (a *App) Routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.HandleFunc("GET /{$}", a.handleIndex)
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
+	mux.HandleFunc("POST /feeds/edit-mode", a.handleEnterFeedEditMode)
+	mux.HandleFunc("POST /feeds/edit-mode/cancel", a.handleCancelFeedEditMode)
 	mux.HandleFunc("GET /opml/export", a.handleExportOPML)
 	mux.HandleFunc("POST /opml/import", a.handleImportOPML)
 	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
@@ -90,6 +93,38 @@ func setSkipDeleteWarningCookie(w http.ResponseWriter) {
 	})
 }
 
+func feedEditModeEnabled(r *http.Request) bool {
+	cookie, err := r.Cookie(feedEditModeCookie)
+	if err != nil {
+		return false
+	}
+	return cookie.Value == "1"
+}
+
+func setFeedEditModeCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     feedEditModeCookie,
+		Value:    "1",
+		Path:     "/",
+		MaxAge:   60 * 60 * 24 * 365,
+		Expires:  time.Now().Add(365 * 24 * time.Hour),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearFeedEditModeCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     feedEditModeCookie,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	feeds, err := store.ListFeeds(a.db)
 	if err != nil {
@@ -100,6 +135,7 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	data := view.PageData{
 		Feeds:             feeds,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "index", data)
 }
@@ -194,6 +230,7 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		ItemList:          itemList,
 		Update:            true,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 
 	a.renderTemplate(w, "subscribe_response", data)
@@ -309,8 +346,45 @@ func (a *App) renderOPMLImportResponse(w http.ResponseWriter, r *http.Request, i
 		Feeds:             feeds,
 		Update:            update,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "opml_import_response", data)
+}
+
+func (a *App) handleEnterFeedEditMode(w http.ResponseWriter, r *http.Request) {
+	setFeedEditModeCookie(w)
+
+	feeds, err := store.ListFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := view.ItemListResponseData{
+		Feeds:             feeds,
+		SelectedFeedID:    parseSelectedFeedID(r),
+		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      true,
+	}
+	a.renderTemplate(w, "feed_list", data)
+}
+
+func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
+	clearFeedEditModeCookie(w)
+
+	feeds, err := store.ListFeeds(a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+		return
+	}
+
+	data := view.ItemListResponseData{
+		Feeds:             feeds,
+		SelectedFeedID:    parseSelectedFeedID(r),
+		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      false,
+	}
+	a.renderTemplate(w, "feed_list", data)
 }
 
 func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +432,7 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 		RefreshDisplay:    refreshDisplay,
 		SelectedFeedID:    feedID,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "poll_response", data)
 }
@@ -468,6 +543,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 		SelectedFeedID:    feedID,
 		View:              currentView,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "item_toggle_response", data)
 }
@@ -540,6 +616,7 @@ func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, fee
 		Feeds:             feeds,
 		SelectedFeedID:    feedID,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "item_list_response", data)
 }
@@ -579,12 +656,7 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var selectedFeedID int64
-	if selected := r.FormValue("selected_feed_id"); selected != "" {
-		if parsed, err := strconv.ParseInt(selected, 10, 64); err == nil {
-			selectedFeedID = parsed
-		}
-	}
+	selectedFeedID := parseSelectedFeedID(r)
 
 	if err := store.DeleteFeed(a.db, feedID); err != nil {
 		http.Error(w, "failed to delete feed", http.StatusInternalServerError)
@@ -620,6 +692,7 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 		Feeds:             feeds,
 		SelectedFeedID:    selectedFeedID,
 		SkipDeleteWarning: skipDeleteWarning,
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "delete_feed_response", data)
 }
@@ -632,8 +705,22 @@ func (a *App) handleRenameFeedForm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Query().Get("cancel") == "1" {
-		data := view.RenameFeedFormData{Feed: view.FeedView{ID: feedID}, Show: false}
-		a.renderTemplate(w, "feed_rename_form", data)
+		clearFeedEditModeCookie(w)
+
+		feeds, err := store.ListFeeds(a.db)
+		if err != nil {
+			http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+			return
+		}
+
+		data := view.RenameFeedResponseData{
+			FeedID:            feedID,
+			Feeds:             feeds,
+			SelectedFeedID:    parseSelectedFeedID(r),
+			SkipDeleteWarning: deleteWarningSkipped(r),
+			FeedEditMode:      false,
+		}
+		a.renderTemplate(w, "feed_rename_response", data)
 		return
 	}
 
@@ -667,12 +754,7 @@ func (a *App) handleRenameFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("feed renamed", "feed_id", feedID, "title", title)
 
-	var selectedFeedID int64
-	if selected := r.FormValue("selected_feed_id"); selected != "" {
-		if parsed, err := strconv.ParseInt(selected, 10, 64); err == nil {
-			selectedFeedID = parsed
-		}
-	}
+	selectedFeedID := parseSelectedFeedID(r)
 
 	feeds, err := store.ListFeeds(a.db)
 	if err != nil {
@@ -689,12 +771,15 @@ func (a *App) handleRenameFeed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	clearFeedEditModeCookie(w)
+
 	data := view.RenameFeedResponseData{
 		FeedID:            feedID,
 		ItemList:          itemList,
 		Feeds:             feeds,
 		SelectedFeedID:    selectedFeedID,
 		SkipDeleteWarning: deleteWarningSkipped(r),
+		FeedEditMode:      false,
 	}
 	a.renderTemplate(w, "feed_rename_response", data)
 }
@@ -797,6 +882,21 @@ func parseAfterID(r *http.Request) int64 {
 		return 0
 	}
 	raw := strings.TrimSpace(r.FormValue("after_id"))
+	if raw == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+func parseSelectedFeedID(r *http.Request) int64 {
+	if err := r.ParseForm(); err != nil {
+		return 0
+	}
+	raw := strings.TrimSpace(r.FormValue("selected_feed_id"))
 	if raw == "" {
 		return 0
 	}

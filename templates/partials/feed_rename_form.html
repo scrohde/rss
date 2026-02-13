@@ -25,6 +25,7 @@
             hx-get="/feeds/{{.Feed.ID}}/rename?cancel=1"
             hx-target="#feed-rename-form-{{.Feed.ID}}"
             hx-swap="outerHTML"
+            hx-include="#selected-feed-id"
           >
             Cancel
           </button>
