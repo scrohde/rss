@@ -56,8 +56,6 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
 	mux.HandleFunc("GET /feeds/{feedID}/delete/confirm", a.handleDeleteFeedConfirm)
 	mux.HandleFunc("POST /feeds/{feedID}/delete", a.handleDeleteFeed)
-	mux.HandleFunc("GET /feeds/{feedID}/rename", a.handleRenameFeedForm)
-	mux.HandleFunc("POST /feeds/{feedID}/rename", a.handleRenameFeed)
 	mux.HandleFunc("POST /feeds/{feedID}/refresh", a.handleRefreshFeed)
 	mux.HandleFunc("GET /feeds/{feedID}/items", a.handleFeedItems)
 	mux.HandleFunc("GET /feeds/{feedID}/items/new", a.handleFeedItemsNew)
@@ -810,99 +808,7 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	a.renderTemplate(w, "delete_feed_response", data)
 }
 
-func (a *App) handleRenameFeedForm(w http.ResponseWriter, r *http.Request) {
-	feedID, ok := parsePathInt64(r, "feedID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-
-	if r.URL.Query().Get("cancel") == "1" {
-		clearFeedEditModeCookie(w)
-
-		feeds, err := store.ListFeeds(a.db)
-		if err != nil {
-			http.Error(w, "failed to load feeds", http.StatusInternalServerError)
-			return
-		}
-
-		data := view.RenameFeedResponseData{
-			FeedID:            feedID,
-			Feeds:             feeds,
-			SelectedFeedID:    parseSelectedFeedID(r),
-			SkipDeleteWarning: deleteWarningSkipped(r),
-			FeedEditMode:      false,
-		}
-		a.renderTemplate(w, "feed_rename_response", data)
-		return
-	}
-
-	currentFeed, err := store.GetFeed(a.db, feedID)
-	if err != nil {
-		http.Error(w, "feed not found", http.StatusNotFound)
-		return
-	}
-
-	data := view.RenameFeedFormData{Feed: currentFeed, Show: true}
-	a.renderTemplate(w, "feed_rename_form", data)
-}
-
-func (a *App) handleRenameFeed(w http.ResponseWriter, r *http.Request) {
-	feedID, ok := parsePathInt64(r, "feedID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-		return
-	}
-
-	title := strings.TrimSpace(r.FormValue("title"))
-
-	if err := store.UpdateFeedTitle(a.db, feedID, title); err != nil {
-		http.Error(w, "failed to rename feed", http.StatusInternalServerError)
-		return
-	}
-	slog.Info("feed renamed", "feed_id", feedID, "title", title)
-
-	selectedFeedID := parseSelectedFeedID(r)
-
-	feeds, err := store.ListFeeds(a.db)
-	if err != nil {
-		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
-		return
-	}
-
-	var itemList *view.ItemListData
-	if selectedFeedID == feedID && selectedFeedID != 0 {
-		itemList, err = store.LoadItemList(a.db, selectedFeedID)
-		if err != nil {
-			http.Error(w, "failed to load items", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	clearFeedEditModeCookie(w)
-
-	data := view.RenameFeedResponseData{
-		FeedID:            feedID,
-		ItemList:          itemList,
-		Feeds:             feeds,
-		SelectedFeedID:    selectedFeedID,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      false,
-	}
-	a.renderTemplate(w, "feed_rename_response", data)
-}
-
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
 		http.Error(w, "missing url", http.StatusBadRequest)

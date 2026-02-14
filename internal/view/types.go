@@ -92,17 +92,3 @@ type DeleteFeedConfirmData struct {
 	Feed FeedView
 	Show bool
 }
-
-type RenameFeedFormData struct {
-	Feed FeedView
-	Show bool
-}
-
-type RenameFeedResponseData struct {
-	FeedID            int64
-	ItemList          *ItemListData
-	Feeds             []FeedView
-	SelectedFeedID    int64
-	SkipDeleteWarning bool
-	FeedEditMode      bool
-}
