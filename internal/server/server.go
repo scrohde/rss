@@ -416,6 +416,7 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 			deleteByID[feedID] = struct{}{}
 		}
 	}
+	orderUpdates := parseFeedOrderUpdates(r.PostForm)
 
 	updates := parseFeedTitleUpdates(r.PostForm)
 	for _, feedID := range updates.FeedIDs {
@@ -450,6 +451,19 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 		}
 		if feedID == selectedFeedID {
 			selectedFeedDeleted = true
+		}
+	}
+	if len(orderUpdates) > 0 {
+		finalOrder := make([]int64, 0, len(orderUpdates))
+		for _, feedID := range orderUpdates {
+			if _, markedForDelete := deleteByID[feedID]; markedForDelete {
+				continue
+			}
+			finalOrder = append(finalOrder, feedID)
+		}
+		if err := store.UpdateFeedOrder(a.db, finalOrder); err != nil {
+			http.Error(w, "failed to reorder feeds", http.StatusInternalServerError)
+			return
 		}
 	}
 
@@ -1095,6 +1109,28 @@ func parseFeedTitleUpdates(values url.Values) feedTitleUpdates {
 	sort.Slice(result.FeedIDs, func(i, j int) bool {
 		return result.FeedIDs[i] < result.FeedIDs[j]
 	})
+	return result
+}
+
+func parseFeedOrderUpdates(values url.Values) []int64 {
+	rawIDs := values["feed_order"]
+	if len(rawIDs) == 0 {
+		return nil
+	}
+
+	result := make([]int64, 0, len(rawIDs))
+	seen := make(map[int64]struct{})
+	for _, rawID := range rawIDs {
+		feedID, err := strconv.ParseInt(strings.TrimSpace(rawID), 10, 64)
+		if err != nil || feedID <= 0 {
+			continue
+		}
+		if _, exists := seen[feedID]; exists {
+			continue
+		}
+		seen[feedID] = struct{}{}
+		result = append(result, feedID)
+	}
 	return result
 }
 

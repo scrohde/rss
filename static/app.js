@@ -5,6 +5,10 @@
     activeId: null,
     pendingReadShortcut: null,
   };
+  const feedDragState = {
+    row: null,
+    list: null,
+  };
 
   const getItemList = () => document.getElementById("item-list");
   const getFeedList = () => document.getElementById("feed-list");
@@ -405,6 +409,47 @@
       });
   };
 
+  const clearFeedDragState = () => {
+    if (feedDragState.row) {
+      feedDragState.row.classList.remove("dragging");
+    }
+    feedDragState.row = null;
+    feedDragState.list = null;
+  };
+
+  const rowFromDragHandle = (target) => {
+    if (!target || !target.closest) {
+      return null;
+    }
+    const handle = target.closest(".feed-drag-handle");
+    if (!handle) {
+      return null;
+    }
+    const row = handle.closest(".feed-row[data-feed-id]");
+    const list = row ? row.closest(".feed-list.edit-mode") : null;
+    if (!row || !list) {
+      return null;
+    }
+    return row;
+  };
+
+  const rowAfterPointer = (list, clientY) => {
+    const rows = Array.from(
+      list.querySelectorAll(".feed-row[data-feed-id]:not(.dragging)")
+    );
+    let closestRow = null;
+    let closestOffset = Number.NEGATIVE_INFINITY;
+    rows.forEach((row) => {
+      const rect = row.getBoundingClientRect();
+      const offset = clientY - rect.top - rect.height / 2;
+      if (offset < 0 && offset > closestOffset) {
+        closestOffset = offset;
+        closestRow = row;
+      }
+    });
+    return closestRow;
+  };
+
   const setSelectedFeed = (feedButton) => {
     const list = getFeedList();
     if (!list || !feedButton || !list.contains(feedButton)) {
@@ -470,6 +515,82 @@
     }
     input.value = originalTitle;
     input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  document.addEventListener("dragstart", (event) => {
+    if (!isFeedEditMode()) {
+      return;
+    }
+    const feedList = getFeedList();
+    if (!feedList || !feedList.contains(event.target)) {
+      return;
+    }
+
+    const row = rowFromDragHandle(event.target);
+    if (!row) {
+      event.preventDefault();
+      return;
+    }
+
+    clearFeedDragState();
+    feedDragState.row = row;
+    feedDragState.list = row.parentElement;
+    row.classList.add("dragging");
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", row.dataset.feedId || "");
+    }
+  });
+
+  document.addEventListener("dragover", (event) => {
+    if (!isFeedEditMode()) {
+      return;
+    }
+    if (!feedDragState.row || !feedDragState.list) {
+      return;
+    }
+    const targetList =
+      event.target && event.target.closest
+        ? event.target.closest(".feed-list.edit-mode")
+        : null;
+    if (!targetList || targetList !== feedDragState.list) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextRow = rowAfterPointer(targetList, event.clientY);
+    const dragRow = feedDragState.row;
+    if (!dragRow) {
+      return;
+    }
+    if (!nextRow) {
+      if (targetList.lastElementChild !== dragRow) {
+        targetList.appendChild(dragRow);
+      }
+      return;
+    }
+    if (nextRow !== dragRow && nextRow.previousElementSibling !== dragRow) {
+      targetList.insertBefore(dragRow, nextRow);
+    }
+  });
+
+  document.addEventListener("drop", (event) => {
+    if (!feedDragState.row || !feedDragState.list) {
+      return;
+    }
+    const targetList =
+      event.target && event.target.closest
+        ? event.target.closest(".feed-list.edit-mode")
+        : null;
+    if (targetList && targetList === feedDragState.list) {
+      event.preventDefault();
+    }
+    clearFeedDragState();
+  });
+
+  document.addEventListener("dragend", () => {
+    clearFeedDragState();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -553,6 +674,7 @@
   });
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
+    clearFeedDragState();
     bindTopbarShortcuts();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();

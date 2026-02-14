@@ -49,7 +49,16 @@
           <li class="feed-empty">No feeds yet.</li>
         {{end}}
         {{range .Feeds}}
-          <li class="feed-row">
+          <li class="feed-row" data-feed-id="{{.ID}}" draggable="true">
+            <input type="hidden" name="feed_order" value="{{.ID}}">
+            <button
+              class="feed-drag-handle"
+              type="button"
+              aria-label="Reorder feed {{.Title}}"
+              title="Drag to reorder"
+            >
+              <img class="icon" src="/static/icons/drag-handle.svg" alt="" aria-hidden="true">
+            </button>
             <input
               id="feed-delete-{{.ID}}"
               class="feed-delete-toggle"

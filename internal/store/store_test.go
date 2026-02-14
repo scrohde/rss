@@ -36,6 +36,101 @@ func TestUpsertFeedCustomTitlePreserved(t *testing.T) {
 	}
 }
 
+func TestUpdateFeedOrderPersistsListOrder(t *testing.T) {
+	db := openTestDB(t)
+
+	firstID, err := UpsertFeed(db, "http://example.com/first", "First")
+	if err != nil {
+		t.Fatalf("UpsertFeed first: %v", err)
+	}
+	secondID, err := UpsertFeed(db, "http://example.com/second", "Second")
+	if err != nil {
+		t.Fatalf("UpsertFeed second: %v", err)
+	}
+	thirdID, err := UpsertFeed(db, "http://example.com/third", "Third")
+	if err != nil {
+		t.Fatalf("UpsertFeed third: %v", err)
+	}
+
+	if err := UpdateFeedOrder(db, []int64{thirdID, firstID, secondID}); err != nil {
+		t.Fatalf("UpdateFeedOrder: %v", err)
+	}
+
+	feeds, err := ListFeeds(db)
+	if err != nil {
+		t.Fatalf("ListFeeds: %v", err)
+	}
+	if len(feeds) != 3 {
+		t.Fatalf("expected 3 feeds, got %d", len(feeds))
+	}
+	if feeds[0].ID != thirdID || feeds[1].ID != firstID || feeds[2].ID != secondID {
+		t.Fatalf("unexpected feed order: got [%d %d %d]", feeds[0].ID, feeds[1].ID, feeds[2].ID)
+	}
+}
+
+func TestInitAddsFeedSortOrderToExistingSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+CREATE TABLE feeds (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	url TEXT NOT NULL UNIQUE,
+	title TEXT NOT NULL,
+	custom_title TEXT,
+	created_at DATETIME NOT NULL,
+	etag TEXT,
+	last_modified TEXT,
+	last_refreshed_at DATETIME,
+	last_error TEXT,
+	unchanged_count INTEGER NOT NULL DEFAULT 0,
+	next_refresh_at DATETIME
+)
+`); err != nil {
+		t.Fatalf("create legacy feeds table: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(
+		`INSERT INTO feeds (url, title, created_at) VALUES (?, ?, ?), (?, ?, ?)`,
+		"http://example.com/bravo", "Bravo", now,
+		"http://example.com/alpha", "Alpha", now.Add(time.Second),
+	); err != nil {
+		t.Fatalf("insert legacy feeds: %v", err)
+	}
+
+	if err := Init(db); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	var hasSortOrder int
+	if err := db.QueryRow(`
+SELECT COUNT(*)
+FROM pragma_table_info('feeds')
+WHERE name = 'sort_order'
+`).Scan(&hasSortOrder); err != nil {
+		t.Fatalf("check sort_order column: %v", err)
+	}
+	if hasSortOrder != 1 {
+		t.Fatalf("expected sort_order column to be added")
+	}
+
+	feeds, err := ListFeeds(db)
+	if err != nil {
+		t.Fatalf("ListFeeds: %v", err)
+	}
+	if len(feeds) != 2 {
+		t.Fatalf("expected 2 feeds, got %d", len(feeds))
+	}
+	if feeds[0].Title != "Alpha" || feeds[1].Title != "Bravo" {
+		t.Fatalf("expected legacy feeds to be initialized in title order, got %q then %q", feeds[0].Title, feeds[1].Title)
+	}
+}
+
 func TestItemLimitAndTombstones(t *testing.T) {
 	db := openTestDB(t)
 	feedID, err := UpsertFeed(db, "http://example.com/rss", "Feed")

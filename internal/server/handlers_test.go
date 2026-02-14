@@ -1054,6 +1054,12 @@ func TestEnterFeedEditMode(t *testing.T) {
 	if !strings.Contains(body, fmt.Sprintf(`name="feed_delete_%d"`, feedID)) {
 		t.Fatalf("expected delete marker input in edit mode")
 	}
+	if !strings.Contains(body, `class="feed-drag-handle"`) {
+		t.Fatalf("expected drag handle control in edit mode")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`name="feed_order" value="%d"`, feedID)) {
+		t.Fatalf("expected persisted order field in edit mode")
+	}
 	if strings.Contains(body, fmt.Sprintf(`hx-post="/feeds/%d/delete"`, feedID)) {
 		t.Fatalf("expected edit mode delete control to defer deletion until save")
 	}
@@ -1120,6 +1126,9 @@ func TestCancelFeedEditModeEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(body, `class="edit-feeds-button"`) {
 		t.Fatalf("expected pencil edit control after cancel")
+	}
+	if strings.Contains(body, `class="feed-drag-handle"`) {
+		t.Fatalf("expected drag handles to be hidden outside edit mode")
 	}
 	setCookie := rec.Header().Get("Set-Cookie")
 	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
@@ -1284,6 +1293,90 @@ func TestFeedEditModeSaveDeletesMarkedFeeds(t *testing.T) {
 	}
 	if feeds[0].ID != keepFeedID {
 		t.Fatalf("expected remaining feed %d, got %d", keepFeedID, feeds[0].ID)
+	}
+}
+
+func TestFeedEditModeSavePersistsFeedOrder(t *testing.T) {
+	app := newTestApp(t)
+
+	firstID, err := store.UpsertFeed(app.db, "http://example.com/first", "First")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed first: %v", err)
+	}
+	secondID, err := store.UpsertFeed(app.db, "http://example.com/second", "Second")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed second: %v", err)
+	}
+	thirdID, err := store.UpsertFeed(app.db, "http://example.com/third", "Third")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed third: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", firstID))
+	form.Add("feed_order", fmt.Sprintf("%d", thirdID))
+	form.Add("feed_order", fmt.Sprintf("%d", firstID))
+	form.Add("feed_order", fmt.Sprintf("%d", secondID))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/save", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save status: %d", rec.Code)
+	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if len(feeds) != 3 {
+		t.Fatalf("expected 3 feeds, got %d", len(feeds))
+	}
+	if feeds[0].ID != thirdID || feeds[1].ID != firstID || feeds[2].ID != secondID {
+		t.Fatalf("unexpected feed order after save: got [%d %d %d]", feeds[0].ID, feeds[1].ID, feeds[2].ID)
+	}
+}
+
+func TestFeedEditModeCancelIgnoresPendingFeedOrder(t *testing.T) {
+	app := newTestApp(t)
+
+	firstID, err := store.UpsertFeed(app.db, "http://example.com/first", "First")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed first: %v", err)
+	}
+	secondID, err := store.UpsertFeed(app.db, "http://example.com/second", "Second")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed second: %v", err)
+	}
+	thirdID, err := store.UpsertFeed(app.db, "http://example.com/third", "Third")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed third: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", firstID))
+	form.Add("feed_order", fmt.Sprintf("%d", thirdID))
+	form.Add("feed_order", fmt.Sprintf("%d", firstID))
+	form.Add("feed_order", fmt.Sprintf("%d", secondID))
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/cancel", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel status: %d", rec.Code)
+	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if len(feeds) != 3 {
+		t.Fatalf("expected 3 feeds, got %d", len(feeds))
+	}
+	if feeds[0].ID != firstID || feeds[1].ID != secondID || feeds[2].ID != thirdID {
+		t.Fatalf("expected persisted order to remain unchanged, got [%d %d %d]", feeds[0].ID, feeds[1].ID, feeds[2].ID)
 	}
 }
 

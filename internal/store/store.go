@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS feeds (
 	url TEXT NOT NULL UNIQUE,
 	title TEXT NOT NULL,
 	custom_title TEXT,
+	sort_order INTEGER NOT NULL DEFAULT 0,
 	created_at DATETIME NOT NULL,
 	etag TEXT,
 	last_modified TEXT,
@@ -81,14 +82,17 @@ END;
 	if _, err := db.Exec(schema); err != nil {
 		return err
 	}
+	if err := ensureFeedOrderColumn(db); err != nil {
+		return err
+	}
 	return nil
 }
 
 func UpsertFeed(db *sql.DB, feedURL, title string) (int64, error) {
 	now := time.Now().UTC()
 	_, err := db.Exec(`
-INSERT INTO feeds (url, title, created_at)
-VALUES (?, ?, ?)
+INSERT INTO feeds (url, title, sort_order, created_at)
+VALUES (?, ?, COALESCE((SELECT MAX(sort_order) + 1 FROM feeds), 1), ?)
 ON CONFLICT(url) DO UPDATE SET title = excluded.title
 `, feedURL, title, now)
 	if err != nil {
@@ -109,6 +113,75 @@ func UpdateFeedTitle(db *sql.DB, feedID int64, title string) error {
 func DeleteFeed(db *sql.DB, feedID int64) error {
 	_, err := db.Exec("DELETE FROM feeds WHERE id = ?", feedID)
 	return err
+}
+
+func UpdateFeedOrder(db *sql.DB, orderedFeedIDs []int64) (err error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	rows, err := tx.Query("SELECT id FROM feeds ORDER BY sort_order ASC, id ASC")
+	if err != nil {
+		return err
+	}
+	existingIDs := make([]int64, 0)
+	existing := make(map[int64]struct{})
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		existingIDs = append(existingIDs, id)
+		existing[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	seen := make(map[int64]struct{})
+	finalOrder := make([]int64, 0, len(existingIDs))
+	for _, id := range orderedFeedIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := existing[id]; !ok {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		finalOrder = append(finalOrder, id)
+	}
+	for _, id := range existingIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		finalOrder = append(finalOrder, id)
+	}
+
+	stmt, err := tx.Prepare("UPDATE feeds SET sort_order = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for idx, id := range finalOrder {
+		if _, err := stmt.Exec(idx+1, id); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func UpsertItems(db *sql.DB, feedID int64, items []*gofeed.Item) (int, error) {
@@ -222,7 +295,7 @@ SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,
        f.last_refreshed_at,
        f.last_error
 FROM feeds f
-ORDER BY display_title COLLATE NOCASE
+ORDER BY f.sort_order ASC, display_title COLLATE NOCASE, f.id ASC
 `)
 	if err != nil {
 		return nil, err
@@ -556,6 +629,40 @@ func maxItemID(items []view.ItemView) int64 {
 		}
 	}
 	return maxID
+}
+
+func ensureFeedOrderColumn(db *sql.DB) error {
+	var hasSortOrder int
+	if err := db.QueryRow(`
+SELECT COUNT(*)
+FROM pragma_table_info('feeds')
+WHERE name = 'sort_order'
+`).Scan(&hasSortOrder); err != nil {
+		return err
+	}
+
+	if hasSortOrder == 0 {
+		if _, err := db.Exec("ALTER TABLE feeds ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+
+	_, err := db.Exec(`
+WITH ranked AS (
+	SELECT
+		id,
+		ROW_NUMBER() OVER (ORDER BY COALESCE(custom_title, title) COLLATE NOCASE, id) AS sort_position
+	FROM feeds
+)
+UPDATE feeds
+SET sort_order = (
+	SELECT sort_position
+	FROM ranked
+	WHERE ranked.id = feeds.id
+)
+WHERE sort_order <= 0
+`)
+	return err
 }
 
 func fallbackString(value, fallback string) string {

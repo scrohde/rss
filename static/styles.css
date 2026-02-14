@@ -412,6 +412,48 @@ body {
   flex-wrap: wrap;
 }
 
+.feed-list.edit-mode .feed-row {
+  border-radius: 12px;
+}
+
+.feed-list.edit-mode .feed-row.dragging {
+  opacity: 0.55;
+}
+
+.feed-drag-handle {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  border-radius: 8px;
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.feed-drag-handle:active {
+  cursor: grabbing;
+}
+
+.feed-drag-handle:hover {
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent);
+}
+
+.feed-drag-handle:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
+
+.feed-drag-handle .icon {
+  width: 16px;
+  height: 16px;
+}
+
 .feed-delete-toggle {
   display: none;
 }
