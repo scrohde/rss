@@ -50,20 +50,19 @@
         {{end}}
         {{range .Feeds}}
           <li class="feed-row">
+            <input
+              id="feed-delete-{{.ID}}"
+              class="feed-delete-toggle"
+              type="checkbox"
+              name="feed_delete_{{.ID}}"
+              value="1"
+            >
             <button
-              class="feed-remove"
+              class="feed-remove feed-remove-mark"
               type="button"
               aria-label="Remove feed {{.Title}}"
-              {{if $.SkipDeleteWarning}}
-                hx-post="/feeds/{{.ID}}/delete"
-                hx-target="#main-content"
-                hx-swap="innerHTML"
-                hx-include="#selected-feed-id"
-              {{else}}
-                hx-get="/feeds/{{.ID}}/delete/confirm"
-                hx-target="#feed-remove-confirm-{{.ID}}"
-                hx-swap="outerHTML"
-              {{end}}
+              aria-pressed="false"
+              data-feed-delete-toggle="feed-delete-{{.ID}}"
             >
               <img class="icon" src="/static/icons/remove-circle.svg" alt="">
             </button>
@@ -88,7 +87,7 @@
                 <img class="icon" src="/static/icons/revert-circle.svg" alt="" aria-hidden="true">
               </button>
             {{end}}
-            <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
+            <span class="feed-delete-pending" role="status">Will be deleted on Save</span>
           </li>
         {{end}}
       </ul>

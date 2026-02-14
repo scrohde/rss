@@ -1048,6 +1048,15 @@ func TestEnterFeedEditMode(t *testing.T) {
 	if !strings.Contains(body, `name="feed_title_`) {
 		t.Fatalf("expected inline feed title input in edit mode")
 	}
+	if !strings.Contains(body, fmt.Sprintf(`data-feed-delete-toggle="feed-delete-%d"`, feedID)) {
+		t.Fatalf("expected delete toggle control in edit mode")
+	}
+	if !strings.Contains(body, fmt.Sprintf(`name="feed_delete_%d"`, feedID)) {
+		t.Fatalf("expected delete marker input in edit mode")
+	}
+	if strings.Contains(body, fmt.Sprintf(`hx-post="/feeds/%d/delete"`, feedID)) {
+		t.Fatalf("expected edit mode delete control to defer deletion until save")
+	}
 	if strings.Contains(body, `class="feed-title-revert"`) {
 		t.Fatalf("expected no revert controls when feeds have no custom title overrides")
 	}
@@ -1129,6 +1138,7 @@ func TestFeedEditModeCancelDiscardsPendingRenames(t *testing.T) {
 	form := url.Values{}
 	form.Set("selected_feed_id", fmt.Sprintf("%d", feedID))
 	form.Set(fmt.Sprintf("feed_title_%d", feedID), "Changed But Canceled")
+	form.Set(fmt.Sprintf("feed_delete_%d", feedID), "1")
 	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/cancel", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
@@ -1151,6 +1161,9 @@ func TestFeedEditModeCancelDiscardsPendingRenames(t *testing.T) {
 	feeds, err := store.ListFeeds(app.db)
 	if err != nil {
 		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if len(feeds) != 1 {
+		t.Fatalf("expected feed to remain after cancel, got %d feeds", len(feeds))
 	}
 	if feeds[0].Title != "Cancel Feed" {
 		t.Fatalf("expected pending rename to be discarded, got %q", feeds[0].Title)
@@ -1204,6 +1217,73 @@ func TestFeedEditModeSaveAppliesRenamesAndExits(t *testing.T) {
 	}
 	if feeds[0].Title != "New Title" {
 		t.Fatalf("expected rename to persist on save, got %q", feeds[0].Title)
+	}
+}
+
+func TestFeedEditModeSaveDeletesMarkedFeeds(t *testing.T) {
+	app := newTestApp(t)
+
+	deleteFeedID, err := store.UpsertFeed(app.db, "http://example.com/delete", "Delete Me")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed delete: %v", err)
+	}
+	keepFeedID, err := store.UpsertFeed(app.db, "http://example.com/keep", "Keep Me")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed keep: %v", err)
+	}
+	if _, err := store.UpsertItems(app.db, keepFeedID, []*gofeed.Item{{
+		Title:           "Keep Item",
+		Link:            "http://example.com/keep-item",
+		GUID:            "keep-item",
+		Description:     "<p>Keep summary</p>",
+		PublishedParsed: testutil.TimePtr(time.Now().Add(-time.Hour)),
+	}}); err != nil {
+		t.Fatalf("store.UpsertItems keep: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("selected_feed_id", fmt.Sprintf("%d", deleteFeedID))
+	form.Set(fmt.Sprintf("feed_delete_%d", deleteFeedID), "1")
+	req := httptest.NewRequest(http.MethodPost, "/feeds/edit-mode/save", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: feedEditModeCookie, Value: "1"})
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "Delete Me") {
+		t.Fatalf("expected deleted feed to be absent from save response")
+	}
+	if !strings.Contains(body, "Keep Me") {
+		t.Fatalf("expected remaining feed in save response")
+	}
+	if !strings.Contains(body, `id="main-content" hx-swap-oob="innerHTML"`) {
+		t.Fatalf("expected main content update when selected feed is deleted")
+	}
+	if !strings.Contains(body, "Keep Item") {
+		t.Fatalf("expected replacement selected feed item list in response")
+	}
+	if strings.Contains(body, `class="feed-list edit-mode"`) {
+		t.Fatalf("expected edit mode to be cleared on save")
+	}
+
+	setCookie := rec.Header().Get("Set-Cookie")
+	if !strings.Contains(setCookie, feedEditModeCookie+"=") || !strings.Contains(setCookie, "Max-Age=0") {
+		t.Fatalf("expected edit mode cookie to be cleared")
+	}
+
+	feeds, err := store.ListFeeds(app.db)
+	if err != nil {
+		t.Fatalf("store.ListFeeds: %v", err)
+	}
+	if len(feeds) != 1 {
+		t.Fatalf("expected one feed after save delete, got %d", len(feeds))
+	}
+	if feeds[0].ID != keepFeedID {
+		t.Fatalf("expected remaining feed %d, got %d", keepFeedID, feeds[0].ID)
 	}
 }
 

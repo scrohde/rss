@@ -1,0 +1,15 @@
+{{define "feed_edit_save_response"}}
+  {{template "feed_list" .}}
+  {{if .ItemList}}
+    <div id="main-content" hx-swap-oob="innerHTML">
+      {{template "item_list" .ItemList}}
+    </div>
+  {{else if eq (len .Feeds) 0}}
+    <div id="main-content" hx-swap-oob="innerHTML">
+      <section class="empty-state">
+        <h2>Pick a feed to start reading.</h2>
+        <p>Subscribe to a new feed or select one from the sidebar.</p>
+      </section>
+    </div>
+  {{end}}
+{{end}}

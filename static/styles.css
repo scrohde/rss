@@ -412,6 +412,10 @@ body {
   flex-wrap: wrap;
 }
 
+.feed-delete-toggle {
+  display: none;
+}
+
 .feed-remove {
   display: none;
   width: 22px;
@@ -427,6 +431,11 @@ body {
 
 .feed-list.edit-mode .feed-remove {
   display: inline-flex;
+}
+
+.feed-list.edit-mode .feed-row.pending-delete .feed-remove {
+  border-radius: 50%;
+  background: rgba(185, 28, 28, 0.12);
 }
 
 .feed-remove:hover {
@@ -483,6 +492,12 @@ body {
   border-color: rgba(15, 118, 110, 0.2);
 }
 
+.feed-list.edit-mode .feed-row.pending-delete .feed-edit-title {
+  color: #7f1d1d;
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+
 .feed-title-revert {
   width: 30px;
   height: 30px;
@@ -514,6 +529,24 @@ body {
 .feed-title-revert .icon {
   width: 18px;
   height: 18px;
+}
+
+.feed-list.edit-mode .feed-row.pending-delete .feed-title-revert {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.feed-delete-pending {
+  display: none;
+  flex-basis: 100%;
+  margin-left: 28px;
+  font-size: 12px;
+  color: #7f1d1d;
+  font-weight: 600;
+}
+
+.feed-list.edit-mode .feed-row.pending-delete .feed-delete-pending {
+  display: inline-flex;
 }
 
 .feed-remove-message {

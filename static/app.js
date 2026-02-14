@@ -380,6 +380,31 @@
     return submitFeedEditForm();
   };
 
+  const syncFeedDeleteToggleState = (button, checked) => {
+    if (!button) {
+      return;
+    }
+    button.setAttribute("aria-pressed", checked ? "true" : "false");
+    const row = button.closest(".feed-row");
+    if (row) {
+      row.classList.toggle("pending-delete", checked);
+    }
+  };
+
+  const syncFeedDeleteMarks = () => {
+    const feedList = getFeedList();
+    if (!feedList) {
+      return;
+    }
+    feedList
+      .querySelectorAll(".feed-remove-mark[data-feed-delete-toggle]")
+      .forEach((button) => {
+        const inputID = button.dataset.feedDeleteToggle;
+        const input = inputID ? document.getElementById(inputID) : null;
+        syncFeedDeleteToggleState(button, Boolean(input && input.checked));
+      });
+  };
+
   const setSelectedFeed = (feedButton) => {
     const list = getFeedList();
     if (!list || !feedButton || !list.contains(feedButton)) {
@@ -417,6 +442,19 @@
   });
 
   document.addEventListener("click", (event) => {
+    const deleteToggleButton = event.target.closest(
+      ".feed-remove-mark[data-feed-delete-toggle]"
+    );
+    if (deleteToggleButton) {
+      const inputID = deleteToggleButton.dataset.feedDeleteToggle;
+      const input = inputID ? document.getElementById(inputID) : null;
+      if (input) {
+        input.checked = !input.checked;
+        syncFeedDeleteToggleState(deleteToggleButton, input.checked);
+      }
+      return;
+    }
+
     const revertButton = event.target.closest(".feed-title-revert");
     if (!revertButton) {
       return;
@@ -505,6 +543,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     bindTopbarShortcuts();
     syncTopbarShortcuts();
+    syncFeedDeleteMarks();
     if (isFeedEditMode()) {
       focusFeedEditTitleInput();
       return;
@@ -516,6 +555,7 @@
   document.body.addEventListener("htmx:afterSwap", (event) => {
     bindTopbarShortcuts();
     syncTopbarShortcuts();
+    syncFeedDeleteMarks();
     const swapTarget = event && event.detail ? event.detail.target : null;
     if (swapTarget && swapTarget.id === "feed-list" && isFeedEditMode()) {
       focusFeedEditTitleInput();

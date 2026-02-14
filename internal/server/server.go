@@ -394,6 +394,7 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
+	selectedFeedID := parseSelectedFeedID(r)
 
 	feeds, err := store.ListFeeds(a.db)
 	if err != nil {
@@ -408,8 +409,19 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 		originalTitles[listedFeed.ID] = strings.TrimSpace(listedFeed.OriginalTitle)
 	}
 
+	deleteUpdates := parseFeedDeleteUpdates(r.PostForm)
+	deleteByID := make(map[int64]struct{}, len(deleteUpdates))
+	for _, feedID := range deleteUpdates {
+		if _, exists := currentTitles[feedID]; exists {
+			deleteByID[feedID] = struct{}{}
+		}
+	}
+
 	updates := parseFeedTitleUpdates(r.PostForm)
 	for _, feedID := range updates.FeedIDs {
+		if _, markedForDelete := deleteByID[feedID]; markedForDelete {
+			continue
+		}
 		title := updates.TitlesByID[feedID]
 		if title == originalTitles[feedID] {
 			if err := store.UpdateFeedTitle(a.db, feedID, ""); err != nil {
@@ -427,6 +439,20 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	selectedFeedDeleted := false
+	for _, feedID := range deleteUpdates {
+		if _, markedForDelete := deleteByID[feedID]; !markedForDelete {
+			continue
+		}
+		if err := store.DeleteFeed(a.db, feedID); err != nil {
+			http.Error(w, "failed to delete feed", http.StatusInternalServerError)
+			return
+		}
+		if feedID == selectedFeedID {
+			selectedFeedDeleted = true
+		}
+	}
+
 	clearFeedEditModeCookie(w)
 
 	feeds, err = store.ListFeeds(a.db)
@@ -435,13 +461,29 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deletedFeedID := int64(0)
+	if selectedFeedDeleted {
+		deletedFeedID = selectedFeedID
+	}
+	selectedFeedID = store.SelectRemainingFeed(selectedFeedID, deletedFeedID, feeds)
+
+	var itemList *view.ItemListData
+	if selectedFeedDeleted && selectedFeedID != 0 {
+		itemList, err = store.LoadItemList(a.db, selectedFeedID)
+		if err != nil {
+			http.Error(w, "failed to load items", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	data := view.ItemListResponseData{
+		ItemList:          itemList,
 		Feeds:             feeds,
-		SelectedFeedID:    parseSelectedFeedID(r),
+		SelectedFeedID:    selectedFeedID,
 		SkipDeleteWarning: deleteWarningSkipped(r),
 		FeedEditMode:      false,
 	}
-	a.renderTemplate(w, "feed_list", data)
+	a.renderTemplate(w, "feed_edit_save_response", data)
 }
 
 func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
@@ -985,6 +1027,42 @@ func parseSelectedItemID(r *http.Request) int64 {
 type feedTitleUpdates struct {
 	FeedIDs    []int64
 	TitlesByID map[int64]string
+}
+
+func parseFeedDeleteUpdates(values url.Values) []int64 {
+	feedIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+
+	for key, rawValues := range values {
+		if !strings.HasPrefix(key, "feed_delete_") || !containsTruthyValue(rawValues) {
+			continue
+		}
+		rawID := strings.TrimPrefix(key, "feed_delete_")
+		feedID, err := strconv.ParseInt(rawID, 10, 64)
+		if err != nil || feedID <= 0 {
+			continue
+		}
+		if _, exists := seen[feedID]; exists {
+			continue
+		}
+		seen[feedID] = struct{}{}
+		feedIDs = append(feedIDs, feedID)
+	}
+
+	sort.Slice(feedIDs, func(i, j int) bool {
+		return feedIDs[i] < feedIDs[j]
+	})
+	return feedIDs
+}
+
+func containsTruthyValue(values []string) bool {
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "1", "true", "on":
+			return true
+		}
+	}
+	return false
 }
 
 func parseFeedTitleUpdates(values url.Values) feedTitleUpdates {
