@@ -44,6 +44,19 @@ func TestRewriteSummaryHTMLForBaseRelativeSrcset(t *testing.T) {
 	}
 }
 
+func TestRewriteSummaryHTMLSrcsetWithCommasInURL(t *testing.T) {
+	input := `<img srcset="https://substackcdn.com/image/fetch/$s_!sBbM!,w_424,c_limit,f_auto,q_auto:good/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fa.png 424w, https://substackcdn.com/image/fetch/$s_!sBbM!,w_848,c_limit,f_auto,q_auto:good/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fa.png 848w" src="https://substackcdn.com/image/fetch/$s_!sBbM!,w_848,c_limit,f_auto,q_auto:good/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fa.png">`
+	output := RewriteSummaryHTML(input, "")
+	if strings.Contains(output, ", w_424, c_limit") || strings.Contains(output, ", w_848, c_limit") {
+		t.Fatalf("expected srcset URLs with embedded commas to remain intact, got %q", output)
+	}
+	proxied424 := ImageProxyPath + "?url=" + url.QueryEscape("https://substackcdn.com/image/fetch/$s_!sBbM!,w_424,c_limit,f_auto,q_auto:good/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fa.png")
+	proxied848 := ImageProxyPath + "?url=" + url.QueryEscape("https://substackcdn.com/image/fetch/$s_!sBbM!,w_848,c_limit,f_auto,q_auto:good/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fa.png")
+	if !strings.Contains(output, proxied424+" 424w") || !strings.Contains(output, proxied848+" 848w") {
+		t.Fatalf("expected proxied srcset candidates, got %q", output)
+	}
+}
+
 func TestRewriteSummaryHTMLAnchorTargetAndRel(t *testing.T) {
 	input := `<a href="https://example.com">Example</a>`
 	output := RewriteSummaryHTML(input, "")
@@ -68,5 +81,27 @@ func TestRewriteSummaryHTMLAnchorTargetOverwritesNonBlank(t *testing.T) {
 	output := RewriteSummaryHTML(input, "")
 	if !strings.Contains(output, `target="_blank"`) {
 		t.Fatalf("expected target _blank, got %q", output)
+	}
+}
+
+func TestBuildImageProxyRequestHeaders(t *testing.T) {
+	target, err := url.Parse("https://cdn-images-1.medium.com/max/1024/1*svqMSkVB3MnkjOetkxoLCQ.png")
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+
+	req, err := BuildImageProxyRequest(target)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	if got := req.Header.Get("User-Agent"); got != ImageProxyUserAgent {
+		t.Fatalf("expected image proxy user-agent %q, got %q", ImageProxyUserAgent, got)
+	}
+	if got := req.Header.Get("Accept"); got == "" || !strings.Contains(got, "image/webp") {
+		t.Fatalf("expected image-focused accept header, got %q", got)
+	}
+	if got := req.Header.Get("Referer"); got != "" {
+		t.Fatalf("expected no referer header, got %q", got)
 	}
 }

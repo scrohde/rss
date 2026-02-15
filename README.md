@@ -21,6 +21,9 @@ go run .
 
 Then open http://localhost:8080.
 
+Optional debug:
+- `IMAGE_PROXY_DEBUG=1 go run .` logs non-2xx upstream image-proxy responses.
+
 ## Tests
 ```bash
 go test ./...

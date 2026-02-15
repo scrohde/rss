@@ -33,6 +33,7 @@ type App struct {
 	tmpl             *template.Template
 	refreshMu        sync.Mutex
 	imageProxyClient *http.Client
+	imageProxyDebug  bool
 }
 
 func New(db *sql.DB, tmpl *template.Template) *App {
@@ -41,6 +42,10 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 		tmpl:             tmpl,
 		imageProxyClient: content.NewHTTPClient(),
 	}
+}
+
+func (a *App) SetImageProxyDebug(enabled bool) {
+	a.imageProxyDebug = enabled
 }
 
 func (a *App) Routes() http.Handler {
@@ -839,6 +844,14 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if a.imageProxyDebug {
+			slog.Info(
+				"image proxy upstream non-2xx",
+				"status", resp.StatusCode,
+				"target_host", target.Host,
+				"target_path", target.EscapedPath(),
+			)
+		}
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"html/template"
+	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -15,12 +17,19 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"rss/internal/content"
 	feedpkg "rss/internal/feed"
 	"rss/internal/opml"
 	"rss/internal/store"
 	"rss/internal/testutil"
 	"rss/internal/view"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func newTestApp(t *testing.T) *App {
 	t.Helper()
@@ -1802,6 +1811,76 @@ func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
 				t.Fatalf("expected unit %q in %q", tc.wantUnit, got)
 			}
 		})
+	}
+}
+
+func TestImageProxyNon2xxLogsWhenDebugEnabled(t *testing.T) {
+	app := newTestApp(t)
+	app.SetImageProxyDebug(true)
+	app.imageProxyClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("forbidden")),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	var logs bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(prevLogger)
+
+	proxyURL := content.ImageProxyPath + "?url=" + url.QueryEscape("https://cdn-images-1.medium.com/max/1024/example.png")
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+	body := logs.String()
+	if !strings.Contains(body, "image proxy upstream non-2xx") {
+		t.Fatalf("expected debug log for non-2xx upstream response, got %q", body)
+	}
+	if !strings.Contains(body, "status=403") {
+		t.Fatalf("expected status in log entry, got %q", body)
+	}
+}
+
+func TestImageProxyNon2xxDoesNotLogWhenDebugDisabled(t *testing.T) {
+	app := newTestApp(t)
+	app.SetImageProxyDebug(false)
+	app.imageProxyClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("forbidden")),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	var logs bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(prevLogger)
+
+	proxyURL := content.ImageProxyPath + "?url=" + url.QueryEscape("https://cdn-images-1.medium.com/max/1024/example.png")
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+	if strings.Contains(logs.String(), "image proxy upstream non-2xx") {
+		t.Fatalf("expected no non-2xx debug log when disabled, got %q", logs.String())
 	}
 }
 

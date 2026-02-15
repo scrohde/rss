@@ -31,6 +31,7 @@ func main() {
 	tmpl = template.Must(tmpl.ParseGlob("templates/partials/*.html"))
 
 	app := server.New(db, tmpl)
+	app.SetImageProxyDebug(envBool("IMAGE_PROXY_DEBUG"))
 	app.StartBackgroundLoops()
 
 	httpServer := &http.Server{
@@ -69,4 +70,14 @@ func resolveAddr() string {
 		return ":8080"
 	}
 	return ":" + port
+}
+
+func envBool(name string) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

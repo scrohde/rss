@@ -18,6 +18,7 @@ const (
 	MaxImageProxyURLLength  = 4096
 	ImageProxyTimeout       = 15 * time.Second
 	ImageProxyCacheFallback = "public, max-age=86400"
+	ImageProxyUserAgent     = "Mozilla/5.0 (compatible; PulseRSSImageProxy/1.0; +https://localhost)"
 )
 
 func NewHTTPClient() *http.Client {
@@ -169,27 +170,93 @@ func ensureRelTokens(node *html.Node, required ...string) bool {
 }
 
 func rewriteSrcset(value string, base *url.URL) (string, bool) {
-	parts := strings.Split(value, ",")
+	parts := parseSrcsetCandidates(value)
+	if len(parts) == 0 {
+		return value, false
+	}
 	changed := false
-	for i, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed == "" {
-			continue
-		}
-		fields := strings.Fields(trimmed)
-		if len(fields) == 0 {
-			continue
-		}
-		if updated, ok := ProxyImageURL(fields[0], base); ok {
-			fields[0] = updated
+	rewritten := make([]string, 0, len(parts))
+	for _, part := range parts {
+		imageURL := part.url
+		if updated, ok := ProxyImageURL(imageURL, base); ok {
+			imageURL = updated
 			changed = true
 		}
-		parts[i] = strings.Join(fields, " ")
+		if part.descriptor == "" {
+			rewritten = append(rewritten, imageURL)
+			continue
+		}
+		rewritten = append(rewritten, imageURL+" "+part.descriptor)
 	}
 	if !changed {
 		return value, false
 	}
-	return strings.Join(parts, ", "), true
+	return strings.Join(rewritten, ", "), true
+}
+
+type srcsetCandidate struct {
+	url        string
+	descriptor string
+}
+
+func parseSrcsetCandidates(value string) []srcsetCandidate {
+	var candidates []srcsetCandidate
+	i := 0
+	for i < len(value) {
+		for i < len(value) && (isASCIISpace(value[i]) || value[i] == ',') {
+			i++
+		}
+		if i >= len(value) {
+			break
+		}
+
+		urlStart := i
+		for i < len(value) {
+			if isASCIISpace(value[i]) {
+				break
+			}
+			if value[i] == ',' {
+				j := i + 1
+				for j < len(value) && isASCIISpace(value[j]) {
+					j++
+				}
+				if j >= len(value) || j > i+1 {
+					break
+				}
+			}
+			i++
+		}
+
+		imageURL := strings.TrimSpace(value[urlStart:i])
+		if imageURL == "" {
+			i++
+			continue
+		}
+
+		if i < len(value) && value[i] == ',' {
+			candidates = append(candidates, srcsetCandidate{url: imageURL})
+			i++
+			continue
+		}
+
+		descStart := i
+		for i < len(value) && value[i] != ',' {
+			i++
+		}
+		descriptor := strings.TrimSpace(value[descStart:i])
+		candidates = append(candidates, srcsetCandidate{
+			url:        imageURL,
+			descriptor: descriptor,
+		})
+		if i < len(value) && value[i] == ',' {
+			i++
+		}
+	}
+	return candidates
+}
+
+func isASCIISpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\f' || b == '\r'
 }
 
 func ProxyImageURL(raw string, base *url.URL) (string, bool) {
@@ -273,8 +340,7 @@ func BuildImageProxyRequest(target *url.URL) (*http.Request, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
-	req.Header.Set("User-Agent", "PulseRSS/1.0")
-	req.Header.Set("Accept", "image/*,*/*;q=0.8")
-	req.Header.Set("Referer", fmt.Sprintf("%s://%s/", target.Scheme, target.Host))
+	req.Header.Set("User-Agent", ImageProxyUserAgent)
+	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 	return req, nil
 }
