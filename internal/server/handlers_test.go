@@ -2,12 +2,14 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
 	"html/template"
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1881,6 +1883,112 @@ func TestImageProxyNon2xxDoesNotLogWhenDebugDisabled(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "image proxy upstream non-2xx") {
 		t.Fatalf("expected no non-2xx debug log when disabled, got %q", logs.String())
+	}
+}
+
+func TestImageProxyRejectsResolvedPrivateHost(t *testing.T) {
+	app := newTestApp(t)
+	app.imageProxyLookup = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host != "example.com" {
+			t.Fatalf("unexpected host %q", host)
+		}
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	app.imageProxyClient = &http.Client{
+		Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+			t.Fatalf("unexpected upstream request")
+			return nil, nil
+		}),
+	}
+
+	proxyURL := content.ImageProxyPath + "?url=" + url.QueryEscape("https://example.com/image.png")
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid url") {
+		t.Fatalf("expected invalid url response, got %q", rec.Body.String())
+	}
+}
+
+func TestImageProxyRejectsOversizedImage(t *testing.T) {
+	app := newTestApp(t)
+	app.imageProxyLookup = func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+	}
+	oversized := bytes.Repeat([]byte("a"), int(content.ImageProxyMaxBodyBytes)+1)
+	app.imageProxyClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Header:        http.Header{"Content-Type": []string{"image/png"}},
+				Body:          io.NopCloser(bytes.NewReader(oversized)),
+				ContentLength: int64(len(oversized)),
+				Request:       req,
+			}, nil
+		}),
+	}
+
+	proxyURL := content.ImageProxyPath + "?url=" + url.QueryEscape("https://example.com/image.png")
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "upstream image too large") {
+		t.Fatalf("expected upstream image too large response, got %q", rec.Body.String())
+	}
+}
+
+func TestImageProxyServesImageWithinSizeLimit(t *testing.T) {
+	app := newTestApp(t)
+	app.imageProxyLookup = func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+	}
+	imageBody := []byte("png-data")
+	app.imageProxyClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type":  []string{"image/png"},
+					"Cache-Control": []string{"public, max-age=60"},
+					"ETag":          []string{"\"abc123\""},
+				},
+				Body:          io.NopCloser(bytes.NewReader(imageBody)),
+				ContentLength: int64(len(imageBody)),
+				Request:       req,
+			}, nil
+		}),
+	}
+
+	proxyURL := content.ImageProxyPath + "?url=" + url.QueryEscape("https://example.com/image.png")
+	req := httptest.NewRequest(http.MethodGet, proxyURL, nil)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if body := rec.Body.Bytes(); !bytes.Equal(body, imageBody) {
+		t.Fatalf("unexpected response body: got %q want %q", body, imageBody)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("expected image/png content-type, got %q", got)
+	}
+	if got := rec.Header().Get("Content-Length"); got != "8" {
+		t.Fatalf("expected content-length 8, got %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=60" {
+		t.Fatalf("expected cache-control preserved, got %q", got)
 	}
 }
 

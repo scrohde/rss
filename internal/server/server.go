@@ -2,12 +2,14 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"errors"
 	"html/template"
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -34,6 +36,7 @@ type App struct {
 	refreshMu        sync.Mutex
 	imageProxyClient *http.Client
 	imageProxyDebug  bool
+	imageProxyLookup content.LookupIPAddrFunc
 }
 
 func New(db *sql.DB, tmpl *template.Template) *App {
@@ -41,6 +44,9 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 		db:               db,
 		tmpl:             tmpl,
 		imageProxyClient: content.NewHTTPClient(),
+		imageProxyLookup: func(ctx context.Context, host string) ([]net.IPAddr, error) {
+			return net.DefaultResolver.LookupIPAddr(ctx, host)
+		},
 	}
 }
 
@@ -825,7 +831,7 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target, err := url.Parse(raw)
-	if err != nil || !content.IsAllowedProxyURL(target) {
+	if err != nil || !content.IsAllowedResolvedProxyURL(r.Context(), target, a.imageProxyLookup) {
 		http.Error(w, "invalid url", http.StatusBadRequest)
 		return
 	}
@@ -868,6 +874,16 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 		contentType = detected
 	}
 
+	body, err := io.ReadAll(io.LimitReader(reader, content.ImageProxyMaxBodyBytes+1))
+	if err != nil {
+		http.Error(w, "upstream read failed", http.StatusBadGateway)
+		return
+	}
+	if int64(len(body)) > content.ImageProxyMaxBodyBytes {
+		http.Error(w, "upstream image too large", http.StatusBadGateway)
+		return
+	}
+
 	w.Header().Set("Content-Type", contentType)
 	if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" {
 		w.Header().Set("Cache-Control", cacheControl)
@@ -880,11 +896,9 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	if modified := resp.Header.Get("Last-Modified"); modified != "" {
 		w.Header().Set("Last-Modified", modified)
 	}
-	if length := resp.Header.Get("Content-Length"); length != "" {
-		w.Header().Set("Content-Length", length)
-	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 
-	if _, err := io.Copy(w, reader); err != nil {
+	if _, err := w.Write(body); err != nil {
 		log.Printf("image proxy copy: %v", err)
 	}
 }

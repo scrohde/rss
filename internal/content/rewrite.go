@@ -12,6 +12,7 @@ import (
 const (
 	ImageProxyPath          = "/image-proxy"
 	MaxImageProxyURLLength  = 4096
+	ImageProxyMaxBodyBytes  = 10 << 20
 	ImageProxyTimeout       = 15 * time.Second
 	ImageProxyCacheFallback = "public, max-age=86400"
 	ImageProxyUserAgent     = "Mozilla/5.0 (compatible; PulseRSSImageProxy/1.0; +https://localhost)"
