@@ -84,6 +84,14 @@ func TestRewriteSummaryHTMLAnchorTargetOverwritesNonBlank(t *testing.T) {
 	}
 }
 
+func TestRewriteSummaryHTMLAnchorHrefResolvesAgainstBase(t *testing.T) {
+	input := `<a href="/r/u_hackrepair/comments/1r60b1p/weve_built_this_before/">[link]</a>`
+	output := RewriteSummaryHTML(input, "https://www.reddit.com/r/accelerate/comments/1r60h2p/discussion_weve_built_this_before/")
+	if !strings.Contains(output, `href="https://www.reddit.com/r/u_hackrepair/comments/1r60b1p/weve_built_this_before/"`) {
+		t.Fatalf("expected absolute href, got %q", output)
+	}
+}
+
 func TestBuildImageProxyRequestHeaders(t *testing.T) {
 	target, err := url.Parse("https://cdn-images-1.medium.com/max/1024/1*svqMSkVB3MnkjOetkxoLCQ.png")
 	if err != nil {

@@ -67,6 +67,11 @@ func rewriteSummaryNode(node *html.Node, base *url.URL) bool {
 				changed = true
 			}
 		case "a":
+			if rewriteAttr(node, "href", func(value string) (string, bool) {
+				return rewriteAnchorURL(value, base)
+			}) {
+				changed = true
+			}
 			if upsertAttr(node, "target", "_blank") {
 				changed = true
 			}
@@ -153,6 +158,36 @@ func ensureRelTokens(node *html.Node, required ...string) bool {
 
 func containsRewriteTargets(text string) bool {
 	return strings.Contains(text, "<img") || strings.Contains(text, "<source") || strings.Contains(text, "<a")
+}
+
+func rewriteAnchorURL(rawURL string, base *url.URL) (string, bool) {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return rawURL, false
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return rawURL, false
+	}
+	if parsed.Host == "" {
+		if base == nil {
+			return rawURL, false
+		}
+		parsed = base.ResolveReference(parsed)
+	} else if parsed.Scheme == "" && base != nil {
+		parsed.Scheme = base.Scheme
+	}
+	if parsed.Host == "" {
+		return rawURL, false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return rawURL, false
+	}
+	rewritten := parsed.String()
+	if rewritten == rawURL {
+		return rawURL, false
+	}
+	return rewritten, true
 }
 
 // parseSummaryBaseURL keeps rewriting deterministic by accepting only absolute
