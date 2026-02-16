@@ -1,10 +1,6 @@
 package content
 
 import (
-	"errors"
-	"fmt"
-	"net"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -21,25 +17,10 @@ const (
 	ImageProxyUserAgent     = "Mozilla/5.0 (compatible; PulseRSSImageProxy/1.0; +https://localhost)"
 )
 
-func NewHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: ImageProxyTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("stopped after 10 redirects")
-			}
-			if !IsAllowedProxyURL(req.URL) {
-				return errors.New("redirect blocked")
-			}
-			return nil
-		},
-	}
-}
+func RewriteSummaryHTML(text, baseURLRaw string) string {
+	base := parseSummaryBaseURL(baseURLRaw)
 
-func RewriteSummaryHTML(text, baseRaw string) string {
-	base := parseRewriteBaseURL(baseRaw)
-
-	if !strings.Contains(text, "<img") && !strings.Contains(text, "<source") && !strings.Contains(text, "<a") {
+	if !containsRewriteTargets(text) {
 		return text
 	}
 	root := &html.Node{Type: html.ElementNode, DataAtom: atom.Div, Data: "div"}
@@ -169,132 +150,13 @@ func ensureRelTokens(node *html.Node, required ...string) bool {
 	return true
 }
 
-func rewriteSrcset(value string, base *url.URL) (string, bool) {
-	parts := parseSrcsetCandidates(value)
-	if len(parts) == 0 {
-		return value, false
-	}
-	changed := false
-	rewritten := make([]string, 0, len(parts))
-	for _, part := range parts {
-		imageURL := part.url
-		if updated, ok := ProxyImageURL(imageURL, base); ok {
-			imageURL = updated
-			changed = true
-		}
-		if part.descriptor == "" {
-			rewritten = append(rewritten, imageURL)
-			continue
-		}
-		rewritten = append(rewritten, imageURL+" "+part.descriptor)
-	}
-	if !changed {
-		return value, false
-	}
-	return strings.Join(rewritten, ", "), true
+func containsRewriteTargets(text string) bool {
+	return strings.Contains(text, "<img") || strings.Contains(text, "<source") || strings.Contains(text, "<a")
 }
 
-type srcsetCandidate struct {
-	url        string
-	descriptor string
-}
-
-func parseSrcsetCandidates(value string) []srcsetCandidate {
-	var candidates []srcsetCandidate
-	i := 0
-	for i < len(value) {
-		for i < len(value) && (isASCIISpace(value[i]) || value[i] == ',') {
-			i++
-		}
-		if i >= len(value) {
-			break
-		}
-
-		urlStart := i
-		for i < len(value) {
-			if isASCIISpace(value[i]) {
-				break
-			}
-			if value[i] == ',' {
-				j := i + 1
-				for j < len(value) && isASCIISpace(value[j]) {
-					j++
-				}
-				if j >= len(value) || j > i+1 {
-					break
-				}
-			}
-			i++
-		}
-
-		imageURL := strings.TrimSpace(value[urlStart:i])
-		if imageURL == "" {
-			i++
-			continue
-		}
-
-		if i < len(value) && value[i] == ',' {
-			candidates = append(candidates, srcsetCandidate{url: imageURL})
-			i++
-			continue
-		}
-
-		descStart := i
-		for i < len(value) && value[i] != ',' {
-			i++
-		}
-		descriptor := strings.TrimSpace(value[descStart:i])
-		candidates = append(candidates, srcsetCandidate{
-			url:        imageURL,
-			descriptor: descriptor,
-		})
-		if i < len(value) && value[i] == ',' {
-			i++
-		}
-	}
-	return candidates
-}
-
-func isASCIISpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\f' || b == '\r'
-}
-
-func ProxyImageURL(raw string, base *url.URL) (string, bool) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return raw, false
-	}
-	if strings.HasPrefix(trimmed, ImageProxyPath+"?") {
-		return raw, false
-	}
-	if strings.HasPrefix(strings.ToLower(trimmed), "data:") {
-		return raw, false
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return raw, false
-	}
-	if parsed.Host == "" {
-		if base == nil {
-			return raw, false
-		}
-		parsed = base.ResolveReference(parsed)
-	} else if parsed.Scheme == "" && base != nil {
-		parsed.Scheme = base.Scheme
-	}
-	if parsed.Host == "" {
-		return raw, false
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return raw, false
-	}
-	if !IsAllowedProxyURL(parsed) {
-		return raw, false
-	}
-	return ImageProxyPath + "?url=" + url.QueryEscape(parsed.String()), true
-}
-
-func parseRewriteBaseURL(raw string) *url.URL {
+// parseSummaryBaseURL keeps rewriting deterministic by accepting only absolute
+// http(s) URLs with a host.
+func parseSummaryBaseURL(raw string) *url.URL {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil
@@ -307,40 +169,4 @@ func parseRewriteBaseURL(raw string) *url.URL {
 		return nil
 	}
 	return parsed
-}
-
-func IsAllowedProxyURL(target *url.URL) bool {
-	if target == nil {
-		return false
-	}
-	if target.Scheme != "http" && target.Scheme != "https" {
-		return false
-	}
-	if target.Hostname() == "" {
-		return false
-	}
-	return !isDisallowedHost(target.Hostname())
-}
-
-func isDisallowedHost(host string) bool {
-	hostname := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
-	if hostname == "" || hostname == "localhost" {
-		return true
-	}
-	if ip := net.ParseIP(hostname); ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
-			return true
-		}
-	}
-	return false
-}
-
-func BuildImageProxyRequest(target *url.URL) (*http.Request, error) {
-	req, err := http.NewRequest(http.MethodGet, target.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("invalid request: %w", err)
-	}
-	req.Header.Set("User-Agent", ImageProxyUserAgent)
-	req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-	return req, nil
 }

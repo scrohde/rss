@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"math/rand"
 	"testing"
 	"time"
 )
@@ -27,7 +26,6 @@ func TestComputeBackoffInterval(t *testing.T) {
 }
 
 func TestApplyJitterRange(t *testing.T) {
-	rand.Seed(1)
 	base := RefreshInterval
 	min := time.Duration(float64(base) * (1 - 0.20))
 	max := time.Duration(float64(base) * (1 + 0.20))
