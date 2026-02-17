@@ -7,6 +7,7 @@ import (
 	"errors"
 	"html/template"
 	"io"
+	"io/fs"
 	"log"
 	"log/slog"
 	"net"
@@ -33,6 +34,7 @@ const maxOPMLUploadBytes int64 = 2 << 20
 type App struct {
 	db               *sql.DB
 	tmpl             *template.Template
+	staticHandler    http.Handler
 	refreshMu        sync.Mutex
 	imageProxyClient *http.Client
 	imageProxyDebug  bool
@@ -43,11 +45,16 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	return &App{
 		db:               db,
 		tmpl:             tmpl,
+		staticHandler:    http.FileServer(http.Dir("static")),
 		imageProxyClient: content.NewHTTPClient(),
 		imageProxyLookup: func(ctx context.Context, host string) ([]net.IPAddr, error) {
 			return net.DefaultResolver.LookupIPAddr(ctx, host)
 		},
 	}
+}
+
+func (a *App) SetStaticFS(fsys fs.FS) {
+	a.staticHandler = http.FileServer(http.FS(fsys))
 }
 
 func (a *App) SetImageProxyDebug(enabled bool) {
@@ -56,7 +63,7 @@ func (a *App) SetImageProxyDebug(enabled bool) {
 
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", a.staticHandler))
 	mux.HandleFunc("GET /{$}", a.handleIndex)
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
 	mux.HandleFunc("POST /feeds/edit-mode", a.handleEnterFeedEditMode)

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"embed"
 	"errors"
 	"html/template"
+	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
@@ -14,6 +16,12 @@ import (
 	"rss/internal/server"
 	"rss/internal/store"
 )
+
+//go:embed templates/*.html templates/partials/*.html
+var templateFiles embed.FS
+
+//go:embed static
+var staticFiles embed.FS
 
 func main() {
 	setupLogging()
@@ -27,10 +35,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tmpl := template.Must(template.ParseGlob("templates/*.html"))
-	tmpl = template.Must(tmpl.ParseGlob("templates/partials/*.html"))
+	tmpl := template.Must(template.ParseFS(templateFiles, "templates/*.html", "templates/partials/*.html"))
+	staticFS, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	app := server.New(db, tmpl)
+	app.SetStaticFS(staticFS)
 	app.SetImageProxyDebug(envBool("IMAGE_PROXY_DEBUG"))
 	app.StartBackgroundLoops()
 
@@ -61,15 +73,15 @@ func setupLogging() {
 func resolveAddr() string {
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
-		return ":8080"
+		return "127.0.0.1:8080"
 	}
 	if strings.HasPrefix(port, ":") {
-		return port
+		return "127.0.0.1" + port
 	}
 	if _, err := strconv.Atoi(port); err != nil {
-		return ":8080"
+		return "127.0.0.1:8080"
 	}
-	return ":" + port
+	return "127.0.0.1:" + port
 }
 
 func envBool(name string) bool {
