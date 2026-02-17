@@ -488,28 +488,6 @@ body {
   margin: 0;
 }
 
-.feed-remove-confirm {
-  display: none;
-  flex-basis: 100%;
-  margin-left: 28px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(185, 28, 28, 0.2);
-  background: rgba(185, 28, 28, 0.06);
-  color: #7f1d1d;
-  font-size: 12px;
-  gap: 8px;
-}
-
-.feed-list.edit-mode .feed-remove-confirm {
-  display: flex;
-  flex-direction: column;
-}
-
-.feed-list.edit-mode .feed-remove-confirm:empty {
-  display: none;
-}
-
 .feed-edit-title {
   flex: 1;
   min-width: 0;
@@ -589,23 +567,6 @@ body {
 
 .feed-list.edit-mode .feed-row.pending-delete .feed-delete-pending {
   display: inline-flex;
-}
-
-.feed-remove-message {
-  font-weight: 600;
-}
-
-.feed-remove-skip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 500;
-}
-
-.feed-remove-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .icon {

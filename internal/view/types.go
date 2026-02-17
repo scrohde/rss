@@ -32,22 +32,20 @@ type ItemListData struct {
 }
 
 type PageData struct {
-	Feeds             []FeedView
-	SelectedFeedID    int64
-	ItemList          *ItemListData
-	SkipDeleteWarning bool
-	FeedEditMode      bool
+	Feeds          []FeedView
+	SelectedFeedID int64
+	ItemList       *ItemListData
+	FeedEditMode   bool
 }
 
 type SubscribeResponseData struct {
-	Message           string
-	MessageClass      string
-	Feeds             []FeedView
-	SelectedFeedID    int64
-	ItemList          *ItemListData
-	Update            bool
-	SkipDeleteWarning bool
-	FeedEditMode      bool
+	Message        string
+	MessageClass   string
+	Feeds          []FeedView
+	SelectedFeedID int64
+	ItemList       *ItemListData
+	Update         bool
+	FeedEditMode   bool
 }
 
 type NewItemsData struct {
@@ -63,32 +61,24 @@ type NewItemsResponseData struct {
 }
 
 type PollResponseData struct {
-	Banner            NewItemsData
-	Feeds             []FeedView
-	RefreshDisplay    string
-	SelectedFeedID    int64
-	SkipDeleteWarning bool
-	FeedEditMode      bool
+	Banner         NewItemsData
+	Feeds          []FeedView
+	RefreshDisplay string
+	SelectedFeedID int64
+	FeedEditMode   bool
 }
 
 type ItemListResponseData struct {
-	ItemList          *ItemListData
-	Feeds             []FeedView
-	SelectedFeedID    int64
-	SkipDeleteWarning bool
-	FeedEditMode      bool
+	ItemList       *ItemListData
+	Feeds          []FeedView
+	SelectedFeedID int64
+	FeedEditMode   bool
 }
 
 type ToggleReadResponseData struct {
-	Item              ItemView
-	Feeds             []FeedView
-	SelectedFeedID    int64
-	View              string
-	SkipDeleteWarning bool
-	FeedEditMode      bool
-}
-
-type DeleteFeedConfirmData struct {
-	Feed FeedView
-	Show bool
+	Item           ItemView
+	Feeds          []FeedView
+	SelectedFeedID int64
+	View           string
+	FeedEditMode   bool
 }

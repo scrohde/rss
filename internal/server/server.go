@@ -26,7 +26,6 @@ import (
 	"rss/internal/view"
 )
 
-const skipDeleteWarningCookie = "pulse_rss_skip_delete_warning"
 const feedEditModeCookie = "pulse_rss_feed_edit_mode"
 
 const maxOPMLUploadBytes int64 = 2 << 20
@@ -72,7 +71,6 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /opml/export", a.handleExportOPML)
 	mux.HandleFunc("POST /opml/import", a.handleImportOPML)
 	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
-	mux.HandleFunc("GET /feeds/{feedID}/delete/confirm", a.handleDeleteFeedConfirm)
 	mux.HandleFunc("POST /feeds/{feedID}/delete", a.handleDeleteFeed)
 	mux.HandleFunc("POST /feeds/{feedID}/refresh", a.handleRefreshFeed)
 	mux.HandleFunc("GET /feeds/{feedID}/items", a.handleFeedItems)
@@ -89,26 +87,6 @@ func (a *App) Routes() http.Handler {
 func (a *App) StartBackgroundLoops() {
 	go a.cleanupLoop()
 	go a.refreshLoop()
-}
-
-func deleteWarningSkipped(r *http.Request) bool {
-	cookie, err := r.Cookie(skipDeleteWarningCookie)
-	if err != nil {
-		return false
-	}
-	return cookie.Value == "1"
-}
-
-func setSkipDeleteWarningCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     skipDeleteWarningCookie,
-		Value:    "1",
-		Path:     "/",
-		MaxAge:   60 * 60 * 24 * 365,
-		Expires:  time.Now().Add(365 * 24 * time.Hour),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
 }
 
 func feedEditModeEnabled(r *http.Request) bool {
@@ -151,9 +129,8 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.PageData{
-		Feeds:             feeds,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      feedEditModeEnabled(r),
+		Feeds:        feeds,
+		FeedEditMode: feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "index", data)
 }
@@ -243,12 +220,11 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.SubscribeResponseData{
-		Feeds:             feeds,
-		SelectedFeedID:    feedID,
-		ItemList:          itemList,
-		Update:            true,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      feedEditModeEnabled(r),
+		Feeds:          feeds,
+		SelectedFeedID: feedID,
+		ItemList:       itemList,
+		Update:         true,
+		FeedEditMode:   feedEditModeEnabled(r),
 	}
 
 	a.renderTemplate(w, "subscribe_response", data)
@@ -359,12 +335,11 @@ func (a *App) renderOPMLImportResponse(w http.ResponseWriter, r *http.Request, i
 	}
 
 	data := view.SubscribeResponseData{
-		Message:           message,
-		MessageClass:      messageClass,
-		Feeds:             feeds,
-		Update:            update,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      feedEditModeEnabled(r),
+		Message:      message,
+		MessageClass: messageClass,
+		Feeds:        feeds,
+		Update:       update,
+		FeedEditMode: feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "opml_import_response", data)
 }
@@ -379,10 +354,9 @@ func (a *App) handleEnterFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.ItemListResponseData{
-		Feeds:             feeds,
-		SelectedFeedID:    parseSelectedFeedID(r),
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      true,
+		Feeds:          feeds,
+		SelectedFeedID: parseSelectedFeedID(r),
+		FeedEditMode:   true,
 	}
 	a.renderTemplate(w, "feed_list", data)
 }
@@ -397,10 +371,9 @@ func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.ItemListResponseData{
-		Feeds:             feeds,
-		SelectedFeedID:    parseSelectedFeedID(r),
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      false,
+		Feeds:          feeds,
+		SelectedFeedID: parseSelectedFeedID(r),
+		FeedEditMode:   false,
 	}
 	a.renderTemplate(w, "feed_list", data)
 }
@@ -507,11 +480,10 @@ func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.ItemListResponseData{
-		ItemList:          itemList,
-		Feeds:             feeds,
-		SelectedFeedID:    selectedFeedID,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      false,
+		ItemList:       itemList,
+		Feeds:          feeds,
+		SelectedFeedID: selectedFeedID,
+		FeedEditMode:   false,
 	}
 	a.renderTemplate(w, "feed_edit_save_response", data)
 }
@@ -556,12 +528,11 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.PollResponseData{
-		Banner:            view.NewItemsData{FeedID: feedID, Count: count},
-		Feeds:             feeds,
-		RefreshDisplay:    refreshDisplay,
-		SelectedFeedID:    feedID,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      feedEditModeEnabled(r),
+		Banner:         view.NewItemsData{FeedID: feedID, Count: count},
+		Feeds:          feeds,
+		RefreshDisplay: refreshDisplay,
+		SelectedFeedID: feedID,
+		FeedEditMode:   feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "poll_response", data)
 }
@@ -667,12 +638,11 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.ToggleReadResponseData{
-		Item:              item,
-		Feeds:             feeds,
-		SelectedFeedID:    feedID,
-		View:              currentView,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      feedEditModeEnabled(r),
+		Item:           item,
+		Feeds:          feeds,
+		SelectedFeedID: feedID,
+		View:           currentView,
+		FeedEditMode:   feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "item_toggle_response", data)
 }
@@ -741,36 +711,12 @@ func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, fee
 	}
 
 	data := view.ItemListResponseData{
-		ItemList:          itemList,
-		Feeds:             feeds,
-		SelectedFeedID:    feedID,
-		SkipDeleteWarning: deleteWarningSkipped(r),
-		FeedEditMode:      feedEditModeEnabled(r),
+		ItemList:       itemList,
+		Feeds:          feeds,
+		SelectedFeedID: feedID,
+		FeedEditMode:   feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "item_list_response", data)
-}
-
-func (a *App) handleDeleteFeedConfirm(w http.ResponseWriter, r *http.Request) {
-	feedID, ok := parsePathInt64(r, "feedID")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-
-	if deleteWarningSkipped(r) || r.URL.Query().Get("cancel") == "1" {
-		data := view.DeleteFeedConfirmData{Feed: view.FeedView{ID: feedID}, Show: false}
-		a.renderTemplate(w, "feed_remove_confirm", data)
-		return
-	}
-
-	currentFeed, err := store.GetFeed(a.db, feedID)
-	if err != nil {
-		http.Error(w, "feed not found", http.StatusNotFound)
-		return
-	}
-
-	data := view.DeleteFeedConfirmData{Feed: currentFeed, Show: true}
-	a.renderTemplate(w, "feed_remove_confirm", data)
 }
 
 func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
@@ -793,12 +739,6 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("feed deleted", "feed_id", feedID)
 
-	skipDeleteWarning := deleteWarningSkipped(r)
-	if r.FormValue("skip_delete_warning") != "" {
-		setSkipDeleteWarningCookie(w)
-		skipDeleteWarning = true
-	}
-
 	feeds, err := store.ListFeeds(a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
@@ -817,11 +757,10 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := view.ItemListResponseData{
-		ItemList:          itemList,
-		Feeds:             feeds,
-		SelectedFeedID:    selectedFeedID,
-		SkipDeleteWarning: skipDeleteWarning,
-		FeedEditMode:      feedEditModeEnabled(r),
+		ItemList:       itemList,
+		Feeds:          feeds,
+		SelectedFeedID: selectedFeedID,
+		FeedEditMode:   feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "delete_feed_response", data)
 }

@@ -66,6 +66,7 @@
               name="feed_delete_{{.ID}}"
               value="1"
             >
+            <label class="sr-only" for="feed-delete-{{.ID}}">Mark feed {{.Title}} for deletion</label>
             <button
               class="feed-remove feed-remove-mark"
               type="button"
@@ -115,28 +116,10 @@
       {{range .Feeds}}
         {{if gt .UnreadCount 0}}
           <li class="feed-row">
-            <button
-              class="feed-remove"
-              type="button"
-              aria-label="Remove feed {{.Title}}"
-              {{if $.SkipDeleteWarning}}
-                hx-post="/feeds/{{.ID}}/delete"
-                hx-target="#main-content"
-                hx-swap="innerHTML"
-                hx-include="#selected-feed-id"
-              {{else}}
-                hx-get="/feeds/{{.ID}}/delete/confirm"
-                hx-target="#feed-remove-confirm-{{.ID}}"
-                hx-swap="outerHTML"
-              {{end}}
-            >
-              <img class="icon" src="/static/icons/remove-circle.svg" alt="">
-            </button>
             <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
               <span class="feed-title">{{.Title}}</span>
               <span class="feed-count">{{.UnreadCount}}</span>
             </button>
-            <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
           </li>
         {{end}}
       {{end}}
@@ -151,28 +134,10 @@
               {{range .Feeds}}
                 {{if eq .UnreadCount 0}}
                   <li class="feed-row">
-                    <button
-                      class="feed-remove"
-                      type="button"
-                      aria-label="Remove feed {{.Title}}"
-                      {{if $.SkipDeleteWarning}}
-                        hx-post="/feeds/{{.ID}}/delete"
-                        hx-target="#main-content"
-                        hx-swap="innerHTML"
-                        hx-include="#selected-feed-id"
-                      {{else}}
-                        hx-get="/feeds/{{.ID}}/delete/confirm"
-                        hx-target="#feed-remove-confirm-{{.ID}}"
-                        hx-swap="outerHTML"
-                      {{end}}
-                    >
-                      <img class="icon" src="/static/icons/remove-circle.svg" alt="">
-                    </button>
                     <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
                       <span class="feed-title">{{.Title}}</span>
                       <span class="feed-count">{{.UnreadCount}}</span>
                     </button>
-                    <div class="feed-remove-confirm" id="feed-remove-confirm-{{.ID}}"></div>
                   </li>
                 {{end}}
               {{end}}

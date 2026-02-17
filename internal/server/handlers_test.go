@@ -972,46 +972,6 @@ func TestPollingInFeedEditModeDoesNotSwapFeedList(t *testing.T) {
 	}
 }
 
-func TestDeleteFeedConfirmEndpoint(t *testing.T) {
-	app := newTestApp(t)
-
-	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Delete Feed")
-	if err != nil {
-		t.Fatalf("store.UpsertFeed: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm", feedID), nil)
-	rec := httptest.NewRecorder()
-	app.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("confirm status: %d", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "Don't warn again") {
-		t.Fatalf("expected skip checkbox label")
-	}
-	if !strings.Contains(body, fmt.Sprintf("feed-remove-confirm-%d", feedID)) {
-		t.Fatalf("expected confirm container id")
-	}
-	if !strings.Contains(body, fmt.Sprintf("hx-post=\"/feeds/%d/delete\"", feedID)) {
-		t.Fatalf("expected delete action in confirm")
-	}
-
-	cancelReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm?cancel=1", feedID), nil)
-	cancelRec := httptest.NewRecorder()
-	app.Routes().ServeHTTP(cancelRec, cancelReq)
-	if cancelRec.Code != http.StatusOK {
-		t.Fatalf("cancel status: %d", cancelRec.Code)
-	}
-	cancelBody := cancelRec.Body.String()
-	if strings.Contains(cancelBody, "skip_delete_warning") {
-		t.Fatalf("expected cancel response to omit confirm inputs")
-	}
-	if !strings.Contains(cancelBody, fmt.Sprintf("feed-remove-confirm-%d", feedID)) {
-		t.Fatalf("expected cancel placeholder id")
-	}
-}
-
 func TestEnterFeedEditMode(t *testing.T) {
 	app := newTestApp(t)
 
@@ -1474,10 +1434,10 @@ func TestFeedEditModeSaveCanonicalTitleClearsCustomOverride(t *testing.T) {
 	}
 }
 
-func TestDeleteFeedSkipCookie(t *testing.T) {
+func TestIndexOmitsInlineDeleteControls(t *testing.T) {
 	app := newTestApp(t)
 
-	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Skip Cookie Feed")
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Delete Control Feed")
 	if err != nil {
 		t.Fatalf("store.UpsertFeed: %v", err)
 	}
@@ -1485,21 +1445,31 @@ func TestDeleteFeedSkipCookie(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("index status: %d", rec.Code)
+	}
 	body := rec.Body.String()
-	if !strings.Contains(body, fmt.Sprintf("hx-get=\"/feeds/%d/delete/confirm\"", feedID)) {
-		t.Fatalf("expected confirm flow when cookie is not set")
+	if strings.Contains(body, fmt.Sprintf(`hx-post="/feeds/%d/delete"`, feedID)) {
+		t.Fatalf("expected no direct delete action outside edit mode")
+	}
+	if strings.Contains(body, "/delete/confirm") {
+		t.Fatalf("expected no delete confirm links in index")
+	}
+}
+
+func TestDeleteFeedConfirmEndpointRemoved(t *testing.T) {
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(app.db, "http://example.com/rss", "Delete Feed")
+	if err != nil {
+		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: skipDeleteWarningCookie, Value: "1"})
-	rec = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm", feedID), nil)
+	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
-	body = rec.Body.String()
-	if !strings.Contains(body, fmt.Sprintf("hx-post=\"/feeds/%d/delete\"", feedID)) {
-		t.Fatalf("expected direct delete when cookie is set")
-	}
-	if strings.Contains(body, fmt.Sprintf("hx-get=\"/feeds/%d/delete/confirm\"", feedID)) {
-		t.Fatalf("expected confirm flow to be skipped when cookie is set")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("confirm endpoint status: %d", rec.Code)
 	}
 }
 
