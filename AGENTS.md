@@ -3,7 +3,7 @@
 Project: Pulse RSS
 
 ## Stack
-- Go 1.25
+- Go 1.26
 - SQLite (modernc.org/sqlite)
 - htmx + HTML templates
 - CSS (no framework)
@@ -18,6 +18,23 @@ Open http://localhost:8080
 ## Tests
 ```bash
 go test ./...
+```
+
+## Linting and formatting
+Lines can be up to 120 chars long.
+
+```bash
+# Rewrite code to newer/cleaner Go idioms when safe
+go fix ./...
+
+# Format (uses formatters section of .golangci.yml)
+golangci-lint fmt ./...
+
+# Lint (uses linters section of .golangci.yml)
+golangci-lint run ./...
+
+# Apply autofixes (lint fixes + formatting fixes)
+golangci-lint run --fix ./...
 ```
 
 ## Project layout
@@ -36,7 +53,7 @@ go test ./...
 - `internal/store/store_test.go` DB/store tests
 
 ## Conventions
-- Keep Go formatting via `gofmt`.
+- Keep Go Linting and formatting as described
 - Prefer server-rendered partials + htmx swaps.
 - Add tests in the package closest to the change (`internal/server`, `internal/store`, `internal/feed`, `internal/content`).
 - Avoid non-ASCII text in files unless already present.

@@ -1,0 +1,107 @@
+version: "2"
+
+run:
+  tests: true
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+    - gci
+  settings:
+    gofumpt:
+      module-path: rss
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - rss
+    gci:
+      custom-order: true
+      no-inline-comments: true
+      no-prefix-comments: true
+      no-lex-order: true
+      sections:
+        - standard
+        - default
+        - prefix(rss)
+        - blank
+        - dot
+        - alias
+        - localmodule
+
+linters:
+  # Maximum strictness: enable all linters by default.
+  default: all
+  disable:
+    - wsl
+    - varnamelen
+    - goconst
+  enable:
+    - wsl_v5
+
+  settings:
+    revive:
+      rules:
+        - name: line-length-limit
+          arguments: [ 120 ]
+        - name: add-constant
+          disabled: true
+      severity: error
+      enable-all-rules: true
+
+    depguard:
+      rules:
+        Main:
+          files:
+            - $all
+          allow:
+            - $gostd
+            - rss/
+            - github.com/mmcdole/gofeed
+            - golang.org/x/net/html
+            - golang.org/x/net/html/atom
+            - modernc.org/sqlite
+
+    govet:
+      enable-all: true
+      settings:
+        shadow:
+          strict: true
+
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      disable-default-exclusions: true
+      verbose: true
+
+
+
+    gocritic:
+      enable-all: true
+
+    testifylint:
+      enable-all: true
+
+    cyclop:
+      max-complexity: 10
+
+    gocognit:
+      min-complexity: 10
+
+    funlen:
+      lines: 60
+      statements: 40
+      ignore-comments: true
+
+    lll:
+      line-length: 120
+      tab-width: 1
+
+    nolintlint:
+      require-explanation: true
+      allow-unused: false
+
+issues:
+  # No truncation: show everything in CI.
+  max-issues-per-linter: 0
+  max-same-issues: 0

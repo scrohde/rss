@@ -1,8 +1,10 @@
+// Package main wires dependencies and runs the Pulse RSS web server.
 package main
 
 import (
 	"embed"
 	"errors"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log"
@@ -17,6 +19,12 @@ import (
 	"rss/internal/store"
 )
 
+const (
+	serverReadTimeout  = 10 * time.Second
+	serverWriteTimeout = 10 * time.Second
+	serverIdleTimeout  = 60 * time.Second
+)
+
 //go:embed templates/*.html templates/partials/*.html
 var templateFiles embed.FS
 
@@ -24,21 +32,37 @@ var templateFiles embed.FS
 var staticFiles embed.FS
 
 func main() {
-	setupLogging()
-	db, err := store.Open("rss.db")
+	err := run()
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+}
 
-	if err := store.Init(db); err != nil {
-		log.Fatal(err)
+func run() error {
+	setupLogging()
+
+	db, err := store.Open("rss.db")
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+
+	defer func() {
+		closeErr := db.Close()
+		if closeErr != nil {
+			log.Printf("db.Close: %v", closeErr)
+		}
+	}()
+
+	initErr := store.Init(db)
+	if initErr != nil {
+		return fmt.Errorf("initialize database: %w", initErr)
 	}
 
 	tmpl := template.Must(template.ParseFS(templateFiles, "templates/*.html", "templates/partials/*.html"))
+
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("open embedded static files: %w", err)
 	}
 
 	app := server.New(db, tmpl)
@@ -46,27 +70,30 @@ func main() {
 	app.SetImageProxyDebug(envBool("IMAGE_PROXY_DEBUG"))
 	app.StartBackgroundLoops()
 
-	httpServer := &http.Server{
-		Addr:         resolveAddr(),
-		Handler:      app.Routes(),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	httpServer := new(http.Server)
+	httpServer.Addr = resolveAddr()
+	httpServer.Handler = app.Routes()
+	httpServer.ReadTimeout = serverReadTimeout
+	httpServer.WriteTimeout = serverWriteTimeout
+	httpServer.IdleTimeout = serverIdleTimeout
 
 	slog.Info("rss reader running", "addr", httpServer.Addr)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+
+	err = httpServer.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve http: %w", err)
 	}
+
+	return nil
 }
 
 func setupLogging() {
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
+	options := new(slog.HandlerOptions)
+	options.Level = slog.LevelInfo
+	handler := slog.NewTextHandler(os.Stdout, options)
 	slog.SetDefault(slog.New(handler))
 }
 
@@ -75,12 +102,16 @@ func resolveAddr() string {
 	if port == "" {
 		return "127.0.0.1:8080"
 	}
+
 	if strings.HasPrefix(port, ":") {
 		return "127.0.0.1" + port
 	}
-	if _, err := strconv.Atoi(port); err != nil {
+
+	_, err := strconv.Atoi(port)
+	if err != nil {
 		return "127.0.0.1:8080"
 	}
+
 	return "127.0.0.1:" + port
 }
 

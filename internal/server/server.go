@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
@@ -13,7 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,20 +27,28 @@ import (
 	"rss/internal/view"
 )
 
-const feedEditModeCookie = "pulse_rss_feed_edit_mode"
+const (
+	feedEditModeCookie             = "pulse_rss_feed_edit_mode"
+	maxOPMLUploadBytes       int64 = 2 << 20
+	imageProxySniffBytes           = 512
+	cleanupInterval                = 10 * time.Minute
+	feedEditModeCookieMaxAge       = 60 * 60 * 24 * 365
+)
 
-const maxOPMLUploadBytes int64 = 2 << 20
+var errFeedReturnedNoContent = errors.New("feed returned no content")
 
+// App wires handlers, dependencies, and background loops for the HTTP server.
 type App struct {
+	staticHandler    http.Handler
 	db               *sql.DB
 	tmpl             *template.Template
-	staticHandler    http.Handler
-	refreshMu        sync.Mutex
 	imageProxyClient *http.Client
-	imageProxyDebug  bool
 	imageProxyLookup content.LookupIPAddrFunc
+	refreshMu        sync.Mutex
+	imageProxyDebug  bool
 }
 
+// New constructs an App with default static file and image proxy dependencies.
 func New(db *sql.DB, tmpl *template.Template) *App {
 	return &App{
 		db:               db,
@@ -49,17 +58,22 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 		imageProxyLookup: func(ctx context.Context, host string) ([]net.IPAddr, error) {
 			return net.DefaultResolver.LookupIPAddr(ctx, host)
 		},
+		refreshMu:       sync.Mutex{},
+		imageProxyDebug: false,
 	}
 }
 
+// SetStaticFS replaces the static file system used for `/static/*` routes.
 func (a *App) SetStaticFS(fsys fs.FS) {
 	a.staticHandler = http.FileServer(http.FS(fsys))
 }
 
+// SetImageProxyDebug toggles debug logging for image proxy upstream responses.
 func (a *App) SetImageProxyDebug(enabled bool) {
 	a.imageProxyDebug = enabled
 }
 
+// Routes returns the fully configured application HTTP handler.
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", a.staticHandler))
@@ -81,9 +95,11 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /items/{itemID}", a.handleItemExpanded)
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)
 	mux.HandleFunc("POST /items/{itemID}/toggle", a.handleToggleRead)
+
 	return mux
 }
 
+// StartBackgroundLoops starts cleanup and feed refresh goroutines.
 func (a *App) StartBackgroundLoops() {
 	go a.cleanupLoop()
 	go a.refreshLoop()
@@ -94,155 +110,203 @@ func feedEditModeEnabled(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
+
 	return cookie.Value == "1"
 }
 
 func setFeedEditModeCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     feedEditModeCookie,
-		Value:    "1",
-		Path:     "/",
-		MaxAge:   60 * 60 * 24 * 365,
-		Expires:  time.Now().Add(365 * 24 * time.Hour),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	cookie := new(http.Cookie)
+	cookie.Name = feedEditModeCookie
+	cookie.Value = "1"
+	cookie.Path = "/"
+	cookie.MaxAge = feedEditModeCookieMaxAge
+	cookie.Expires = time.Now().Add(365 * 24 * time.Hour)
+	cookie.HttpOnly = true
+	cookie.SameSite = http.SameSiteLaxMode
+	http.SetCookie(w, cookie)
 }
 
 func clearFeedEditModeCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     feedEditModeCookie,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		Expires:  time.Unix(1, 0),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	cookie := new(http.Cookie)
+	cookie.Name = feedEditModeCookie
+	cookie.Value = ""
+	cookie.Path = "/"
+	cookie.MaxAge = -1
+	cookie.Expires = time.Unix(1, 0)
+	cookie.HttpOnly = true
+	cookie.SameSite = http.SameSiteLaxMode
+	http.SetCookie(w, cookie)
 }
 
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	data := view.PageData{
-		Feeds:        feeds,
-		FeedEditMode: feedEditModeEnabled(r),
-	}
+	var data pageData
+
+	data.Feeds = feeds
+	data.FeedEditMode = feedEditModeEnabled(r)
 	a.renderTemplate(w, "index", data)
 }
 
 func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
+
 		return
 	}
 
-	rawURL := r.FormValue("url")
-	feedURL, err := feed.NormalizeURL(rawURL)
+	feedID, err := a.subscribeAndStoreFeed(r.Context(), r.FormValue("url"))
 	if err != nil {
 		a.renderSubscribeError(w, err)
+
 		return
+	}
+
+	data, err := a.buildSubscribeResponseData(r.Context(), r, feedID)
+	if err != nil {
+		a.renderSubscribeError(w, err)
+
+		return
+	}
+
+	a.renderTemplate(w, "subscribe_response", data)
+}
+
+func (a *App) subscribeAndStoreFeed(ctx context.Context, rawURL string) (int64, error) {
+	feedURL, err := feed.NormalizeURL(rawURL)
+	if err != nil {
+		return 0, fmt.Errorf("normalize feed URL: %w", err)
 	}
 
 	start := time.Now()
-	slog.Info("subscribe feed", "feed_url", feedURL)
-	result, err := feed.Fetch(feedURL, "", "")
+
+	slog.Info("subscribe feed")
+
+	result, err := feed.Fetch(ctx, feedURL, "", "")
 	if err != nil {
-		slog.Error("subscribe fetch failed", "feed_url", feedURL, "err", err)
-		a.renderSubscribeError(w, err)
-		return
+		slog.Error("subscribe fetch failed", "err", err)
+
+		return 0, fmt.Errorf("fetch feed: %w", err)
 	}
+
 	if result.NotModified || result.Feed == nil {
-		slog.Warn("subscribe feed returned no content", "feed_url", feedURL, "status", result.StatusCode)
-		a.renderSubscribeError(w, errors.New("feed returned no content"))
-		return
+		slog.Warn("subscribe feed returned no content")
+
+		return 0, errFeedReturnedNoContent
 	}
 
-	feedTitle := strings.TrimSpace(result.Feed.Title)
-	if feedTitle == "" {
-		feedTitle = feedURL
-	}
-
-	feedID, err := store.UpsertFeed(a.db, feedURL, feedTitle)
+	feedID, err := a.persistSubscribedFeed(ctx, feedURL, result)
 	if err != nil {
-		slog.Error("subscribe upsert feed failed", "feed_url", feedURL, "err", err)
-		a.renderSubscribeError(w, err)
-		return
+		return 0, err
 	}
 
-	inserted, err := store.UpsertItems(a.db, feedID, result.Feed.Items)
-	if err != nil {
-		slog.Error("subscribe upsert items failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
-		a.renderSubscribeError(w, err)
-		return
-	}
+	a.saveSubscribeRefreshMeta(ctx, feedID, result)
 
-	if err := store.EnforceItemLimit(a.db, feedID); err != nil {
-		slog.Error("subscribe enforce item limit failed", "feed_id", feedID, "feed_url", feedURL, "err", err)
-		a.renderSubscribeError(w, err)
-		return
-	}
-
-	duration := time.Since(start).Milliseconds()
-	checkedAt := time.Now().UTC()
-	if err := feed.SaveRefreshMeta(a.db, feedID, feed.RefreshMeta{
-		ETag:           result.ETag,
-		LastModified:   result.LastModified,
-		LastCheckedAt:  checkedAt,
-		LastError:      "",
-		UnchangedCount: 0,
-		NextRefreshAt:  feed.NextRefreshAt(checkedAt, 0),
-	}); err != nil {
-		log.Printf("refresh meta update failed: %v", err)
-	}
 	slog.Info("subscribe feed stored",
-		"feed_id", feedID,
-		"title", feedTitle,
-		"items_in_feed", len(result.Feed.Items),
-		"items_new", inserted,
-		"duration_ms", duration,
+		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	feeds, err := store.ListFeeds(a.db)
+	return feedID, nil
+}
+
+func (a *App) persistSubscribedFeed(ctx context.Context, feedURL string, result *feed.FetchResult) (int64, error) {
+	feedTitle := subscribeFeedTitle(result.Feed.Title, feedURL)
+
+	feedID, err := store.UpsertFeed(ctx, a.db, feedURL, feedTitle)
 	if err != nil {
-		a.renderSubscribeError(w, err)
-		return
+		slog.Error("subscribe upsert feed failed", "err", err)
+
+		return 0, fmt.Errorf("upsert feed: %w", err)
 	}
 
-	itemList, err := store.LoadItemList(a.db, feedID)
+	_, err = store.UpsertItems(ctx, a.db, feedID, result.Feed.Items)
 	if err != nil {
-		a.renderSubscribeError(w, err)
-		return
+		slog.Error("subscribe upsert items failed")
+
+		return 0, fmt.Errorf("upsert feed items: %w", err)
 	}
 
-	data := view.SubscribeResponseData{
+	enforceErr := store.EnforceItemLimit(ctx, a.db, feedID)
+	if enforceErr != nil {
+		slog.Error("subscribe enforce item limit failed")
+
+		return 0, fmt.Errorf("enforce item limit: %w", enforceErr)
+	}
+
+	return feedID, nil
+}
+
+func subscribeFeedTitle(rawTitle, feedURL string) string {
+	title := strings.TrimSpace(rawTitle)
+	if title == "" {
+		return feedURL
+	}
+
+	return title
+}
+
+func (a *App) saveSubscribeRefreshMeta(ctx context.Context, feedID int64, result *feed.FetchResult) {
+	checkedAt := time.Now().UTC()
+	meta := new(feed.RefreshMeta)
+	meta.ETag = result.ETag
+	meta.LastModified = result.LastModified
+	meta.LastCheckedAt = checkedAt
+	meta.LastError = ""
+	meta.UnchangedCount = 0
+	meta.NextRefreshAt = feed.NextRefreshAt(checkedAt, 0)
+
+	err := feed.SaveRefreshMeta(ctx, a.db, feedID, meta)
+	if err != nil {
+		log.Printf("refresh meta update failed: %v", err)
+	}
+}
+
+func (a *App) buildSubscribeResponseData(
+	ctx context.Context,
+	r *http.Request,
+	feedID int64,
+) (subscribeResponseData, error) {
+	feeds, err := store.ListFeeds(ctx, a.db)
+	if err != nil {
+		return subscribeResponseData{}, fmt.Errorf("list feeds: %w", err)
+	}
+
+	itemList, err := store.LoadItemList(ctx, a.db, feedID)
+	if err != nil {
+		return subscribeResponseData{}, fmt.Errorf("load feed items: %w", err)
+	}
+
+	return subscribeResponseData{
+		Message:        "",
+		MessageClass:   "",
 		Feeds:          feeds,
 		SelectedFeedID: feedID,
 		ItemList:       itemList,
 		Update:         true,
 		FeedEditMode:   feedEditModeEnabled(r),
-	}
-
-	a.renderTemplate(w, "subscribe_response", data)
+	}, nil
 }
 
 func (a *App) renderSubscribeError(w http.ResponseWriter, err error) {
-	data := view.SubscribeResponseData{
-		Message:      err.Error(),
-		MessageClass: "error",
-		Update:       false,
-	}
+	var data subscribeResponseData
+
+	data.Message = err.Error()
+	data.MessageClass = "error"
+	data.Update = false
 	a.renderTemplate(w, "subscribe_response", data)
 }
 
 func (a *App) handleExportOPML(w http.ResponseWriter, r *http.Request) {
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
@@ -255,71 +319,133 @@ func (a *App) handleExportOPML(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filename := "pulse-rss-subscriptions-" + time.Now().UTC().Format("20060102") + ".opml"
+
 	w.Header().Set("Content-Type", "text/x-opml; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	if err := opml.Write(w, "Pulse RSS Subscriptions", subscriptions); err != nil {
+
+	err = opml.Write(w, "Pulse RSS Subscriptions", subscriptions)
+	if err != nil {
 		http.Error(w, "failed to export opml", http.StatusInternalServerError)
+
 		return
 	}
 }
 
+type opmlImportCounts struct {
+	imported int
+	skipped  int
+}
+
 func (a *App) handleImportOPML(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxOPMLUploadBytes)
-	if err := r.ParseMultipartForm(maxOPMLUploadBytes); err != nil {
-		a.renderOPMLImportResponse(w, r, 0, 0, false, "invalid OPML upload")
+	subscriptions, message := parseOPMLUpload(w, r)
+	if message != "" {
+		a.renderOPMLImportResponse(w, r, 0, 0, "error", message)
+
 		return
+	}
+
+	counts := a.importOPMLSubscriptions(r.Context(), subscriptions)
+
+	if counts.imported == 0 {
+		a.renderOPMLImportResponse(
+			w,
+			r,
+			counts.imported,
+			counts.skipped,
+			"error",
+			"no valid feeds found in OPML",
+		)
+
+		return
+	}
+
+	a.renderOPMLImportResponse(w, r, counts.imported, counts.skipped, "success", "")
+}
+
+//nolint:gocritic // Tuple return keeps upload parsing call sites simple.
+func parseOPMLUpload(w http.ResponseWriter, r *http.Request) ([]opml.Subscription, string) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxOPMLUploadBytes)
+
+	parseErr := r.ParseMultipartForm(maxOPMLUploadBytes)
+	if parseErr != nil {
+		return nil, "invalid OPML upload"
 	}
 
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		a.renderOPMLImportResponse(w, r, 0, 0, false, "missing OPML file")
-		return
+		return nil, "missing OPML file"
 	}
-	defer file.Close()
+
+	defer func() {
+		closeErr := file.Close()
+		if closeErr != nil {
+			log.Printf("opml upload close: %v", closeErr)
+		}
+	}()
 
 	subscriptions, err := opml.Parse(file)
 	if err != nil {
-		a.renderOPMLImportResponse(w, r, 0, 0, false, "invalid OPML file")
-		return
+		return nil, "invalid OPML file"
 	}
 
-	imported := 0
-	skipped := 0
-	for _, subscription := range subscriptions {
-		feedURL, normalizeErr := feed.NormalizeURL(subscription.URL)
-		if normalizeErr != nil {
-			skipped++
-			continue
-		}
-
-		feedTitle := strings.TrimSpace(subscription.Title)
-		if feedTitle == "" {
-			feedTitle = feedURL
-		}
-
-		if _, upsertErr := store.UpsertFeed(a.db, feedURL, feedTitle); upsertErr != nil {
-			skipped++
-			continue
-		}
-		imported++
-	}
-
-	if imported == 0 {
-		a.renderOPMLImportResponse(w, r, imported, skipped, false, "no valid feeds found in OPML")
-		return
-	}
-
-	a.renderOPMLImportResponse(w, r, imported, skipped, true, "")
+	return subscriptions, ""
 }
 
-func (a *App) renderOPMLImportResponse(w http.ResponseWriter, r *http.Request, imported, skipped int, update bool, fallbackMessage string) {
-	feeds, err := store.ListFeeds(a.db)
+func (a *App) importOPMLSubscriptions(ctx context.Context, subscriptions []opml.Subscription) opmlImportCounts {
+	var counts opmlImportCounts
+
+	for _, subscription := range subscriptions {
+		feedURL, err := feed.NormalizeURL(subscription.URL)
+		if err != nil {
+			counts.skipped++
+
+			continue
+		}
+
+		feedTitle := subscribeFeedTitle(subscription.Title, feedURL)
+
+		_, upsertErr := store.UpsertFeed(ctx, a.db, feedURL, feedTitle)
+		if upsertErr != nil {
+			counts.skipped++
+
+			continue
+		}
+
+		counts.imported++
+	}
+
+	return counts
+}
+
+func (a *App) renderOPMLImportResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	imported,
+	skipped int,
+	messageClass,
+	fallbackMessage string,
+) {
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	messageClass := "success"
+	message := opmlImportMessage(imported, skipped, fallbackMessage)
+	update := messageClass == "success"
+
+	var data subscribeResponseData
+
+	data.Message = message
+	data.MessageClass = messageClass
+	data.Feeds = feeds
+	data.Update = update
+	data.FeedEditMode = feedEditModeEnabled(r)
+	a.renderTemplate(w, "opml_import_response", data)
+}
+
+func opmlImportMessage(imported, skipped int, fallbackMessage string) string {
 	message := fallbackMessage
 	if message == "" {
 		message = "Imported " + strconv.Itoa(imported) + " feed"
@@ -327,171 +453,281 @@ func (a *App) renderOPMLImportResponse(w http.ResponseWriter, r *http.Request, i
 			message += "s"
 		}
 	}
+
 	if skipped > 0 {
 		message += " (" + strconv.Itoa(skipped) + " skipped)"
 	}
-	if !update {
-		messageClass = "error"
-	}
 
-	data := view.SubscribeResponseData{
-		Message:      message,
-		MessageClass: messageClass,
-		Feeds:        feeds,
-		Update:       update,
-		FeedEditMode: feedEditModeEnabled(r),
-	}
-	a.renderTemplate(w, "opml_import_response", data)
+	return message
 }
 
 func (a *App) handleEnterFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	setFeedEditModeCookie(w)
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	data := view.ItemListResponseData{
-		Feeds:          feeds,
-		SelectedFeedID: parseSelectedFeedID(r),
-		FeedEditMode:   true,
-	}
+	var data itemListResponseData
+
+	data.ItemList = nil
+	data.Feeds = feeds
+	data.SelectedFeedID = parseSelectedFeedID(r)
+	data.FeedEditMode = true
 	a.renderTemplate(w, "feed_list", data)
 }
 
 func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	clearFeedEditModeCookie(w)
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	data := view.ItemListResponseData{
-		Feeds:          feeds,
-		SelectedFeedID: parseSelectedFeedID(r),
-		FeedEditMode:   false,
-	}
+	var data itemListResponseData
+
+	data.ItemList = nil
+	data.Feeds = feeds
+	data.SelectedFeedID = parseSelectedFeedID(r)
+	data.FeedEditMode = false
 	a.renderTemplate(w, "feed_list", data)
 }
 
 func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
+
 		return
 	}
+
 	selectedFeedID := parseSelectedFeedID(r)
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	currentTitles := make(map[int64]string, len(feeds))
-	originalTitles := make(map[int64]string, len(feeds))
-	for _, listedFeed := range feeds {
-		currentTitles[listedFeed.ID] = strings.TrimSpace(listedFeed.Title)
-		originalTitles[listedFeed.ID] = strings.TrimSpace(listedFeed.OriginalTitle)
-	}
+	titles := feedTitleMaps(feeds)
 
 	deleteUpdates := parseFeedDeleteUpdates(r.PostForm)
-	deleteByID := make(map[int64]struct{}, len(deleteUpdates))
-	for _, feedID := range deleteUpdates {
-		if _, exists := currentTitles[feedID]; exists {
-			deleteByID[feedID] = struct{}{}
-		}
-	}
+	deleteByID := existingDeleteSet(deleteUpdates, titles.current)
 	orderUpdates := parseFeedOrderUpdates(r.PostForm)
 
 	updates := parseFeedTitleUpdates(r.PostForm)
-	for _, feedID := range updates.FeedIDs {
-		if _, markedForDelete := deleteByID[feedID]; markedForDelete {
-			continue
-		}
-		title := updates.TitlesByID[feedID]
-		if title == originalTitles[feedID] {
-			if err := store.UpdateFeedTitle(a.db, feedID, ""); err != nil {
-				http.Error(w, "failed to rename feed", http.StatusInternalServerError)
-				return
-			}
-			continue
-		}
-		if title == currentTitles[feedID] {
-			continue
-		}
-		if err := store.UpdateFeedTitle(a.db, feedID, title); err != nil {
-			http.Error(w, "failed to rename feed", http.StatusInternalServerError)
-			return
-		}
+
+	titleErr := a.applyFeedTitleUpdates(r.Context(), updates, deleteByID, titles)
+	if titleErr != nil {
+		http.Error(w, "failed to rename feed", http.StatusInternalServerError)
+
+		return
 	}
 
-	selectedFeedDeleted := false
-	for _, feedID := range deleteUpdates {
-		if _, markedForDelete := deleteByID[feedID]; !markedForDelete {
-			continue
-		}
-		if err := store.DeleteFeed(a.db, feedID); err != nil {
-			http.Error(w, "failed to delete feed", http.StatusInternalServerError)
-			return
-		}
-		if feedID == selectedFeedID {
-			selectedFeedDeleted = true
-		}
+	selectedFeedDeleted, err := a.applyFeedDeletes(r.Context(), deleteUpdates, deleteByID, selectedFeedID)
+	if err != nil {
+		http.Error(w, "failed to delete feed", http.StatusInternalServerError)
+
+		return
 	}
-	if len(orderUpdates) > 0 {
-		finalOrder := make([]int64, 0, len(orderUpdates))
-		for _, feedID := range orderUpdates {
-			if _, markedForDelete := deleteByID[feedID]; markedForDelete {
-				continue
-			}
-			finalOrder = append(finalOrder, feedID)
-		}
-		if err := store.UpdateFeedOrder(a.db, finalOrder); err != nil {
-			http.Error(w, "failed to reorder feeds", http.StatusInternalServerError)
-			return
-		}
+
+	reorderErr := a.applyFeedReorder(r.Context(), orderUpdates, deleteByID)
+	if reorderErr != nil {
+		http.Error(w, "failed to reorder feeds", http.StatusInternalServerError)
+
+		return
 	}
 
 	clearFeedEditModeCookie(w)
-
-	feeds, err = store.ListFeeds(a.db)
-	if err != nil {
-		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
-		return
-	}
 
 	deletedFeedID := int64(0)
 	if selectedFeedDeleted {
 		deletedFeedID = selectedFeedID
 	}
-	selectedFeedID = store.SelectRemainingFeed(selectedFeedID, deletedFeedID, feeds)
 
-	var itemList *view.ItemListData
-	if selectedFeedDeleted && selectedFeedID != 0 {
-		itemList, err = store.LoadItemList(a.db, selectedFeedID)
-		if err != nil {
-			http.Error(w, "failed to load items", http.StatusInternalServerError)
-			return
+	a.renderFeedEditSaveResponse(w, r, selectedFeedID, deletedFeedID)
+}
+
+func (a *App) renderFeedEditSaveResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	selectedFeedID int64,
+	deletedFeedID int64,
+) {
+	feeds, err := store.ListFeeds(r.Context(), a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
+		return
+	}
+
+	selectedFeedID, itemList, err := a.feedEditSelection(r.Context(), selectedFeedID, deletedFeedID, feeds)
+	if err != nil {
+		http.Error(w, "failed to load items", http.StatusInternalServerError)
+
+		return
+	}
+
+	var data itemListResponseData
+
+	data.ItemList = itemList
+	data.Feeds = feeds
+	data.SelectedFeedID = selectedFeedID
+	data.FeedEditMode = false
+	a.renderTemplate(w, "feed_edit_save_response", data)
+}
+
+type feedTitleState struct {
+	current  map[int64]string
+	original map[int64]string
+}
+
+func feedTitleMaps(feeds []view.FeedView) feedTitleState {
+	state := feedTitleState{
+		current:  make(map[int64]string, len(feeds)),
+		original: make(map[int64]string, len(feeds)),
+	}
+
+	for _, listedFeed := range feeds {
+		state.current[listedFeed.ID] = strings.TrimSpace(listedFeed.Title)
+		state.original[listedFeed.ID] = strings.TrimSpace(listedFeed.OriginalTitle)
+	}
+
+	return state
+}
+
+func existingDeleteSet(deleteUpdates []int64, currentTitles map[int64]string) map[int64]struct{} {
+	deleteByID := make(map[int64]struct{}, len(deleteUpdates))
+
+	for _, feedID := range deleteUpdates {
+		if _, exists := currentTitles[feedID]; exists {
+			deleteByID[feedID] = struct{}{}
 		}
 	}
 
-	data := view.ItemListResponseData{
-		ItemList:       itemList,
-		Feeds:          feeds,
-		SelectedFeedID: selectedFeedID,
-		FeedEditMode:   false,
+	return deleteByID
+}
+
+func (a *App) applyFeedTitleUpdates(
+	ctx context.Context,
+	updates feedTitleUpdates,
+	deleteByID map[int64]struct{},
+	titles feedTitleState,
+) error {
+	for _, feedID := range updates.FeedIDs {
+		if _, markedForDelete := deleteByID[feedID]; markedForDelete {
+			continue
+		}
+
+		nextTitle, shouldUpdate := feedTitleUpdate(
+			updates.TitlesByID[feedID],
+			titles.current[feedID],
+			titles.original[feedID],
+		)
+		if !shouldUpdate {
+			continue
+		}
+
+		updateErr := store.UpdateFeedTitle(ctx, a.db, feedID, nextTitle)
+		if updateErr != nil {
+			return fmt.Errorf("update feed title for %d: %w", feedID, updateErr)
+		}
 	}
-	a.renderTemplate(w, "feed_edit_save_response", data)
+
+	return nil
+}
+
+func feedTitleUpdate(nextTitle, currentTitle, originalTitle string) (string, bool) {
+	if nextTitle == currentTitle {
+		return "", false
+	}
+
+	if nextTitle == originalTitle {
+		return "", true
+	}
+
+	return nextTitle, true
+}
+
+func (a *App) applyFeedDeletes(
+	ctx context.Context,
+	deleteUpdates []int64,
+	deleteByID map[int64]struct{},
+	selectedFeedID int64,
+) (bool, error) {
+	selectedFeedDeleted := false
+
+	for _, feedID := range deleteUpdates {
+		if _, markedForDelete := deleteByID[feedID]; !markedForDelete {
+			continue
+		}
+
+		deleteErr := store.DeleteFeed(ctx, a.db, feedID)
+		if deleteErr != nil {
+			return false, fmt.Errorf("delete feed %d: %w", feedID, deleteErr)
+		}
+
+		if feedID == selectedFeedID {
+			selectedFeedDeleted = true
+		}
+	}
+
+	return selectedFeedDeleted, nil
+}
+
+func (a *App) applyFeedReorder(ctx context.Context, orderUpdates []int64, deleteByID map[int64]struct{}) error {
+	if len(orderUpdates) == 0 {
+		return nil
+	}
+
+	finalOrder := make([]int64, 0, len(orderUpdates))
+	for _, feedID := range orderUpdates {
+		if _, markedForDelete := deleteByID[feedID]; markedForDelete {
+			continue
+		}
+
+		finalOrder = append(finalOrder, feedID)
+	}
+
+	err := store.UpdateFeedOrder(ctx, a.db, finalOrder)
+	if err != nil {
+		return fmt.Errorf("update feed order: %w", err)
+	}
+
+	return nil
+}
+
+func (a *App) feedEditSelection(
+	ctx context.Context,
+	selectedFeedID int64,
+	deletedFeedID int64,
+	feeds []view.FeedView,
+) (int64, *view.ItemListData, error) {
+	nextFeedID := store.SelectRemainingFeed(selectedFeedID, deletedFeedID, feeds)
+	if deletedFeedID == 0 || nextFeedID == 0 {
+		return nextFeedID, nil, nil
+	}
+
+	itemList, err := store.LoadItemList(ctx, a.db, nextFeedID)
+	if err != nil {
+		return 0, nil, fmt.Errorf("load item list for feed %d: %w", nextFeedID, err)
+	}
+
+	return nextFeedID, itemList, nil
 }
 
 func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
@@ -502,38 +738,43 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
 	afterID := parseAfterID(r)
 
-	count, err := store.CountItemsAfter(a.db, feedID, afterID)
+	count, err := store.CountItemsAfter(r.Context(), a.db, feedID, afterID)
 	if err != nil {
 		http.Error(w, "failed to check new items", http.StatusInternalServerError)
+
 		return
 	}
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
 	refreshDisplay := "Never"
+
 	for _, listedFeed := range feeds {
 		if listedFeed.ID == feedID {
 			refreshDisplay = listedFeed.LastRefreshDisplay
+
 			break
 		}
 	}
 
-	data := view.PollResponseData{
-		Banner:         view.NewItemsData{FeedID: feedID, Count: count},
-		Feeds:          feeds,
-		RefreshDisplay: refreshDisplay,
-		SelectedFeedID: feedID,
-		FeedEditMode:   feedEditModeEnabled(r),
-	}
+	var data pollResponseData
+
+	data.Banner = view.NewItemsData{FeedID: feedID, Count: count, SwapOOB: false}
+	data.Feeds = feeds
+	data.RefreshDisplay = refreshDisplay
+	data.SelectedFeedID = feedID
+	data.FeedEditMode = feedEditModeEnabled(r)
 	a.renderTemplate(w, "poll_response", data)
 }
 
@@ -541,14 +782,16 @@ func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
 	afterID := parseAfterID(r)
 
-	items, err := store.ListItemsAfter(a.db, feedID, afterID)
+	items, err := store.ListItemsAfter(r.Context(), a.db, feedID, afterID)
 	if err != nil {
 		http.Error(w, "failed to load new items", http.StatusInternalServerError)
+
 		return
 	}
 
@@ -559,7 +802,7 @@ func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := view.NewItemsResponseData{
+	data := newItemsResponseData{
 		Items:    items,
 		NewestID: newestID,
 		Banner:   view.NewItemsData{FeedID: feedID, Count: 0, SwapOOB: true},
@@ -571,14 +814,17 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
-	item, err := store.GetItem(a.db, itemID)
+	item, err := store.GetItem(r.Context(), a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
+
 		return
 	}
+
 	item.IsActive = parseSelectedItemID(r) == item.ID
 	a.renderTemplate(w, "item_expanded", item)
 }
@@ -587,57 +833,72 @@ func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
-	item, err := store.GetItem(a.db, itemID)
+	item, err := store.GetItem(r.Context(), a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
+
 		return
 	}
+
 	item.IsActive = parseSelectedItemID(r) == item.ID
 	a.renderTemplate(w, "item_compact", item)
 }
 
+//nolint:gosec // Read toggle logs include request-derived view values for debugging.
 func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
+
 		return
 	}
 
 	currentView := r.FormValue("view")
-	if err := store.ToggleRead(a.db, itemID); err != nil {
+
+	err = store.ToggleRead(r.Context(), a.db, itemID)
+	if err != nil {
 		http.Error(w, "failed to update item", http.StatusInternalServerError)
+
 		return
 	}
+
 	slog.Info("item read toggled", "item_id", itemID, "view", currentView)
 
-	feedID, err := store.GetFeedIDByItem(a.db, itemID)
+	feedID, err := store.GetFeedIDByItem(r.Context(), a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
+
 		return
 	}
 
-	item, err := store.GetItem(a.db, itemID)
+	item, err := store.GetItem(r.Context(), a.db, itemID)
 	if err != nil {
 		http.Error(w, "item not found", http.StatusNotFound)
+
 		return
 	}
+
 	item.IsActive = parseSelectedItemID(r) == item.ID
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	data := view.ToggleReadResponseData{
+	data := toggleReadResponseData{
 		Item:           item,
 		Feeds:          feeds,
 		SelectedFeedID: feedID,
@@ -647,49 +908,61 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	a.renderTemplate(w, "item_toggle_response", data)
 }
 
+//nolint:gosec // Mark-all-read logs include request-derived feed IDs for operational visibility.
 func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
-	if err := store.MarkAllRead(a.db, feedID); err != nil {
+	err := store.MarkAllRead(r.Context(), a.db, feedID)
+	if err != nil {
 		http.Error(w, "failed to update items", http.StatusInternalServerError)
+
 		return
 	}
+
 	slog.Info("feed items marked read", "feed_id", feedID)
 
 	a.renderItemListResponse(w, r, feedID)
 }
 
+//nolint:gosec // Sweep logs include request-derived feed IDs for operational visibility.
 func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
-	deleted, err := store.SweepReadItems(a.db, feedID)
+	deleted, err := store.SweepReadItems(r.Context(), a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to remove read items", http.StatusInternalServerError)
+
 		return
 	}
+
 	slog.Info("feed read items swept", "feed_id", feedID, "deleted", deleted)
 
 	a.renderItemListResponse(w, r, feedID)
 }
 
+//nolint:gosec // Manual refresh logs include request-derived feed IDs for operational visibility.
 func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
 	a.refreshMu.Lock()
-	_, err := feed.Refresh(a.db, feedID)
+	_, err := feed.Refresh(r.Context(), a.db, feedID)
 	a.refreshMu.Unlock()
+
 	if err != nil {
 		slog.Warn("manual refresh failed", "feed_id", feedID, "err", err)
 	}
@@ -698,19 +971,21 @@ func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
-	itemList, err := store.LoadItemList(a.db, feedID)
+	itemList, err := store.LoadItemList(r.Context(), a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to load items", http.StatusInternalServerError)
+
 		return
 	}
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
-	data := view.ItemListResponseData{
+	data := itemListResponseData{
 		ItemList:       itemList,
 		Feeds:          feeds,
 		SelectedFeedID: feedID,
@@ -719,29 +994,37 @@ func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, fee
 	a.renderTemplate(w, "item_list_response", data)
 }
 
+//nolint:gosec // Delete logs include request-derived feed IDs for operational visibility.
 func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
+
 		return
 	}
 
 	selectedFeedID := parseSelectedFeedID(r)
 
-	if err := store.DeleteFeed(a.db, feedID); err != nil {
+	err = store.DeleteFeed(r.Context(), a.db, feedID)
+	if err != nil {
 		http.Error(w, "failed to delete feed", http.StatusInternalServerError)
+
 		return
 	}
+
 	slog.Info("feed deleted", "feed_id", feedID)
 
-	feeds, err := store.ListFeeds(a.db)
+	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
 		return
 	}
 
@@ -749,14 +1032,15 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 
 	var itemList *view.ItemListData
 	if selectedFeedID != 0 {
-		itemList, err = store.LoadItemList(a.db, selectedFeedID)
+		itemList, err = store.LoadItemList(r.Context(), a.db, selectedFeedID)
 		if err != nil {
 			http.Error(w, "failed to load items", http.StatusInternalServerError)
+
 			return
 		}
 	}
 
-	data := view.ItemListResponseData{
+	data := itemListResponseData{
 		ItemList:       itemList,
 		Feeds:          feeds,
 		SelectedFeedID: selectedFeedID,
@@ -765,35 +1049,48 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	a.renderTemplate(w, "delete_feed_response", data)
 }
 
+//nolint:cyclop,funlen,gocognit,gosec,revive // Validates proxy request and forwards vetted image responses.
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
 		http.Error(w, "missing url", http.StatusBadRequest)
+
 		return
 	}
+
 	if len(raw) > content.MaxImageProxyURLLength {
 		http.Error(w, "url too long", http.StatusRequestURITooLong)
+
 		return
 	}
 
 	target, err := url.Parse(raw)
 	if err != nil || !content.IsAllowedResolvedProxyURL(r.Context(), target, a.imageProxyLookup) {
 		http.Error(w, "invalid url", http.StatusBadRequest)
+
 		return
 	}
 
-	req, err := content.BuildImageProxyRequest(target)
+	req, err := content.BuildImageProxyRequest(r.Context(), target)
 	if err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+
 		return
 	}
 
 	resp, err := a.imageProxyClient.Do(req)
 	if err != nil {
 		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
+
 		return
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		closeErr := resp.Body.Close()
+		if closeErr != nil {
+			log.Printf("image proxy close body: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		if a.imageProxyDebug {
@@ -804,56 +1101,79 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 				"target_path", target.EscapedPath(),
 			)
 		}
+
 		http.Error(w, "upstream error", http.StatusBadGateway)
+
 		return
 	}
 
 	reader := bufio.NewReader(resp.Body)
-	sniff, _ := reader.Peek(512)
+
+	sniff, err := reader.Peek(imageProxySniffBytes)
+	if err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "upstream read failed", http.StatusBadGateway)
+
+		return
+	}
+
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" || !strings.HasPrefix(strings.ToLower(contentType), "image/") {
 		detected := http.DetectContentType(sniff)
 		if !strings.HasPrefix(detected, "image/") {
 			http.Error(w, "upstream did not return image content", http.StatusUnsupportedMediaType)
+
 			return
 		}
+
 		contentType = detected
 	}
 
 	body, err := io.ReadAll(io.LimitReader(reader, content.ImageProxyMaxBodyBytes+1))
 	if err != nil {
 		http.Error(w, "upstream read failed", http.StatusBadGateway)
+
 		return
 	}
+
 	if int64(len(body)) > content.ImageProxyMaxBodyBytes {
 		http.Error(w, "upstream image too large", http.StatusBadGateway)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", contentType)
+
 	if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" {
 		w.Header().Set("Cache-Control", cacheControl)
 	} else {
 		w.Header().Set("Cache-Control", content.ImageProxyCacheFallback)
 	}
+
 	if etag := resp.Header.Get("ETag"); etag != "" {
 		w.Header().Set("ETag", etag)
 	}
+
 	if modified := resp.Header.Get("Last-Modified"); modified != "" {
 		w.Header().Set("Last-Modified", modified)
 	}
+
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 
-	if _, err := w.Write(body); err != nil {
-		log.Printf("image proxy copy: %v", err)
+	_, writeErr := w.Write(body)
+	if writeErr != nil {
+		log.Printf("image proxy copy: %v", writeErr)
 	}
 }
 
 func (a *App) renderTemplate(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.tmpl.ExecuteTemplate(w, name, data); err != nil {
-		log.Printf("template %s: %v", name, err)
+
+	err := a.tmpl.ExecuteTemplate(w, name, data)
+	if err != nil {
+		log.Printf("template execute failed: %v", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
+
+		return
 	}
 }
 
@@ -862,64 +1182,79 @@ func parsePathInt64(r *http.Request, key string) (int64, bool) {
 	if raw == "" {
 		return 0, false
 	}
+
 	parsed, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, false
 	}
+
 	return parsed, true
 }
 
 func parseAfterID(r *http.Request) int64 {
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		return 0
 	}
+
 	raw := strings.TrimSpace(r.FormValue("after_id"))
 	if raw == "" {
 		return 0
 	}
+
 	parsed, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0
 	}
+
 	return parsed
 }
 
 func parseSelectedFeedID(r *http.Request) int64 {
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		return 0
 	}
+
 	raw := strings.TrimSpace(r.FormValue("selected_feed_id"))
 	if raw == "" {
 		return 0
 	}
+
 	parsed, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0
 	}
+
 	return parsed
 }
 
 func parseSelectedItemID(r *http.Request) int64 {
-	if err := r.ParseForm(); err != nil {
+	err := r.ParseForm()
+	if err != nil {
 		return 0
 	}
+
 	raw := strings.TrimSpace(r.FormValue("selected_item_id"))
 	if raw == "" {
 		return 0
 	}
-	if strings.HasPrefix(raw, "item-") {
-		raw = strings.TrimPrefix(raw, "item-")
+
+	if after, ok := strings.CutPrefix(raw, "item-"); ok {
+		raw = after
 	}
+
 	parsed, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0
 	}
+
 	return parsed
 }
 
 type feedTitleUpdates struct {
-	FeedIDs    []int64
 	TitlesByID map[int64]string
+	FeedIDs    []int64
 }
 
 func parseFeedDeleteUpdates(values url.Values) []int64 {
@@ -927,24 +1262,25 @@ func parseFeedDeleteUpdates(values url.Values) []int64 {
 	seen := make(map[int64]struct{})
 
 	for key, rawValues := range values {
-		if !strings.HasPrefix(key, "feed_delete_") || !containsTruthyValue(rawValues) {
+		if !containsTruthyValue(rawValues) {
 			continue
 		}
-		rawID := strings.TrimPrefix(key, "feed_delete_")
-		feedID, err := strconv.ParseInt(rawID, 10, 64)
-		if err != nil || feedID <= 0 {
+
+		feedID, ok := parseFeedIDFromKey(key, "feed_delete_")
+		if !ok {
 			continue
 		}
+
 		if _, exists := seen[feedID]; exists {
 			continue
 		}
+
 		seen[feedID] = struct{}{}
 		feedIDs = append(feedIDs, feedID)
 	}
 
-	sort.Slice(feedIDs, func(i, j int) bool {
-		return feedIDs[i] < feedIDs[j]
-	})
+	slices.Sort(feedIDs)
+
 	return feedIDs
 }
 
@@ -955,6 +1291,7 @@ func containsTruthyValue(values []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -965,30 +1302,43 @@ func parseFeedTitleUpdates(values url.Values) feedTitleUpdates {
 	}
 
 	for key, titles := range values {
-		if !strings.HasPrefix(key, "feed_title_") {
+		feedID, ok := parseFeedIDFromKey(key, "feed_title_")
+		if !ok {
 			continue
-		}
-		rawID := strings.TrimPrefix(key, "feed_title_")
-		feedID, err := strconv.ParseInt(rawID, 10, 64)
-		if err != nil || feedID <= 0 {
-			continue
-		}
-
-		title := ""
-		if len(titles) > 0 {
-			title = strings.TrimSpace(titles[0])
 		}
 
 		if _, exists := result.TitlesByID[feedID]; !exists {
 			result.FeedIDs = append(result.FeedIDs, feedID)
 		}
-		result.TitlesByID[feedID] = title
+
+		result.TitlesByID[feedID] = firstTrimmedValue(titles)
 	}
 
-	sort.Slice(result.FeedIDs, func(i, j int) bool {
-		return result.FeedIDs[i] < result.FeedIDs[j]
-	})
+	slices.Sort(result.FeedIDs)
+
 	return result
+}
+
+func parseFeedIDFromKey(key, prefix string) (int64, bool) {
+	rawID, ok := strings.CutPrefix(key, prefix)
+	if !ok {
+		return 0, false
+	}
+
+	feedID, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || feedID <= 0 {
+		return 0, false
+	}
+
+	return feedID, true
+}
+
+func firstTrimmedValue(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(values[0])
 }
 
 func parseFeedOrderUpdates(values url.Values) []int64 {
@@ -999,27 +1349,34 @@ func parseFeedOrderUpdates(values url.Values) []int64 {
 
 	result := make([]int64, 0, len(rawIDs))
 	seen := make(map[int64]struct{})
+
 	for _, rawID := range rawIDs {
 		feedID, err := strconv.ParseInt(strings.TrimSpace(rawID), 10, 64)
 		if err != nil || feedID <= 0 {
 			continue
 		}
+
 		if _, exists := seen[feedID]; exists {
 			continue
 		}
+
 		seen[feedID] = struct{}{}
 		result = append(result, feedID)
 	}
+
 	return result
 }
 
 func (a *App) cleanupLoop() {
-	ticker := time.NewTicker(10 * time.Minute)
+	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
+
 	for {
-		if err := store.CleanupReadItems(a.db); err != nil {
+		err := store.CleanupReadItems(a.db)
+		if err != nil {
 			slog.Error("cleanup error", "err", err)
 		}
+
 		<-ticker.C
 	}
 }
@@ -1027,10 +1384,13 @@ func (a *App) cleanupLoop() {
 func (a *App) refreshLoop() {
 	ticker := time.NewTicker(feed.RefreshLoopInterval)
 	defer ticker.Stop()
+
 	for {
-		if err := a.refreshDueFeeds(); err != nil {
+		err := a.refreshDueFeeds()
+		if err != nil {
 			slog.Error("refresh loop error", "err", err)
 		}
+
 		<-ticker.C
 	}
 }
@@ -1038,18 +1398,22 @@ func (a *App) refreshLoop() {
 func (a *App) refreshDueFeeds() error {
 	ids, err := store.ListDueFeeds(a.db, time.Now().UTC(), feed.RefreshBatchSize)
 	if err != nil {
-		return err
+		return fmt.Errorf("list due feeds: %w", err)
 	}
+
 	if len(ids) > 0 {
 		slog.Info("refresh due feeds", "count", len(ids))
 	}
+
 	for _, id := range ids {
 		a.refreshMu.Lock()
-		_, err := feed.Refresh(a.db, id)
+		_, refreshErr := feed.Refresh(context.Background(), a.db, id)
 		a.refreshMu.Unlock()
-		if err != nil {
-			slog.Error("refresh feed error", "feed_id", id, "err", err)
+
+		if refreshErr != nil {
+			slog.Error("refresh feed error", "feed_id", id, "err", refreshErr)
 		}
 	}
+
 	return nil
 }

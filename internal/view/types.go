@@ -2,83 +2,41 @@ package view
 
 import "html/template"
 
+// FeedView is template data for one feed in the feed list.
 type FeedView struct {
-	ID                 int64
 	Title              string
 	OriginalTitle      string
 	URL                string
-	ItemCount          int
-	UnreadCount        int
 	LastRefreshDisplay string
 	LastError          string
+	ID                 int64
+	ItemCount          int
+	UnreadCount        int
 }
 
+// ItemView is template data for one feed item row.
 type ItemView struct {
-	ID               int64
 	Title            string
 	Link             string
 	SummaryHTML      template.HTML
 	PublishedDisplay string
 	PublishedCompact string
+	ID               int64
 	IsRead           bool
 	IsActive         bool
 }
 
-type ItemListData struct {
-	Feed     FeedView
-	Items    []ItemView
-	NewestID int64
-	NewItems NewItemsData
-}
-
-type PageData struct {
-	Feeds          []FeedView
-	SelectedFeedID int64
-	ItemList       *ItemListData
-	FeedEditMode   bool
-}
-
-type SubscribeResponseData struct {
-	Message        string
-	MessageClass   string
-	Feeds          []FeedView
-	SelectedFeedID int64
-	ItemList       *ItemListData
-	Update         bool
-	FeedEditMode   bool
-}
-
+// NewItemsData is template data for the new-items banner.
 type NewItemsData struct {
 	FeedID  int64
 	Count   int
 	SwapOOB bool
 }
 
-type NewItemsResponseData struct {
+// ItemListData is template data for a feed and its item list.
+type ItemListData struct {
 	Items    []ItemView
+	Feed     FeedView
+	NewItems NewItemsData
 	NewestID int64
-	Banner   NewItemsData
-}
-
-type PollResponseData struct {
-	Banner         NewItemsData
-	Feeds          []FeedView
-	RefreshDisplay string
-	SelectedFeedID int64
-	FeedEditMode   bool
-}
-
-type ItemListResponseData struct {
-	ItemList       *ItemListData
-	Feeds          []FeedView
-	SelectedFeedID int64
-	FeedEditMode   bool
-}
-
-type ToggleReadResponseData struct {
-	Item           ItemView
-	Feeds          []FeedView
-	SelectedFeedID int64
-	View           string
-	FeedEditMode   bool
 }

@@ -1,6 +1,9 @@
+//nolint:testpackage // Feed tests exercise package-internal helpers directly.
 package feed
 
 import (
+	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -8,55 +11,84 @@ import (
 	"rss/internal/testutil"
 )
 
-func TestRefreshInsertsNewItems(t *testing.T) {
-	base := time.Now().UTC().Add(-2 * time.Hour)
-	fs, feedURL := testutil.NewFeedServer(t, testutil.RSSXML("Refresh Feed", []testutil.RSSItem{{
-		Title:       "First",
-		Link:        "http://example.com/1",
-		GUID:        "1",
-		PubDate:     base.Format(time.RFC1123Z),
-		Description: "<p>First summary</p>",
-	}}))
-	db := testutil.OpenTestDB(t)
+const (
+	refreshFeedTitle         = "Refresh Feed"
+	expectedInitialItemCount = 1
+	expectedUpdatedItemCount = 2
+)
 
-	feedID, err := store.UpsertFeed(db, feedURL, "Refresh Feed")
+func TestRefreshInsertsNewItems(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	feedServer, feedURL := testutil.NewFeedServer(
+		t,
+		testutil.RSSXML(refreshFeedTitle, []testutil.RSSItem{{
+			Title:       "First",
+			Link:        "http://example.com/1",
+			GUID:        "1",
+			PubDate:     base.Format(time.RFC1123Z),
+			Description: "<p>First summary</p>",
+		}}),
+	)
+	database := testutil.OpenTestDB(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), database, feedURL, refreshFeedTitle)
 	if err != nil {
 		t.Fatalf("store.UpsertFeed: %v", err)
 	}
 
-	if _, err := Refresh(db, feedID); err != nil {
-		t.Fatalf("Refresh initial: %v", err)
-	}
-	items, err := store.ListItems(db, feedID)
-	if err != nil {
-		t.Fatalf("store.ListItems initial: %v", err)
-	}
-	if len(items) != 1 {
-		t.Fatalf("expected 1 item after first refresh, got %d", len(items))
+	_, refreshErr := Refresh(context.Background(), database, feedID)
+	if refreshErr != nil {
+		t.Fatalf("Refresh initial: %v", refreshErr)
 	}
 
-	fs.SetFeedXML(testutil.RSSXML("Refresh Feed", []testutil.RSSItem{{
-		Title:       "Second",
-		Link:        "http://example.com/2",
-		GUID:        "2",
-		PubDate:     base.Add(time.Minute).Format(time.RFC1123Z),
-		Description: "<p>Second summary</p>",
-	}, {
-		Title:       "First",
-		Link:        "http://example.com/1",
-		GUID:        "1",
-		PubDate:     base.Format(time.RFC1123Z),
-		Description: "<p>First summary</p>",
-	}}))
+	assertFeedItemCount(t, database, feedID, expectedInitialItemCount, "first")
 
-	if _, err := Refresh(db, feedID); err != nil {
-		t.Fatalf("Refresh second: %v", err)
+	feedServer.SetFeedXML(
+		testutil.RSSXML(refreshFeedTitle, []testutil.RSSItem{{
+			Title:       "Second",
+			Link:        "http://example.com/2",
+			GUID:        "2",
+			PubDate:     base.Add(time.Minute).Format(time.RFC1123Z),
+			Description: "<p>Second summary</p>",
+		}, {
+			Title:       "First",
+			Link:        "http://example.com/1",
+			GUID:        "1",
+			PubDate:     base.Format(time.RFC1123Z),
+			Description: "<p>First summary</p>",
+		}}),
+	)
+
+	_, refreshErr = Refresh(context.Background(), database, feedID)
+	if refreshErr != nil {
+		t.Fatalf("Refresh second: %v", refreshErr)
 	}
-	items, err = store.ListItems(db, feedID)
+
+	assertFeedItemCount(t, database, feedID, expectedUpdatedItemCount, "second")
+}
+
+func assertFeedItemCount(
+	t *testing.T,
+	database *sql.DB,
+	feedID int64,
+	want int,
+	phase string,
+) {
+	t.Helper()
+
+	items, err := store.ListItems(context.Background(), database, feedID)
 	if err != nil {
-		t.Fatalf("store.ListItems second: %v", err)
+		t.Fatalf("store.ListItems %s: %v", phase, err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected 2 items after second refresh, got %d", len(items))
+
+	if len(items) != want {
+		t.Fatalf(
+			"expected %d items after %s refresh, got %d",
+			want,
+			phase,
+			len(items),
+		)
 	}
 }

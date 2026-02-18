@@ -1,3 +1,4 @@
+//nolint:testpackage // OPML tests exercise package-internal helpers directly.
 package opml
 
 import (
@@ -6,7 +7,17 @@ import (
 	"testing"
 )
 
+const (
+	alphaFeedURL           = "https://example.com/alpha.xml"
+	betaFeedURL            = "https://example.com/beta.xml"
+	gammaFeedURL           = "https://example.com/gamma.xml"
+	expectedNestedFeeds    = 3
+	expectedRoundtripFeeds = 2
+)
+
 func TestParseCollectsNestedSubscriptions(t *testing.T) {
+	t.Parallel()
+
 	input := `<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
   <head>
@@ -14,10 +25,17 @@ func TestParseCollectsNestedSubscriptions(t *testing.T) {
   </head>
   <body>
     <outline text="Tech">
-      <outline text="Alpha Feed" type="rss" xmlUrl="https://example.com/alpha.xml" />
+      <outline
+        text="Alpha Feed"
+        type="rss"
+        xmlUrl="https://example.com/alpha.xml"
+      />
       <outline title="Beta Feed" xmlurl="https://example.com/beta.xml" />
     </outline>
-    <outline text="Gamma Feed" url="https://example.com/gamma.xml" />
+    <outline
+      text="Gamma Feed"
+      url="https://example.com/gamma.xml"
+    />
   </body>
 </opml>`
 
@@ -26,30 +44,38 @@ func TestParseCollectsNestedSubscriptions(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	if len(got) != 3 {
-		t.Fatalf("expected 3 subscriptions, got %d", len(got))
+	expected := []Subscription{
+		{Title: "Alpha Feed", URL: alphaFeedURL},
+		{Title: "Beta Feed", URL: betaFeedURL},
+		{Title: "Gamma Feed", URL: gammaFeedURL},
 	}
 
-	if got[0].Title != "Alpha Feed" || got[0].URL != "https://example.com/alpha.xml" {
-		t.Fatalf("unexpected first subscription: %+v", got[0])
+	if len(got) != expectedNestedFeeds {
+		t.Fatalf(
+			"expected %d subscriptions, got %d",
+			expectedNestedFeeds,
+			len(got),
+		)
 	}
-	if got[1].Title != "Beta Feed" || got[1].URL != "https://example.com/beta.xml" {
-		t.Fatalf("unexpected second subscription: %+v", got[1])
-	}
-	if got[2].Title != "Gamma Feed" || got[2].URL != "https://example.com/gamma.xml" {
-		t.Fatalf("unexpected third subscription: %+v", got[2])
+
+	for index := range expected {
+		assertSubscription(t, got[index], expected[index], index)
 	}
 }
 
 func TestWriteRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	input := []Subscription{
 		{Title: "Alpha", URL: "https://example.com/alpha.xml"},
-		{Title: "", URL: "https://example.com/beta.xml"},
+		{Title: "", URL: betaFeedURL},
 		{Title: "Ignored", URL: ""},
 	}
 
 	var buf bytes.Buffer
-	if err := Write(&buf, "My Subscriptions", input); err != nil {
+
+	err := Write(&buf, "My Subscriptions", input)
+	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
@@ -58,14 +84,33 @@ func TestWriteRoundTrip(t *testing.T) {
 		t.Fatalf("Parse roundtrip: %v", err)
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("expected 2 subscriptions after roundtrip, got %d", len(got))
+	expected := []Subscription{
+		{Title: "Alpha", URL: alphaFeedURL},
+		{Title: betaFeedURL, URL: betaFeedURL},
 	}
 
-	if got[0].Title != "Alpha" || got[0].URL != "https://example.com/alpha.xml" {
-		t.Fatalf("unexpected first roundtrip subscription: %+v", got[0])
+	if len(got) != expectedRoundtripFeeds {
+		t.Fatalf(
+			"expected %d subscriptions after roundtrip, got %d",
+			expectedRoundtripFeeds,
+			len(got),
+		)
 	}
-	if got[1].Title != "https://example.com/beta.xml" || got[1].URL != "https://example.com/beta.xml" {
-		t.Fatalf("unexpected second roundtrip subscription: %+v", got[1])
+
+	for index := range expected {
+		assertSubscription(t, got[index], expected[index], index)
+	}
+}
+
+func assertSubscription(t *testing.T, got, want Subscription, index int) {
+	t.Helper()
+
+	if got != want {
+		t.Fatalf(
+			"subscription %d mismatch: got %+v want %+v",
+			index,
+			got,
+			want,
+		)
 	}
 }
