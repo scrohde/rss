@@ -58,6 +58,7 @@ linters:
             - $gostd
             - rss/
             - github.com/mmcdole/gofeed
+            - github.com/go-webauthn/webauthn
             - golang.org/x/net/html
             - golang.org/x/net/html/atom
             - modernc.org/sqlite

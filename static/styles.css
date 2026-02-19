@@ -1005,6 +1005,33 @@ body {
   padding: 32px 16px;
 }
 
+.auth-shell {
+  max-width: 40rem;
+  margin: 4rem auto;
+}
+
+.auth-shell-wide {
+  max-width: 48rem;
+}
+
+.auth-shell .message {
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+  white-space: normal;
+  overflow: visible;
+}
+
+.auth-message {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.auth-section {
+  margin-top: 2rem;
+}
+
 .modal {
   border: none;
   border-radius: 18px;

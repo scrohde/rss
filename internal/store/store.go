@@ -22,28 +22,7 @@ const (
 	readRetention   = 30 * time.Minute
 )
 
-// Open is part of the store package API.
-func Open(path string) (*sql.DB, error) {
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
-
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite database: %w", err)
-	}
-	// SQLite behaves best with a single connection for this workload.
-	db.SetMaxOpenConns(1)
-
-	_, err = db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL;")
-	if err != nil {
-		return nil, fmt.Errorf("enable WAL mode: %w", err)
-	}
-
-	return db, nil
-}
-
-// Init is part of the store package API.
-func Init(db *sql.DB) error {
-	schema := `
+const initSchemaSQL = `
 CREATE TABLE IF NOT EXISTS feeds (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	url TEXT NOT NULL UNIQUE,
@@ -90,12 +69,38 @@ BEGIN
 END;
 `
 
-	_, err := db.ExecContext(context.Background(), schema)
+// Open is part of the store package API.
+func Open(path string) (*sql.DB, error) {
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite database: %w", err)
+	}
+	// SQLite behaves best with a single connection for this workload.
+	db.SetMaxOpenConns(1)
+
+	_, err = db.ExecContext(context.Background(), "PRAGMA journal_mode=WAL;")
+	if err != nil {
+		return nil, fmt.Errorf("enable WAL mode: %w", err)
+	}
+
+	return db, nil
+}
+
+// Init is part of the store package API.
+func Init(db *sql.DB) error {
+	_, err := db.ExecContext(context.Background(), initSchemaSQL)
 	if err != nil {
 		return fmt.Errorf("initialize schema: %w", err)
 	}
 
 	err = ensureFeedOrderColumn(db)
+	if err != nil {
+		return err
+	}
+
+	err = ensureAuthSchema(db)
 	if err != nil {
 		return err
 	}

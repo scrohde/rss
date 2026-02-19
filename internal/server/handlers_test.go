@@ -1,5 +1,3 @@
-// Package server tests handler behavior, rendering, and integration flows.
-//
 //nolint:testpackage // Handler integration tests intentionally exercise unexported helpers.
 package server
 
@@ -49,7 +47,6 @@ const (
 	expectedTwoItems     = 2
 	expectedTwoUnread    = 2
 	expectedOneUnread    = 1
-	expectedOneItemFmt   = "expected 1 item, got %d"
 	errStoreListFeeds    = "store.ListFeeds: %v"
 	errStoreUpsertFeed   = "store.UpsertFeed: %v"
 	errStoreUpsertItems  = "store.UpsertItems: %v"
@@ -93,8 +90,6 @@ const (
 	cookieClearedToken   = "Max-Age=0"
 	imageProxyURLQuery   = "?url="
 	examplePublicIP      = "93.184.216.34"
-	mediumImageURL       = "https://cdn-images-1.medium.com/max/1024/example.png"
-	exampleImageURL      = "https://example.com/image.png"
 	selectedItemIDParam  = "selected_item_id"
 	selectedItemIDPlain  = int64(42)
 	selectedItemIDRaw    = "42"
@@ -705,8 +700,7 @@ func markSweepItemsRead(
 
 	_, err := app.db.ExecContext(
 		context.Background(),
-		"UPDATE items SET read_at = ? WHERE feed_id = ? AND "+
-			"guid IN (?, ?)",
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid IN (?, ?)",
 		now,
 		feedID,
 		sweepGUIDA,
@@ -1428,7 +1422,7 @@ func TestItemCompactExpandRequestIncludesSelectedItemID(t *testing.T) {
 	assertContains(
 		t,
 		body,
-		`hx-vals='js:{selected_item_id:this.id}'`,
+		`hx-vals='{"selected_item_id":"item-`,
 		"expected compact item expand request to include selected_item_id",
 	)
 }
@@ -2702,11 +2696,10 @@ func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
 	}
 }
 
-func TestImageProxyNon2xxLogsWhenDebugEnabled(t *testing.T) {
+func TestImageProxyNon2xxLogsAtDebugLevel(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	app.SetImageProxyDebug(true)
 	app.imageProxyLookup = func(_ context.Context, host string) ([]net.IPAddr, error) {
 		if host != "cdn-images-1.medium.com" {
 			t.Fatalf("unexpected host %q", host)
@@ -2723,7 +2716,7 @@ func TestImageProxyNon2xxLogsWhenDebugEnabled(t *testing.T) {
 	prevLogger := slog.Default()
 
 	options := new(slog.HandlerOptions)
-	options.Level = slog.LevelInfo
+	options.Level = slog.LevelDebug
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, options)))
 	defer slog.SetDefault(prevLogger)
@@ -2749,11 +2742,10 @@ func TestImageProxyNon2xxLogsWhenDebugEnabled(t *testing.T) {
 	}
 }
 
-func TestImageProxyNon2xxDoesNotLogWhenDebugDisabled(t *testing.T) {
+func TestImageProxyNon2xxDoesNotLogAtInfoLevel(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
-	app.SetImageProxyDebug(false)
 	app.imageProxyLookup = func(_ context.Context, host string) ([]net.IPAddr, error) {
 		if host != "cdn-images-1.medium.com" {
 			t.Fatalf("unexpected host %q", host)
@@ -2787,7 +2779,7 @@ func TestImageProxyNon2xxDoesNotLogWhenDebugDisabled(t *testing.T) {
 	}
 
 	if strings.Contains(logs.String(), "image proxy upstream non-2xx") {
-		t.Fatalf("expected no non-2xx debug log when disabled, got %q", logs.String())
+		t.Fatalf("expected no non-2xx debug log at info level, got %q", logs.String())
 	}
 }
 

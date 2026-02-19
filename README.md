@@ -16,15 +16,46 @@ A compact RSS reader built with Go, htmx, and SQLite.
 ## Run
 ```bash
 go mod tidy
-go run .
+AUTH_ENABLED=false go run .
 ```
 
 Then open http://localhost:8080.
 
-Optional debug:
-- `IMAGE_PROXY_DEBUG=1 go run .` logs non-2xx upstream image-proxy responses.
+Optional environment variables:
+- `LOG_LEVEL` controls structured log verbosity (`debug`, `info`, `warn`, `error`; default `info`).
 
-## Run as a service (macOS)
+## Run as a public service
+### Caddy reverse proxy (recommended)
+
+Use Caddy for TLS termination and edge headers. Start from [`Caddyfile.example`](./Caddyfile.example) and replace the domain.
+
+Run the app on loopback (`127.0.0.1:8080`) behind Caddy.
+
+### Authentication (Passkeys)
+
+Pulse RSS can run with passkey-only authentication for public hosting.
+
+Set these env vars before `go run .` in production:
+
+```bash
+AUTH_ENABLED=true
+AUTH_RP_ID=rss.example.com
+AUTH_RP_ORIGIN=https://rss.example.com
+AUTH_RP_NAME="Pulse RSS"
+AUTH_SETUP_TOKEN="<long-random-secret>"
+AUTH_SESSION_TTL=24h
+AUTH_CHALLENGE_TTL=5m
+AUTH_COOKIE_NAME=pulse_rss_session
+AUTH_COOKIE_SECURE=true
+```
+
+Notes:
+- `AUTH_SETUP_TOKEN` is required for initial enrollment.
+- `AUTH_RP_ORIGIN` must exactly match the public HTTPS origin.
+- Passkeys do not work reliably on raw public IP addresses.
+- If unset, secure defaults are applied: `AUTH_SESSION_TTL=24h`, `AUTH_CHALLENGE_TTL=5m`, and secure cookies.
+
+## Run as a local service (macOS)
 
 ### 1. Build and install RSS on the host Mac
 
@@ -59,6 +90,10 @@ cat > "$HOME/Library/LaunchAgents/com.pulse-rss.plist" <<EOF
   <dict>
     <key>PORT</key>
     <string>8080</string>
+    <key>LOG_LEVEL</key>
+    <string>info</string>
+    <key>AUTH_ENABLED</key>
+    <string>false</string>
   </dict>
 
   <key>RunAtLoad</key>
@@ -118,12 +153,14 @@ go test ./...
 ```
 
 ## Project layout
-- `main.go` thin entrypoint (logging, wiring, server startup)
-- `internal/server/` HTTP routes, handlers, template rendering, background loops
-- `internal/store/` SQLite open/init and data access logic
+- `main.go` thin entrypoint (logging, wiring, config/env parsing, server startup)
+- `internal/server/` HTTP routes, handlers, template rendering, auth/session flows, background loops
+- `internal/store/` SQLite open/init and data access for feeds/items and auth state
 - `internal/feed/` feed fetch/refresh and refresh scheduling
-- `internal/content/` summary HTML rewriting and image proxy helpers
+- `internal/content/` summary HTML rewriting, srcset normalization, and image proxy helpers
+- `internal/auth/` passkey registration/authentication service logic
+- `internal/opml/` OPML import/export parsing and rendering helpers
 - `internal/view/` template-facing view models and formatting builders
 - `internal/testutil/` shared test helpers
-- `templates/` HTML templates and htmx partials
-- `static/` frontend assets
+- `templates/` HTML templates and htmx partials (including auth screens)
+- `static/` frontend assets (`app.js`, `auth.js`, CSS, icons, vendor JS)

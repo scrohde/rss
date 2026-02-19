@@ -1,0 +1,54 @@
+{{define "auth_setup"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pulse RSS Setup</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/auth.js" defer></script>
+</head>
+<body>
+  <main class="empty-state auth-shell">
+    {{if .HasCredentials}}
+      <h2>Initial Passkey Setup</h2>
+      {{if .Message}}
+        <p class="message">{{.Message}}</p>
+      {{end}}
+      <p>Setup is complete. <a href="/auth/login">Sign in</a>.</p>
+    {{else}}
+      {{if .SetupUnlocked}}
+        <h2>Initial Passkey Setup</h2>
+        {{if .Message}}
+          <p class="message">{{.Message}}</p>
+        {{end}}
+        <p class="message auth-message" data-auth-message role="status" aria-live="polite"></p>
+        <p>Register your first passkey to finish setup.</p>
+        <p>
+          <button
+            type="button"
+            class="chip"
+            data-passkey-register="true"
+            {{if .AutoStartRegistration}}data-passkey-autostart="true"{{end}}
+          >
+            Register passkey
+          </button>
+        </p>
+      {{else}}
+        <h2>Enter setup code</h2>
+        {{if .SetupTokenSet}}
+          <form method="post" action="/auth/setup/unlock">
+            <label for="setup-token">Setup code</label>
+            <input id="setup-token" name="setup_token" type="password" autocomplete="off" autofocus required>
+            <button type="submit">Continue</button>
+          </form>
+        {{else}}
+          <p class="message error">Setup token is not configured on the server.</p>
+        {{end}}
+      {{end}}
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}

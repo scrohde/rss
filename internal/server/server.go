@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"rss/internal/auth"
 	"rss/internal/content"
 	"rss/internal/feed"
 	"rss/internal/opml"
@@ -39,28 +40,43 @@ var errFeedReturnedNoContent = errors.New("feed returned no content")
 
 // App wires handlers, dependencies, and background loops for the HTTP server.
 type App struct {
-	staticHandler    http.Handler
-	db               *sql.DB
-	tmpl             *template.Template
-	imageProxyClient *http.Client
-	imageProxyLookup content.LookupIPAddrFunc
-	refreshMu        sync.Mutex
-	imageProxyDebug  bool
+	staticHandler       http.Handler
+	authManager         *auth.Manager
+	db                  *sql.DB
+	tmpl                *template.Template
+	imageProxyClient    *http.Client
+	imageProxyLookup    content.LookupIPAddrFunc
+	authRateLimiter     *authRateLimiter
+	authCookieName      string
+	authSetupToken      string
+	authSetupCookieName string
+	authSetupSignerKey  []byte
+	refreshMu           sync.Mutex
+	authEnabled         bool
+	authCookieSecure    bool
 }
 
 // New constructs an App with default static file and image proxy dependencies.
 func New(db *sql.DB, tmpl *template.Template) *App {
-	return &App{
-		db:               db,
-		tmpl:             tmpl,
-		staticHandler:    http.FileServer(http.Dir("static")),
-		imageProxyClient: content.NewHTTPClient(),
-		imageProxyLookup: func(ctx context.Context, host string) ([]net.IPAddr, error) {
-			return net.DefaultResolver.LookupIPAddr(ctx, host)
-		},
-		refreshMu:       sync.Mutex{},
-		imageProxyDebug: false,
+	app := new(App)
+	app.db = db
+	app.tmpl = tmpl
+	app.staticHandler = http.FileServer(http.Dir("static"))
+	app.imageProxyClient = content.NewHTTPClient()
+	app.imageProxyLookup = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		return net.DefaultResolver.LookupIPAddr(ctx, host)
 	}
+	app.authManager = nil
+	app.authRateLimiter = nil
+	app.authCookieName = ""
+	app.authSetupToken = ""
+	app.authSetupCookieName = ""
+	app.authSetupSignerKey = nil
+	app.refreshMu = sync.Mutex{}
+	app.authEnabled = false
+	app.authCookieSecure = false
+
+	return app
 }
 
 // SetStaticFS replaces the static file system used for `/static/*` routes.
@@ -68,23 +84,41 @@ func (a *App) SetStaticFS(fsys fs.FS) {
 	a.staticHandler = http.FileServer(http.FS(fsys))
 }
 
-// SetImageProxyDebug toggles debug logging for image proxy upstream responses.
-func (a *App) SetImageProxyDebug(enabled bool) {
-	a.imageProxyDebug = enabled
-}
-
 // Routes returns the fully configured application HTTP handler.
 func (a *App) Routes() http.Handler {
 	mux := http.NewServeMux()
+	a.registerCoreRoutes(mux)
+	a.registerFeedRoutes(mux)
+
+	if a.authEnabled {
+		a.registerAuthRoutes(mux)
+	}
+
+	var handler http.Handler = mux
+
+	return a.wrapRoutes(handler)
+}
+
+// StartBackgroundLoops starts cleanup and feed refresh goroutines.
+func (a *App) StartBackgroundLoops() {
+	go a.cleanupLoop()
+	go a.refreshLoop()
+}
+
+func (a *App) registerCoreRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", a.handleHealthz)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", a.staticHandler))
 	mux.HandleFunc("GET /{$}", a.handleIndex)
+	mux.HandleFunc("GET /opml/export", a.handleExportOPML)
+	mux.HandleFunc("POST /opml/import", a.handleImportOPML)
+	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
+}
+
+func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
 	mux.HandleFunc("POST /feeds/edit-mode", a.handleEnterFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/save", a.handleSaveFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/cancel", a.handleCancelFeedEditMode)
-	mux.HandleFunc("GET /opml/export", a.handleExportOPML)
-	mux.HandleFunc("POST /opml/import", a.handleImportOPML)
-	mux.HandleFunc("GET "+content.ImageProxyPath, a.handleImageProxy)
 	mux.HandleFunc("POST /feeds/{feedID}/delete", a.handleDeleteFeed)
 	mux.HandleFunc("POST /feeds/{feedID}/refresh", a.handleRefreshFeed)
 	mux.HandleFunc("GET /feeds/{feedID}/items", a.handleFeedItems)
@@ -95,14 +129,35 @@ func (a *App) Routes() http.Handler {
 	mux.HandleFunc("GET /items/{itemID}", a.handleItemExpanded)
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)
 	mux.HandleFunc("POST /items/{itemID}/toggle", a.handleToggleRead)
-
-	return mux
 }
 
-// StartBackgroundLoops starts cleanup and feed refresh goroutines.
-func (a *App) StartBackgroundLoops() {
-	go a.cleanupLoop()
-	go a.refreshLoop()
+func (a *App) registerAuthRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /auth/login", a.handleAuthLogin)
+	mux.HandleFunc("POST /auth/webauthn/login/options", a.handleAuthLoginOptions)
+	mux.HandleFunc("POST /auth/webauthn/login/verify", a.handleAuthLoginVerify)
+	mux.HandleFunc("GET /auth/setup", a.handleAuthSetup)
+	mux.HandleFunc("POST /auth/setup/unlock", a.handleAuthSetupUnlock)
+	mux.HandleFunc("POST /auth/webauthn/register/options", a.handleAuthRegisterOptions)
+	mux.HandleFunc("POST /auth/webauthn/register/verify", a.handleAuthRegisterVerify)
+	mux.HandleFunc("POST /auth/logout", a.handleAuthLogout)
+	mux.HandleFunc("GET /auth/security", a.handleAuthSecurity)
+	mux.HandleFunc("GET /auth/recovery", a.handleAuthRecovery)
+	mux.HandleFunc("POST /auth/recovery/use", a.handleAuthRecoveryUse)
+	mux.HandleFunc("POST /auth/recovery/generate", a.handleAuthRecoveryGenerate)
+}
+
+func (a *App) wrapRoutes(handler http.Handler) http.Handler {
+	handler = a.withRequestID(handler)
+	handler = a.withRealIP(handler)
+	handler = a.withSecurityHeaders(handler)
+
+	if a.authEnabled {
+		handler = a.withAuthRateLimit(handler)
+		handler = a.withCSRFMiddleware(handler)
+		handler = a.withAuthSession(handler)
+	}
+
+	return handler
 }
 
 func feedEditModeEnabled(r *http.Request) bool {
@@ -150,6 +205,7 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	data.Feeds = feeds
 	data.FeedEditMode = feedEditModeEnabled(r)
+	data.CSRFToken = a.csrfTokenForRequest(r)
 	a.renderTemplate(w, "index", data)
 }
 
@@ -1093,14 +1149,12 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		if a.imageProxyDebug {
-			slog.Info(
-				"image proxy upstream non-2xx",
-				"status", resp.StatusCode,
-				"target_host", target.Host,
-				"target_path", target.EscapedPath(),
-			)
-		}
+		slog.Debug(
+			"image proxy upstream non-2xx",
+			"status", resp.StatusCode,
+			"target_host", target.Host,
+			"target_path", target.EscapedPath(),
+		)
 
 		http.Error(w, "upstream error", http.StatusBadGateway)
 
@@ -1372,12 +1426,23 @@ func (a *App) cleanupLoop() {
 	defer ticker.Stop()
 
 	for {
-		err := store.CleanupReadItems(a.db)
-		if err != nil {
-			slog.Error("cleanup error", "err", err)
-		}
+		a.runCleanupIteration()
 
 		<-ticker.C
+	}
+}
+
+func (a *App) runCleanupIteration() {
+	err := store.CleanupReadItems(a.db)
+	if err != nil {
+		slog.Error("cleanup error", "err", err)
+	}
+
+	if a.authEnabled && a.authManager != nil {
+		authErr := a.authManager.CleanupExpiredAuthData(context.Background())
+		if authErr != nil {
+			slog.Error("auth cleanup error", "err", authErr)
+		}
 	}
 }
 

@@ -19,6 +19,13 @@
     document.getElementById("topbar-shortcuts-button");
   const getTopbarShortcutsPanel = () =>
     document.getElementById("topbar-shortcuts-panel");
+  const getCSRFToken = () => {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (!meta) {
+      return "";
+    }
+    return (meta.getAttribute("content") || "").trim();
+  };
 
   const isTopbarShortcutsOpen = () => {
     const button = getTopbarShortcutsButton();
@@ -70,6 +77,80 @@
       return;
     }
     shortcuts.hidden = false;
+  };
+
+  const bindSubscribeForm = () => {
+    const form = document.querySelector("form.subscribe-form");
+    if (!form || form.dataset.bound === "true") {
+      return;
+    }
+    form.dataset.bound = "true";
+    form.addEventListener("htmx:afterRequest", (event) => {
+      if (!event || !event.detail || !event.detail.successful) {
+        return;
+      }
+      form.reset();
+    });
+  };
+
+  const bindImportControls = () => {
+    document
+      .querySelectorAll("button[data-import-button='true']")
+      .forEach((button) => {
+        if (button.dataset.bound === "true") {
+          return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+          const form = button.closest("form");
+          if (!form) {
+            return;
+          }
+          const input = form.querySelector("input[data-import-file-input='true']");
+          if (input) {
+            input.click();
+          }
+        });
+      });
+
+    document
+      .querySelectorAll("input[data-import-file-input='true']")
+      .forEach((input) => {
+        if (input.dataset.bound === "true") {
+          return;
+        }
+        input.dataset.bound = "true";
+        input.addEventListener("change", () => {
+          if (!input.files || input.files.length === 0) {
+            return;
+          }
+          const form = input.closest("form");
+          if (!form) {
+            return;
+          }
+          if (typeof form.requestSubmit === "function") {
+            form.requestSubmit();
+            return;
+          }
+          form.submit();
+        });
+      });
+  };
+
+  const bindItemCardClickGuards = () => {
+    document.querySelectorAll(".item-card a, .item-card button").forEach((element) => {
+      if (element.dataset.cardClickGuardBound === "true") {
+        return;
+      }
+      element.dataset.cardClickGuardBound = "true";
+      element.addEventListener("click", (event) => {
+        const card = event.currentTarget.closest(".item-card");
+        if (card) {
+          setActive(card);
+        }
+        event.stopPropagation();
+      });
+    });
   };
 
   const isFeedEditMode = () => {
@@ -663,6 +744,9 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     bindTopbarShortcuts();
+    bindSubscribeForm();
+    bindImportControls();
+    bindItemCardClickGuards();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     if (isFeedEditMode()) {
@@ -676,6 +760,9 @@
   document.body.addEventListener("htmx:afterSwap", (event) => {
     clearFeedDragState();
     bindTopbarShortcuts();
+    bindSubscribeForm();
+    bindImportControls();
+    bindItemCardClickGuards();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     const swapTarget = event && event.detail ? event.detail.target : null;
@@ -702,6 +789,13 @@
   document.body.addEventListener("htmx:configRequest", (event) => {
     if (!event || !event.detail || !event.detail.parameters) {
       return;
+    }
+    const csrfToken = getCSRFToken();
+    if (csrfToken) {
+      if (!event.detail.headers) {
+        event.detail.headers = {};
+      }
+      event.detail.headers["X-CSRF-Token"] = csrfToken;
     }
     if (!event.detail.parameters.selected_item_id) {
       const source = event.detail.elt;

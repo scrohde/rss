@@ -1,0 +1,27 @@
+{{define "auth_recovery"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pulse RSS Recovery</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="empty-state auth-shell">
+    <h2>Recover Access</h2>
+    <p>Use your single-use emergency recovery code.</p>
+    {{if .Message}}
+      <p class="message error">{{.Message}}</p>
+    {{end}}
+    <form method="post" action="/auth/recovery/use">
+      <label for="recovery-code">Recovery code</label>
+      <input id="recovery-code" name="recovery_code" type="text" autocomplete="off" required>
+      <button type="submit">Recover</button>
+    </form>
+    <p><a href="/auth/login">Back to login</a></p>
+  </main>
+</body>
+</html>
+{{end}}

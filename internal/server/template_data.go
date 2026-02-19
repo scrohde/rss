@@ -4,6 +4,7 @@ import "rss/internal/view"
 
 type pageData struct {
 	ItemList       *view.ItemListData
+	CSRFToken      string
 	Feeds          []view.FeedView
 	SelectedFeedID int64
 	FeedEditMode   bool
@@ -46,4 +47,31 @@ type toggleReadResponseData struct {
 	Item           view.ItemView
 	SelectedFeedID int64
 	FeedEditMode   bool
+}
+
+type authLoginPageData struct {
+	Message string
+}
+
+type authSetupPageData struct {
+	Message               string
+	RegistrationURL       string
+	SetupUnlocked         bool
+	HasCredentials        bool
+	SetupTokenSet         bool
+	AutoStartRegistration bool
+}
+
+type authSecurityPageData struct {
+	CSRFToken          string
+	RecoveryCode       string
+	RegistrationURL    string
+	RecoveryEnabledURL string
+	Message            string
+	PasskeyCount       int
+	HasRecoveryCode    bool
+}
+
+type authRecoveryPageData struct {
+	Message string
 }

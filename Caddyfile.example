@@ -1,0 +1,11 @@
+# Replace rss.example.com with your public domain.
+# Passkey WebAuthn RP settings must match this origin exactly.
+rss.example.com {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	reverse_proxy 127.0.0.1:8080
+}

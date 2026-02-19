@@ -6,7 +6,6 @@
       hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
       hx-swap="outerHTML"
-      hx-trigger="click[!((event.target.closest && event.target.closest('a, button')) || (event.target.parentElement && event.target.parentElement.closest('a, button')))]"
     >
       <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
       <div class="item-actions">

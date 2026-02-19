@@ -1,0 +1,49 @@
+{{define "auth_security"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  <title>Pulse RSS Security</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/auth.js" defer></script>
+</head>
+<body>
+  <main class="empty-state auth-shell auth-shell-wide">
+    <h2>Security Settings</h2>
+    {{if .Message}}
+      <p class="message">{{.Message}}</p>
+    {{end}}
+    <p class="message auth-message" data-auth-message role="status" aria-live="polite"></p>
+    <p>Registered passkeys: <strong>{{.PasskeyCount}}</strong></p>
+    <p>
+      <button type="button" class="chip" data-passkey-register="true">Add another passkey</button>
+    </p>
+
+    <section class="auth-section">
+      <h3>Emergency Recovery Code</h3>
+      {{if .RecoveryCode}}
+        <p class="message success"><strong>{{.RecoveryCode}}</strong></p>
+      {{else if .HasRecoveryCode}}
+        <p>A recovery code is active.</p>
+      {{else}}
+        <p>No recovery code has been generated.</p>
+      {{end}}
+      <form method="post" action="/auth/recovery/generate">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit">Generate recovery code</button>
+      </form>
+    </section>
+
+    <section class="auth-section">
+      <form method="post" action="/auth/logout">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button type="submit" class="chip ghost">Sign out</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

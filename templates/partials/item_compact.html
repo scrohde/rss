@@ -3,10 +3,9 @@
     class="item-card compact clickable {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
     id="item-{{.ID}}"
     hx-get="/items/{{.ID}}"
-    hx-vals='js:{selected_item_id:this.id}'
+    hx-vals='{"selected_item_id":"item-{{.ID}}"}'
     hx-target="#item-{{.ID}}"
     hx-swap="outerHTML"
-    hx-trigger="click[!((event.target.closest && event.target.closest('a, button')) || (event.target.parentElement && event.target.parentElement.closest('a, button')))]"
   >
     <div class="item-row">
       <div class="item-title-row">

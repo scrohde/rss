@@ -1,0 +1,28 @@
+{{define "auth_login"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pulse RSS Login</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/auth.js" defer></script>
+</head>
+<body>
+  <main class="empty-state auth-shell">
+    <h2>Sign in with Passkey</h2>
+    <p>This app uses passkey-only authentication.</p>
+    {{if .Message}}
+      <p class="message error">{{.Message}}</p>
+    {{end}}
+    <p class="message auth-message" data-auth-message role="status" aria-live="polite"></p>
+    <p>
+      <button type="button" class="chip" data-passkey-login="true">Continue with passkey</button>
+    </p>
+    <p><a href="/auth/setup">Initial setup</a></p>
+    <p><a href="/auth/recovery">Use emergency recovery code</a></p>
+  </main>
+</body>
+</html>
+{{end}}
