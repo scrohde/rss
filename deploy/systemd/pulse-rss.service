@@ -1,0 +1,40 @@
+[Unit]
+Description=Pulse RSS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pulse-rss
+Group=pulse-rss
+WorkingDirectory=/var/lib/pulse-rss
+EnvironmentFile=/etc/pulse-rss/pulse-rss.env
+ExecStart=/usr/local/bin/pulse-rss
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+LimitNOFILE=4096
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+ReadWritePaths=/var/lib/pulse-rss
+
+[Install]
+WantedBy=multi-user.target

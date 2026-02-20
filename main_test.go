@@ -87,3 +87,29 @@ func TestResolveLogLevelInvalidValueFallsBackToInfo(t *testing.T) {
 		t.Fatalf("expected fallback info level for invalid LOG_LEVEL, got %s", got)
 	}
 }
+
+func TestResolveDBPath(t *testing.T) {
+	t.Run("defaults to rss.db when unset", func(t *testing.T) {
+		t.Setenv("DB_PATH", "")
+
+		if got := resolveDBPath(); got != "rss.db" {
+			t.Fatalf("expected default db path rss.db, got %q", got)
+		}
+	})
+
+	t.Run("uses explicit path", func(t *testing.T) {
+		t.Setenv("DB_PATH", "/var/lib/pulse/rss.db")
+
+		if got := resolveDBPath(); got != "/var/lib/pulse/rss.db" {
+			t.Fatalf("expected explicit db path, got %q", got)
+		}
+	})
+
+	t.Run("trims and falls back for whitespace", func(t *testing.T) {
+		t.Setenv("DB_PATH", "   ")
+
+		if got := resolveDBPath(); got != "rss.db" {
+			t.Fatalf("expected default db path rss.db, got %q", got)
+		}
+	})
+}

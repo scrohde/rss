@@ -23,13 +23,60 @@ Then open http://localhost:8080.
 
 Optional environment variables:
 - `LOG_LEVEL` controls structured log verbosity (`debug`, `info`, `warn`, `error`; default `info`).
+- `DB_PATH` sets the SQLite database file path (default `rss.db` in the process working directory).
 
 ## Run as a public service
-### Caddy reverse proxy (recommended)
+Production templates in this repo:
+- [`Caddyfile.example`](./Caddyfile.example) (hardened TLS reverse-proxy config)
+- [`deploy/systemd/pulse-rss.service`](./deploy/systemd/pulse-rss.service)
+- [`deploy/systemd/pulse-rss.env.example`](./deploy/systemd/pulse-rss.env.example)
 
-Use Caddy for TLS termination and edge headers. Start from [`Caddyfile.example`](./Caddyfile.example) and replace the domain.
+### Linux production setup (systemd + Caddy)
 
-Run the app on loopback (`127.0.0.1:8080`) behind Caddy.
+Quick deploy helper:
+```bash
+go build -o ./rss .
+./scripts/deploy-linux.sh
+```
+
+Useful overrides:
+- `APPLY_CADDY=false` to skip installing/reloading Caddy.
+- `BIN_SRC=/path/to/rss` to deploy a different binary path.
+- `CADDY_SRC=/path/to/Caddyfile` to deploy a different Caddy config file.
+- `CADDY_ALLOW_PLACEHOLDER=true` to bypass placeholder-domain safety check.
+
+1. Install Pulse RSS binary:
+```bash
+sudo install -d -m 0750 /var/lib/pulse-rss
+sudo install -d -m 0750 /etc/pulse-rss
+sudo install -o root -g root -m 0755 ./rss /usr/local/bin/pulse-rss
+```
+
+2. Create runtime user and install service files:
+```bash
+sudo useradd --system --home /var/lib/pulse-rss --shell /usr/sbin/nologin pulse-rss 2>/dev/null || true
+sudo chown pulse-rss:pulse-rss /var/lib/pulse-rss
+sudo cp ./deploy/systemd/pulse-rss.service /etc/systemd/system/pulse-rss.service
+sudo cp ./deploy/systemd/pulse-rss.env.example /etc/pulse-rss/pulse-rss.env
+sudo chmod 0640 /etc/pulse-rss/pulse-rss.env
+```
+
+3. Edit `/etc/pulse-rss/pulse-rss.env` for your domain and secrets.
+
+4. Install Caddy config:
+```bash
+sudo cp ./Caddyfile.example /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+5. Start and enable Pulse RSS:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pulse-rss
+sudo systemctl status pulse-rss --no-pager
+```
+
+Pulse RSS should remain bound to loopback (`127.0.0.1:8080`) behind Caddy.
 
 ### Authentication (Passkeys)
 
@@ -151,6 +198,15 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.pulse-rss.plist
 ```bash
 go test ./...
 ```
+
+All-in-one dev check (lint autofix + tests):
+```bash
+./scripts/check.sh
+```
+
+Optional overrides:
+- `SKIP_LINT=true ./scripts/check.sh`
+- `SKIP_TESTS=true ./scripts/check.sh`
 
 ## Project layout
 - `main.go` thin entrypoint (logging, wiring, config/env parsing, server startup)

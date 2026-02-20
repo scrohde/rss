@@ -50,7 +50,7 @@ func main() {
 func run() error {
 	setupLogging()
 
-	db, err := openInitializedDB("rss.db")
+	db, err := openInitializedDB(resolveDBPath())
 	if err != nil {
 		return err
 	}
@@ -183,6 +183,15 @@ func resolveAddr() string {
 	}
 
 	return "127.0.0.1:" + port
+}
+
+func resolveDBPath() string {
+	path := strings.TrimSpace(os.Getenv("DB_PATH"))
+	if path == "" {
+		return "rss.db"
+	}
+
+	return path
 }
 
 func envBool(name string) bool {

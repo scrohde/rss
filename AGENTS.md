@@ -20,10 +20,22 @@ Open http://localhost:8080
 go test ./...
 ```
 
+Shortcut:
+```bash
+./scripts/check.sh
+```
+
 ## Linting and formatting
 Lines can be up to 120 chars long.
 
+In sandboxed runs (like Codex), `golangci-lint` may fail to read/write default caches under `~/Library/Caches`.
+Use `./scripts/check.sh` to handle this automatically. If running commands manually, set writable cache dirs first:
+
 ```bash
+mkdir -p /tmp/go-build-cache /tmp/golangci-lint-cache
+export GOCACHE=/tmp/go-build-cache
+export GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache
+
 # Rewrite code to newer/cleaner Go idioms when safe
 go fix ./...
 
@@ -31,9 +43,6 @@ go fix ./...
 golangci-lint fmt ./...
 
 # Lint (uses linters section of .golangci.yml)
-golangci-lint run ./...
-
-# Apply autofixes (lint fixes + formatting fixes)
 golangci-lint run --fix ./...
 ```
 

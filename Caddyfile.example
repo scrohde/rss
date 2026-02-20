@@ -1,11 +1,55 @@
+{
+	servers {
+		# Only trust forwarded headers from local/reverse-proxy networks.
+		trusted_proxies static private_ranges
+	}
+}
+
 # Replace rss.example.com with your public domain.
 # Passkey WebAuthn RP settings must match this origin exactly.
 rss.example.com {
 	encode zstd gzip
 
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	tls {
+		protocols tls1.2 tls1.3
 	}
 
-	reverse_proxy 127.0.0.1:8080
+	@disallowed_methods method TRACE TRACK
+	respond @disallowed_methods 405
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Cross-Origin-Resource-Policy "same-origin"
+		-Server
+	}
+
+	request_body {
+		max_size 10MB
+	}
+
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Port {server_port}
+
+		transport http {
+			dial_timeout 5s
+			read_timeout 30s
+			write_timeout 30s
+			response_header_timeout 30s
+		}
+	}
+
+	log {
+		output file /var/log/caddy/pulse-rss-access.log {
+			roll_size 10MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format json
+	}
 }
