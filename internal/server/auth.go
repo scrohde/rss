@@ -247,13 +247,16 @@ func (*App) withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		// Keep enough referrer for third-party embeds (e.g. YouTube) that require client identification.
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set(
 			"Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "+
-				"img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; "+
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https: http:; "+
+				"font-src 'self' data: https: http:; img-src 'self' data: blob: https: http:; "+
+				"media-src 'self' data: blob: https: http:; connect-src 'self' https: http:; "+
+				"frame-src 'self' data: https: http:; object-src 'none'; base-uri 'self'; "+
 				"frame-ancestors 'none'; form-action 'self'",
 		)
 

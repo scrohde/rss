@@ -1136,7 +1136,7 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := a.imageProxyClient.Do(req)
 	if err != nil {
-		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
+		redirectToOriginalImage(w, r, target)
 
 		return
 	}
@@ -1156,7 +1156,7 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 			"target_path", target.EscapedPath(),
 		)
 
-		http.Error(w, "upstream error", http.StatusBadGateway)
+		redirectToOriginalImage(w, r, target)
 
 		return
 	}
@@ -1165,7 +1165,7 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	sniff, err := reader.Peek(imageProxySniffBytes)
 	if err != nil && !errors.Is(err, io.EOF) {
-		http.Error(w, "upstream read failed", http.StatusBadGateway)
+		redirectToOriginalImage(w, r, target)
 
 		return
 	}
@@ -1174,7 +1174,7 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" || !strings.HasPrefix(strings.ToLower(contentType), "image/") {
 		detected := http.DetectContentType(sniff)
 		if !strings.HasPrefix(detected, "image/") {
-			http.Error(w, "upstream did not return image content", http.StatusUnsupportedMediaType)
+			redirectToOriginalImage(w, r, target)
 
 			return
 		}
@@ -1184,13 +1184,13 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(io.LimitReader(reader, content.ImageProxyMaxBodyBytes+1))
 	if err != nil {
-		http.Error(w, "upstream read failed", http.StatusBadGateway)
+		redirectToOriginalImage(w, r, target)
 
 		return
 	}
 
 	if int64(len(body)) > content.ImageProxyMaxBodyBytes {
-		http.Error(w, "upstream image too large", http.StatusBadGateway)
+		redirectToOriginalImage(w, r, target)
 
 		return
 	}
@@ -1217,6 +1217,17 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	if writeErr != nil {
 		log.Printf("image proxy copy: %v", writeErr)
 	}
+}
+
+func redirectToOriginalImage(w http.ResponseWriter, r *http.Request, target *url.URL) {
+	if target == nil {
+		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
+
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, target.String(), http.StatusTemporaryRedirect)
 }
 
 func (a *App) renderTemplate(w http.ResponseWriter, name string, data any) {

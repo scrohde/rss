@@ -174,6 +174,90 @@ func TestRewriteSummaryHTMLAnchorHrefResolvesAgainstBase(t *testing.T) {
 	}
 }
 
+func TestRewriteSummaryHTMLStripsInlineEventAttrs(t *testing.T) {
+	t.Parallel()
+
+	input := `<p style="color:red" onclick="alert(1)">Hello <span style="display:none">world</span></p>`
+
+	output := RewriteSummaryHTML(input, "")
+	if !strings.Contains(output, `style="color:red"`) {
+		t.Fatalf("expected style attributes preserved, got %q", output)
+	}
+
+	if strings.Contains(output, "onclick=") {
+		t.Fatalf("expected inline event handlers stripped, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLKeepsVideoEmbedsAndDropsScripts(t *testing.T) {
+	t.Parallel()
+
+	input := `<p>before</p><iframe src="https://tube.tchncs.de/" style="border:0" onclick="x()"></iframe>` +
+		`<script>alert(1)</script><style>p{color:red;}</style><p>after</p>`
+
+	output := RewriteSummaryHTML(input, "")
+	if !strings.Contains(output, `<iframe src="https://tube.tchncs.de/"`) {
+		t.Fatalf("expected iframe preserved, got %q", output)
+	}
+
+	if !strings.Contains(output, `style="border:0"`) {
+		t.Fatalf("expected iframe style preserved, got %q", output)
+	}
+
+	if strings.Contains(output, "onclick=") {
+		t.Fatalf("expected inline event handlers stripped, got %q", output)
+	}
+
+	if strings.Contains(output, "<script") {
+		t.Fatalf("expected script removed, got %q", output)
+	}
+
+	if !strings.Contains(output, "<style>") {
+		t.Fatalf("expected style tag preserved, got %q", output)
+	}
+
+	if !containsAll(output, "<p>before</p>", "<p>after</p>") {
+		t.Fatalf("expected surrounding content preserved, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLDropsUnsafeIframeSrc(t *testing.T) {
+	t.Parallel()
+
+	input := `<iframe src="javascript:alert(1)"></iframe><p>after</p>`
+	output := RewriteSummaryHTML(input, "")
+
+	if strings.Contains(output, "<iframe") {
+		t.Fatalf("expected unsafe iframe dropped, got %q", output)
+	}
+
+	if !strings.Contains(output, "<p>after</p>") {
+		t.Fatalf("expected safe content preserved, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLRewritesYouTubeEmbedToNoCookie(t *testing.T) {
+	t.Parallel()
+
+	input := `<iframe src="https://www.youtube.com/embed/0YhJxJZOWBw?feature=oembed"></iframe>`
+	output := RewriteSummaryHTML(input, "")
+
+	if !strings.Contains(output, `src="https://www.youtube-nocookie.com/embed/0YhJxJZOWBw?feature=oembed"`) {
+		t.Fatalf("expected youtube-nocookie embed src, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLRewritesShortYouTubeURLToNoCookieEmbed(t *testing.T) {
+	t.Parallel()
+
+	input := `<iframe src="https://youtu.be/Jr2auYrBDA4"></iframe>`
+	output := RewriteSummaryHTML(input, "")
+
+	if !strings.Contains(output, `src="https://www.youtube-nocookie.com/embed/Jr2auYrBDA4"`) {
+		t.Fatalf("expected youtube-nocookie embed src, got %q", output)
+	}
+}
+
 func TestBuildImageProxyRequestHeaders(t *testing.T) {
 	t.Parallel()
 

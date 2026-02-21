@@ -2728,8 +2728,12 @@ func TestImageProxyNon2xxLogsAtDebugLevel(t *testing.T) {
 
 	app.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got %d", rec.Code)
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected 307, got %d", rec.Code)
+	}
+
+	if got := rec.Header().Get("Location"); got != targetImageURL {
+		t.Fatalf("expected redirect to original image, got %q", got)
 	}
 
 	body := logs.String()
@@ -2774,8 +2778,12 @@ func TestImageProxyNon2xxDoesNotLogAtInfoLevel(t *testing.T) {
 
 	app.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got %d", rec.Code)
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected 307, got %d", rec.Code)
+	}
+
+	if got := rec.Header().Get("Location"); got != targetImageURL {
+		t.Fatalf("expected redirect to original image, got %q", got)
 	}
 
 	if strings.Contains(logs.String(), "image proxy upstream non-2xx") {
@@ -2841,12 +2849,12 @@ func TestImageProxyRejectsOversizedImage(t *testing.T) {
 
 	app.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got %d", rec.Code)
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected 307, got %d", rec.Code)
 	}
 
-	if !strings.Contains(rec.Body.String(), "upstream image too large") {
-		t.Fatalf("expected upstream image too large response, got %q", rec.Body.String())
+	if got := rec.Header().Get("Location"); got != "https://example.com/image.png" {
+		t.Fatalf("expected redirect to original image, got %q", got)
 	}
 }
 

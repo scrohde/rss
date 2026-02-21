@@ -40,6 +40,16 @@ type relAttrLookup struct {
 	index    int
 }
 
+type summarySanitizeResult struct {
+	changed bool
+	removed bool
+}
+
+type summaryRewriteResult struct {
+	changed bool
+	stop    bool
+}
+
 // RewriteSummaryHTML rewrites summary HTML image and anchor URLs when possible.
 func RewriteSummaryHTML(text, baseURLRaw string) string {
 	base := parseSummaryBaseURL(baseURLRaw)
@@ -104,18 +114,85 @@ func renderSummaryNodes(nodes []*html.Node) (string, bool) {
 }
 
 func rewriteSummaryNode(node *html.Node, base *url.URL) bool {
-	changed := false
-	if node.Type == html.ElementNode {
-		changed = rewriteSummaryElement(node, base)
+	if node.Type != html.ElementNode {
+		return rewriteSummaryChildren(node, base)
 	}
 
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
+	result := rewriteSummaryElementNode(node, base)
+	if result.stop {
+		return result.changed
+	}
+
+	return result.changed || rewriteSummaryChildren(node, base)
+}
+
+func rewriteSummaryChildren(node *html.Node, base *url.URL) bool {
+	changed := false
+
+	for child := node.FirstChild; child != nil; {
+		next := child.NextSibling
 		if rewriteSummaryNode(child, base) {
 			changed = true
 		}
+
+		child = next
 	}
 
 	return changed
+}
+
+func rewriteSummaryElementNode(node *html.Node, base *url.URL) summaryRewriteResult {
+	sanitized := sanitizeSummaryElement(node)
+	if sanitized.changed {
+		if sanitized.removed {
+			return summaryRewriteResult{
+				changed: true,
+				stop:    true,
+			}
+		}
+
+		if rewriteSummaryElement(node, base) {
+			return summaryRewriteResult{
+				changed: true,
+				stop:    false,
+			}
+		}
+
+		return summaryRewriteResult{
+			changed: true,
+			stop:    false,
+		}
+	}
+
+	return summaryRewriteResult{
+		changed: rewriteSummaryElement(node, base),
+		stop:    false,
+	}
+}
+
+func sanitizeSummaryElement(node *html.Node) summarySanitizeResult {
+	if shouldDropSummaryElement(node) {
+		dropSummaryNode(node)
+
+		return summarySanitizeResult{
+			changed: true,
+			removed: true,
+		}
+	}
+
+	return summarySanitizeResult{
+		changed: dropEventHandlerAttrs(node),
+		removed: false,
+	}
+}
+
+func shouldDropSummaryElement(node *html.Node) bool {
+	switch node.Data {
+	case "script", "object", "embed":
+		return true
+	default:
+		return false
+	}
 }
 
 func rewriteSummaryElement(node *html.Node, base *url.URL) bool {
@@ -128,6 +205,8 @@ func rewriteSummaryElement(node *html.Node, base *url.URL) bool {
 		})
 	case "a":
 		return rewriteSummaryAnchorNode(node, base)
+	case "iframe":
+		return rewriteSummaryIFrameNode(node, base)
 	default:
 		return false
 	}
@@ -163,6 +242,103 @@ func rewriteSummaryAnchorNode(node *html.Node, base *url.URL) bool {
 	return changed
 }
 
+func rewriteSummaryIFrameNode(node *html.Node, base *url.URL) bool {
+	src, found := attrValue(node, "src")
+	if !found {
+		dropSummaryNode(node)
+
+		return true
+	}
+
+	parsed, ok := parseAnchorURL(strings.TrimSpace(src))
+	if !ok {
+		dropSummaryNode(node)
+
+		return true
+	}
+
+	resolved, ok := resolveAnchorURL(parsed, base)
+	if !ok {
+		dropSummaryNode(node)
+
+		return true
+	}
+
+	resolved = rewritePrivacyEmbedURL(resolved)
+
+	changed := keepOnlyAttrs(node, map[string]bool{
+		"allow":          true,
+		"frameborder":    true,
+		"height":         true,
+		"loading":        true,
+		"referrerpolicy": true,
+		"sandbox":        true,
+		"src":            true,
+		"style":          true,
+		"title":          true,
+		"width":          true,
+	})
+
+	rewritten := resolved.String()
+	if upsertAttr(node, "src", rewritten) {
+		changed = true
+	}
+
+	if upsertAttr(node, "loading", "lazy") {
+		changed = true
+	}
+
+	if upsertAttr(node, "allow", "autoplay; encrypted-media; fullscreen; picture-in-picture") {
+		changed = true
+	}
+
+	return changed
+}
+
+func rewritePrivacyEmbedURL(target *url.URL) *url.URL {
+	if target == nil {
+		return nil
+	}
+
+	host := strings.ToLower(strings.TrimSuffix(target.Hostname(), "."))
+	switch host {
+	case "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com":
+		if !strings.HasPrefix(target.EscapedPath(), "/embed/") {
+			return target
+		}
+
+		cloned := cloneURL(target)
+		cloned.Host = "www.youtube-nocookie.com"
+
+		return cloned
+	case "youtu.be":
+		videoID := strings.Trim(target.EscapedPath(), "/")
+		if videoID == "" {
+			return target
+		}
+
+		cloned := cloneURL(target)
+		cloned.Host = "www.youtube-nocookie.com"
+		cloned.Path = "/embed/" + videoID
+		cloned.RawPath = ""
+
+		return cloned
+	default:
+		return target
+	}
+}
+
+func cloneURL(src *url.URL) *url.URL {
+	if src == nil {
+		return nil
+	}
+
+	dst := new(url.URL)
+	*dst = *src
+
+	return dst
+}
+
 func rewriteAttr(
 	node *html.Node,
 	key string,
@@ -183,6 +359,79 @@ func rewriteAttr(
 	}
 
 	return false
+}
+
+func keepOnlyAttrs(node *html.Node, allowed map[string]bool) bool {
+	if len(node.Attr) == 0 {
+		return false
+	}
+
+	changed := false
+
+	attrs := node.Attr[:0]
+	for _, attr := range node.Attr {
+		if !allowed[attr.Key] {
+			changed = true
+
+			continue
+		}
+
+		attrs = append(attrs, attr)
+	}
+
+	node.Attr = attrs
+
+	return changed
+}
+
+func attrValue(node *html.Node, key string) (string, bool) {
+	for _, attr := range node.Attr {
+		if attr.Key != key {
+			continue
+		}
+
+		return attr.Val, true
+	}
+
+	return "", false
+}
+
+func dropEventHandlerAttrs(node *html.Node) bool {
+	if len(node.Attr) == 0 {
+		return false
+	}
+
+	changed := false
+
+	attrs := node.Attr[:0]
+	for _, attr := range node.Attr {
+		if strings.HasPrefix(attr.Key, "on") {
+			changed = true
+
+			continue
+		}
+
+		attrs = append(attrs, attr)
+	}
+
+	node.Attr = attrs
+
+	return changed
+}
+
+func dropSummaryNode(node *html.Node) {
+	if node.Parent != nil {
+		node.Parent.RemoveChild(node)
+
+		return
+	}
+
+	node.Type = html.TextNode
+	node.DataAtom = 0
+	node.Data = ""
+	node.Attr = nil
+	node.FirstChild = nil
+	node.LastChild = nil
 }
 
 func upsertAttr(node *html.Node, key, value string) bool {
@@ -292,9 +541,18 @@ func mergeRelTokens(tokens []string, existing map[string]bool, required []string
 }
 
 func containsRewriteTargets(text string) bool {
-	return strings.Contains(text, "<img") ||
-		strings.Contains(text, "<source") ||
-		strings.Contains(text, "<a")
+	lower := strings.ToLower(text)
+
+	return strings.Contains(lower, "<img") ||
+		strings.Contains(lower, "<source") ||
+		strings.Contains(lower, "<a") ||
+		strings.Contains(lower, "<iframe") ||
+		strings.Contains(lower, "<script") ||
+		strings.Contains(lower, "<style") ||
+		strings.Contains(lower, "<object") ||
+		strings.Contains(lower, "<embed") ||
+		strings.Contains(lower, "style=") ||
+		strings.Contains(lower, " on")
 }
 
 func rewriteAnchorURL(rawURL string, base *url.URL) (string, bool) {

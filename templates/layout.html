@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"attributesToSettle":["class","width","height"]}'>
   <title>Pulse RSS</title>
   {{if .CSRFToken}}
     <meta name="csrf-token" content="{{.CSRFToken}}">
