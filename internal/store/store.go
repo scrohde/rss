@@ -681,6 +681,49 @@ func ListDueFeeds(db *sql.DB, now time.Time, limit int) ([]int64, error) {
 	return ids, nil
 }
 
+// ListPulseFeedIDs returns pulse-eligible feed IDs in display order.
+// Feeds refreshed after cutoff are excluded.
+func ListPulseFeedIDs(ctx context.Context, db *sql.DB, cutoff time.Time) ([]int64, error) {
+	ctx = contextOrBackground(ctx)
+
+	rows, err := db.QueryContext(ctx, `
+	SELECT id
+	FROM feeds
+	WHERE last_refreshed_at IS NULL OR last_refreshed_at <= ?
+	ORDER BY sort_order ASC, id ASC
+	`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("query pulse feed IDs: %w", err)
+	}
+
+	defer func() {
+		closeErr := rows.Close()
+		if closeErr != nil {
+			slog.Warn("rows close failed", "err", closeErr)
+		}
+	}()
+
+	var ids []int64
+
+	for rows.Next() {
+		var id int64
+
+		scanErr := rows.Scan(&id)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan pulse feed ID: %w", scanErr)
+		}
+
+		ids = append(ids, id)
+	}
+
+	rowsErr := rows.Err()
+	if rowsErr != nil {
+		return nil, fmt.Errorf("iterate pulse feed ID rows: %w", rowsErr)
+	}
+
+	return ids, nil
+}
+
 // ListItems is part of the store package API.
 func ListItems(
 	ctx context.Context,

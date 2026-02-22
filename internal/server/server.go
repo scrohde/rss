@@ -33,6 +33,7 @@ const (
 	maxOPMLUploadBytes       int64 = 2 << 20
 	imageProxySniffBytes           = 512
 	cleanupInterval                = 10 * time.Minute
+	pulseRecentRefreshWindow       = time.Hour
 	feedEditModeCookieMaxAge       = 60 * 60 * 24 * 365
 )
 
@@ -52,6 +53,8 @@ type App struct {
 	authSetupCookieName string
 	authSetupSignerKey  []byte
 	refreshMu           sync.Mutex
+	pulseMu             sync.Mutex
+	pulseRunning        bool
 	authEnabled         bool
 	authCookieSecure    bool
 }
@@ -73,6 +76,8 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	app.authSetupCookieName = ""
 	app.authSetupSignerKey = nil
 	app.refreshMu = sync.Mutex{}
+	app.pulseMu = sync.Mutex{}
+	app.pulseRunning = false
 	app.authEnabled = false
 	app.authCookieSecure = false
 
@@ -116,6 +121,7 @@ func (a *App) registerCoreRoutes(mux *http.ServeMux) {
 
 func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
+	mux.HandleFunc("POST /feeds/pulse", a.handlePulseFeeds)
 	mux.HandleFunc("POST /feeds/edit-mode", a.handleEnterFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/save", a.handleSaveFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/cancel", a.handleCancelFeedEditMode)
@@ -1026,6 +1032,104 @@ func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 	a.renderItemListResponse(w, r, feedID)
 }
 
+func (a *App) handlePulseFeeds(w http.ResponseWriter, r *http.Request) {
+	cutoff := time.Now().UTC().Add(-pulseRecentRefreshWindow)
+
+	feedIDs, err := store.ListPulseFeedIDs(r.Context(), a.db, cutoff)
+	if err != nil {
+		a.renderPulseMessage(w, "pulse failed", "error")
+
+		return
+	}
+
+	if len(feedIDs) == 0 {
+		a.renderPulseMessage(w, "No feeds to pulse.", "")
+
+		return
+	}
+
+	if !a.startPulse(r.Context(), feedIDs) {
+		a.renderPulseMessage(w, "Pulse already running.", "")
+
+		return
+	}
+
+	a.renderPulseMessage(w, "", "")
+}
+
+func (a *App) renderPulseMessage(w http.ResponseWriter, message, className string) {
+	data := subscribeResponseData{
+		ItemList:       nil,
+		Message:        message,
+		MessageClass:   className,
+		Feeds:          nil,
+		SelectedFeedID: 0,
+		Update:         false,
+		FeedEditMode:   false,
+	}
+	a.renderTemplate(w, "subscribe_response", data)
+}
+
+func (a *App) startPulse(ctx context.Context, feedIDs []int64) bool {
+	a.pulseMu.Lock()
+	if a.pulseRunning {
+		a.pulseMu.Unlock()
+
+		return false
+	}
+
+	a.pulseRunning = true
+	a.pulseMu.Unlock()
+
+	feedIDsCopy := append([]int64(nil), feedIDs...)
+	pulseCtx := context.WithoutCancel(ctx)
+
+	go a.runPulse(pulseCtx, feedIDsCopy)
+
+	return true
+}
+
+func (a *App) runPulse(ctx context.Context, feedIDs []int64) {
+	defer a.finishPulse()
+
+	slog.Info("pulse refresh started", "feeds", len(feedIDs))
+
+	failed := 0
+
+	for _, feedID := range feedIDs {
+		a.refreshMu.Lock()
+		_, err := feed.Refresh(ctx, a.db, feedID)
+		a.refreshMu.Unlock()
+
+		if err != nil {
+			failed++
+
+			slog.Warn("pulse refresh failed", "feed_id", feedID, "err", err)
+		}
+	}
+
+	slog.Info(
+		"pulse refresh finished",
+		"feeds",
+		len(feedIDs),
+		"failed",
+		failed,
+	)
+}
+
+func (a *App) finishPulse() {
+	a.pulseMu.Lock()
+	a.pulseRunning = false
+	a.pulseMu.Unlock()
+}
+
+func (a *App) isPulseRunning() bool {
+	a.pulseMu.Lock()
+	defer a.pulseMu.Unlock()
+
+	return a.pulseRunning
+}
+
 func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
 	itemList, err := store.LoadItemList(r.Context(), a.db, feedID)
 	if err != nil {
@@ -1472,6 +1576,10 @@ func (a *App) refreshLoop() {
 }
 
 func (a *App) refreshDueFeeds() error {
+	if a.isPulseRunning() {
+		return nil
+	}
+
 	ids, err := store.ListDueFeeds(a.db, time.Now().UTC(), feed.RefreshBatchSize)
 	if err != nil {
 		return fmt.Errorf("list due feeds: %w", err)

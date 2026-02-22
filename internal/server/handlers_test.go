@@ -35,6 +35,7 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 const (
 	pathParentDir        = ".."
 	pathIndex            = "/"
+	pathPulseFeeds       = "/feeds/pulse"
 	pathFeedEditMode     = "/feeds/edit-mode"
 	pathEditModeCancel   = "/feeds/edit-mode/cancel"
 	pathEditModeSave     = "/feeds/edit-mode/save"
@@ -73,6 +74,8 @@ const (
 	deleteFeedTitle      = "Delete Feed"
 	itemLimitFeedTitle   = "Feed"
 	pollFeedTitle        = "Poll Feed"
+	pulseFeedOneTitle    = "Pulse Feed One"
+	pulseFeedTwoTitle    = "Pulse Feed Two"
 	emptyStateNoFeed     = "Pick a feed to start reading."
 	newFeedTitle         = "New Title"
 	itemLimitTotal       = 210
@@ -291,6 +294,21 @@ func postRequest(app *App, target string) *httptest.ResponseRecorder {
 	app.Routes().ServeHTTP(rec, req)
 
 	return rec
+}
+
+func waitForPulseIdle(t *testing.T, app *App) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !app.isPulseRunning() {
+			return
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatal("timed out waiting for pulse to finish")
 }
 
 func getRequest(
@@ -1578,6 +1596,146 @@ func TestManualFeedRefresh(t *testing.T) {
 
 	items := mustListItems(t, app, feedID)
 	assertItemCount(t, items, expectedTwoItems)
+}
+
+type pulseFeedXML struct {
+	initial string
+	updated string
+}
+
+type pulseRefreshFixture struct {
+	feedServerStale *testutil.FeedServer
+	staleUpdated    string
+	recentFeedID    int64
+	staleFeedID     int64
+}
+
+func pulseStaleFeedXML(base time.Time) pulseFeedXML {
+	initial := testutil.RSSXML(pulseFeedTwoTitle, []testutil.RSSItem{{
+		Title:       "Two First",
+		Link:        "http://example.com/two/1",
+		GUID:        "two-1",
+		PubDate:     base.Format(time.RFC1123Z),
+		Description: "<p>Two First</p>",
+	}})
+	updated := testutil.RSSXML(pulseFeedTwoTitle, []testutil.RSSItem{
+		{
+			Title:       "Two Second",
+			Link:        "http://example.com/two/2",
+			GUID:        "two-2",
+			PubDate:     base.Add(time.Minute).Format(time.RFC1123Z),
+			Description: "<p>Two Second</p>",
+		},
+		{
+			Title:       "Two First",
+			Link:        "http://example.com/two/1",
+			GUID:        "two-1",
+			PubDate:     base.Format(time.RFC1123Z),
+			Description: "<p>Two First</p>",
+		},
+	})
+
+	return pulseFeedXML{
+		initial: initial,
+		updated: updated,
+	}
+}
+
+func setPulseRefreshState(t *testing.T, app *App, feedID int64, refreshedAt time.Time, lastError string) {
+	t.Helper()
+
+	_, err := app.db.ExecContext(
+		context.Background(),
+		"UPDATE feeds SET last_refreshed_at = ?, last_error = ? WHERE id = ?",
+		refreshedAt,
+		lastError,
+		feedID,
+	)
+	requireNoErr(t, err, "set pulse refresh state: %v")
+}
+
+func setupPulseRefreshFixture(t *testing.T, app *App, base time.Time) pulseRefreshFixture {
+	t.Helper()
+
+	staleFeedXML := pulseStaleFeedXML(base)
+	feedServerStale, feedURLStale := testutil.NewFeedServer(t, staleFeedXML.initial)
+
+	recentFeedID := mustUpsertFeed(t, app, "not a valid feed url", pulseFeedOneTitle)
+	staleFeedID := mustUpsertFeed(t, app, feedURLStale, pulseFeedTwoTitle)
+
+	_, refreshErr := feedpkg.Refresh(context.Background(), app.db, staleFeedID)
+	requireNoErr(t, refreshErr, "feedpkg.Refresh initial stale: %v")
+
+	now := time.Now().UTC()
+	setPulseRefreshState(t, app, staleFeedID, now.Add(-2*time.Hour), "")
+	setPulseRefreshState(t, app, recentFeedID, now, "")
+
+	return pulseRefreshFixture{
+		feedServerStale: feedServerStale,
+		recentFeedID:    recentFeedID,
+		staleFeedID:     staleFeedID,
+		staleUpdated:    staleFeedXML.updated,
+	}
+}
+
+func assertRecentFeedSkippedAfterPulse(t *testing.T, app *App, recentFeedID int64) {
+	t.Helper()
+
+	recentItems := mustListItems(t, app, recentFeedID)
+	assertItemCount(t, recentItems, expectedNoItems)
+
+	recentFeed, feedErr := store.GetFeed(context.Background(), app.db, recentFeedID)
+	requireNoErr(t, feedErr, "store.GetFeed recent: %v")
+
+	if recentFeed.LastError != "" {
+		t.Fatalf("expected recent feed to be skipped, got last_error %q", recentFeed.LastError)
+	}
+}
+
+func TestPulseRefreshAllFeeds(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	app := newTestApp(t)
+	fixture := setupPulseRefreshFixture(t, app, base)
+
+	fixture.feedServerStale.SetFeedXML(fixture.staleUpdated)
+
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse refresh status")
+	assertNotContains(t, rec.Body.String(), "Pulse started:", "expected no pulse success message")
+
+	waitForPulseIdle(t, app)
+
+	assertRecentFeedSkippedAfterPulse(t, app, fixture.recentFeedID)
+
+	staleItems := mustListItems(t, app, fixture.staleFeedID)
+	assertItemCount(t, staleItems, expectedTwoItems)
+}
+
+func TestPulseRefreshAlreadyRunning(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	_ = mustUpsertFeed(t, app, exampleRSSURL, pulseFeedOneTitle)
+
+	app.pulseMu.Lock()
+	app.pulseRunning = true
+	app.pulseMu.Unlock()
+	t.Cleanup(func() {
+		app.pulseMu.Lock()
+		app.pulseRunning = false
+		app.pulseMu.Unlock()
+	})
+
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse already running status")
+	assertContains(
+		t,
+		rec.Body.String(),
+		"Pulse already running.",
+		"expected pulse already running message",
+	)
 }
 
 func seedDeleteFeedFixture(t *testing.T, app *App) int64 {

@@ -71,6 +71,55 @@ func TestUpdateFeedOrderPersistsListOrder(t *testing.T) {
 	assertFeedOrderIDs(t, feeds, thirdID, firstID, secondID)
 }
 
+func TestListPulseFeedIDsSkipsRecentlyRefreshed(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	firstID := mustUpsertFeed(t, db, "http://example.com/first", "First")
+	secondID := mustUpsertFeed(t, db, "http://example.com/second", "Second")
+	thirdID := mustUpsertFeed(t, db, "http://example.com/third", "Third")
+	now := time.Now().UTC()
+
+	err := UpdateFeedOrder(context.Background(), db, []int64{thirdID, firstID, secondID})
+	if err != nil {
+		t.Fatalf("UpdateFeedOrder: %v", err)
+	}
+
+	_, execErr := db.ExecContext(
+		context.Background(),
+		"UPDATE feeds SET last_refreshed_at = ? WHERE id = ?",
+		now.Add(-2*time.Hour),
+		thirdID,
+	)
+	if execErr != nil {
+		t.Fatalf("set stale refresh timestamp: %v", execErr)
+	}
+
+	_, execErr = db.ExecContext(
+		context.Background(),
+		"UPDATE feeds SET last_refreshed_at = ? WHERE id = ?",
+		now.Add(-30*time.Minute),
+		firstID,
+	)
+	if execErr != nil {
+		t.Fatalf("set recent refresh timestamp: %v", execErr)
+	}
+
+	ids, err := ListPulseFeedIDs(context.Background(), db, now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListPulseFeedIDs: %v", err)
+	}
+
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 pulse feed IDs, got %d", len(ids))
+	}
+
+	if ids[0] != thirdID || ids[1] != secondID {
+		t.Fatalf("unexpected pulse feed IDs order: %+v", ids)
+	}
+}
+
 func TestInitAddsFeedSortOrderToExistingSchema(t *testing.T) {
 	t.Parallel()
 

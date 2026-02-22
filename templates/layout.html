@@ -17,13 +17,21 @@
 <body>
   <div class="page">
     <header class="topbar">
-      <div class="brand">
+      <button
+        class="brand brand-pulse"
+        type="button"
+        title="Refresh all feeds"
+        aria-label="Refresh all feeds"
+        hx-post="/feeds/pulse"
+        hx-target="#subscribe-message"
+        hx-swap="outerHTML"
+      >
         <div class="brand-mark">o</div>
         <div>
           <div class="brand-title">Pulse RSS</div>
-          <div class="brand-subtitle">Your compact feed cockpit</div>
+          <div class="brand-subtitle">Send a PULSE</div>
         </div>
-      </div>
+      </button>
       <form class="subscribe-form" hx-post="/feeds" hx-target="#subscribe-message" hx-swap="outerHTML">
         <input type="url" name="url" placeholder="https://example.com/rss" required>
         <button type="submit">Subscribe</button>
