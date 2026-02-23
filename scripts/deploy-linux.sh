@@ -87,14 +87,30 @@ parse_bool "$VALIDATE_INSTANCE_DB_PATH"
 parse_bool "$VALIDATE_RP_ID_PLACEHOLDER"
 parse_bool "$ALLOW_BASE_SERVICE_WITH_INSTANCES"
 
+file_exists() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    return 0
+  fi
+  if [[ "${#SUDO[@]}" -gt 0 ]]; then
+    run_root test -f "$path"
+    return $?
+  fi
+  return 1
+}
+
 read_env_key() {
   local env_file="$1"
   local env_key="$2"
   local raw_value=""
-  if [[ ! -f "$env_file" ]]; then
+  if ! file_exists "$env_file"; then
     return 0
   fi
-  raw_value="$(sed -nE "s/^[[:space:]]*${env_key}[[:space:]]*=[[:space:]]*(.*)[[:space:]]*$/\\1/p" "$env_file" | tail -n1)"
+  if [[ -r "$env_file" ]]; then
+    raw_value="$(sed -nE "s/^[[:space:]]*${env_key}[[:space:]]*=[[:space:]]*(.*)[[:space:]]*$/\\1/p" "$env_file" | tail -n1)"
+  else
+    raw_value="$(run_root sed -nE "s/^[[:space:]]*${env_key}[[:space:]]*=[[:space:]]*(.*)[[:space:]]*$/\\1/p" "$env_file" | tail -n1)"
+  fi
   if [[ -z "$raw_value" ]]; then
     return 0
   fi
@@ -295,7 +311,7 @@ if [[ "$INSTALL_ENV_TEMPLATE" == "true" ]]; then
   if [[ "$USES_INSTANCE_UNITS" == "true" ]]; then
     for instance_name in "${INSTANCE_NAMES[@]}"; do
       instance_env_dst="$(dirname "$ENV_DST")/$instance_name.env"
-      if [[ -f "$instance_env_dst" ]]; then
+      if file_exists "$instance_env_dst"; then
         echo "Keeping existing env file at $instance_env_dst"
       else
         echo "Installing env template to $instance_env_dst"
@@ -304,7 +320,7 @@ if [[ "$INSTALL_ENV_TEMPLATE" == "true" ]]; then
     done
   fi
 
-  if [[ -f "$ENV_DST" ]]; then
+  if file_exists "$ENV_DST"; then
     echo "Keeping existing env file at $ENV_DST"
   else
     echo "Installing env template to $ENV_DST"
