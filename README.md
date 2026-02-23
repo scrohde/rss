@@ -56,6 +56,9 @@ When `SERVICES` includes instance units (`@...`), the script automatically:
 - ensures per-instance data dirs under `/var/lib/pulse-rss/<instance>`
 - seeds missing env files at `/etc/pulse-rss/<instance>.env`
 - validates that effective `PORT` values are unique across restarted instance units
+- validates that effective `DB_PATH` values stay inside each instance directory
+- validates that effective `AUTH_RP_ID` is not `rss.example.com`
+- fails if `pulse-rss.service` is still active/enabled (unless explicitly allowed)
 
 Useful overrides:
 - `SERVICES='pulse-rss.service'` to pick explicit unit names (space or comma separated).
@@ -64,6 +67,9 @@ Useful overrides:
 - `BUILD_BINARY=false` to skip `go build` and use an existing `BIN_SRC`.
 - `ENABLE_SERVICES=false` to skip `systemctl enable` and only restart units.
 - `VALIDATE_INSTANCE_PORTS=false` to skip duplicate-port safety checks.
+- `VALIDATE_INSTANCE_DB_PATH=false` to skip instance DB path safety checks.
+- `VALIDATE_RP_ID_PLACEHOLDER=false` to skip placeholder RP ID safety checks.
+- `ALLOW_BASE_SERVICE_WITH_INSTANCES=true` to allow running base and instance units together.
 - `APPLY_CADDY=false` to skip installing/reloading Caddy.
 - `BIN_SRC=/path/to/rss` to deploy a different binary path.
 - `CADDY_SRC=/path/to/Caddyfile` to deploy a different Caddy config file.

@@ -39,6 +39,9 @@ ENABLE_SERVICES="${ENABLE_SERVICES:-true}"
 APPLY_CADDY="${APPLY_CADDY:-true}"
 CADDY_ALLOW_PLACEHOLDER="${CADDY_ALLOW_PLACEHOLDER:-false}"
 VALIDATE_INSTANCE_PORTS="${VALIDATE_INSTANCE_PORTS:-true}"
+VALIDATE_INSTANCE_DB_PATH="${VALIDATE_INSTANCE_DB_PATH:-true}"
+VALIDATE_RP_ID_PLACEHOLDER="${VALIDATE_RP_ID_PLACEHOLDER:-true}"
+ALLOW_BASE_SERVICE_WITH_INSTANCES="${ALLOW_BASE_SERVICE_WITH_INSTANCES:-false}"
 
 DEFAULT_SERVICE="${APP_UNIT_BASE}.service"
 SERVICES_RAW="${SERVICES:-$DEFAULT_SERVICE}"
@@ -80,6 +83,9 @@ parse_bool "$ENABLE_SERVICES"
 parse_bool "$APPLY_CADDY"
 parse_bool "$CADDY_ALLOW_PLACEHOLDER"
 parse_bool "$VALIDATE_INSTANCE_PORTS"
+parse_bool "$VALIDATE_INSTANCE_DB_PATH"
+parse_bool "$VALIDATE_RP_ID_PLACEHOLDER"
+parse_bool "$ALLOW_BASE_SERVICE_WITH_INSTANCES"
 
 read_env_key() {
   local env_file="$1"
@@ -149,9 +155,22 @@ if [[ "${#SERVICE_UNITS[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+for idx in "${!SERVICE_UNITS[@]}"; do
+  unit="${SERVICE_UNITS[$idx]}"
+  if [[ "$unit" != *.service ]]; then
+    SERVICE_UNITS[$idx]="${unit}.service"
+  fi
+done
+
 USES_INSTANCE_UNITS=false
 INSTANCE_NAMES=()
+TARGETS_BASE_SERVICE=false
+BASE_SERVICE_UNIT="${APP_UNIT_BASE}.service"
 for unit in "${SERVICE_UNITS[@]}"; do
+  if [[ "$unit" == "$BASE_SERVICE_UNIT" ]]; then
+    TARGETS_BASE_SERVICE=true
+  fi
+
   if [[ "$unit" == *"@"* ]]; then
     instance_name="${unit#*@}"
     instance_name="${instance_name%.service}"
@@ -179,6 +198,29 @@ fi
 if [[ "${#SUDO[@]}" -gt 0 ]]; then
   echo "Checking sudo access..."
   run_root -v
+fi
+
+echo "Target services:"
+for unit in "${SERVICE_UNITS[@]}"; do
+  echo "  - $unit"
+done
+
+if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$ALLOW_BASE_SERVICE_WITH_INSTANCES" == "false" ]] && [[ "$TARGETS_BASE_SERVICE" == "false" ]]; then
+  base_active=false
+  base_enabled=false
+  if run_root systemctl is-active --quiet "$BASE_SERVICE_UNIT"; then
+    base_active=true
+  fi
+  if run_root systemctl is-enabled --quiet "$BASE_SERVICE_UNIT" >/dev/null 2>&1; then
+    base_enabled=true
+  fi
+  if [[ "$base_active" == "true" ]] || [[ "$base_enabled" == "true" ]]; then
+    echo "error: $BASE_SERVICE_UNIT is active or enabled while deploying instance services."
+    echo "hint: disable it to avoid a third running service:"
+    echo "      sudo systemctl disable --now $BASE_SERVICE_UNIT"
+    echo "hint: set ALLOW_BASE_SERVICE_WITH_INSTANCES=true to bypass this guard."
+    exit 1
+  fi
 fi
 
 if [[ "$GIT_PULL" == "true" ]]; then
@@ -310,6 +352,78 @@ if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$VALIDATE_INSTANCE_PORTS" == "t
     done
     echo "hint: set unique PORT values in /etc/pulse-rss/<instance>.env before restarting."
     echo "hint: use VALIDATE_INSTANCE_PORTS=false to bypass this guard if intentional."
+    exit 1
+  fi
+fi
+
+if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$VALIDATE_INSTANCE_DB_PATH" == "true" ]]; then
+  shared_db_path="$(read_env_key "$ENV_DST" "DB_PATH")"
+  invalid_db_paths=()
+
+  for unit in "${SERVICE_UNITS[@]}"; do
+    if [[ "$unit" != *"@"* ]]; then
+      continue
+    fi
+
+    instance_name="${unit#*@}"
+    instance_name="${instance_name%.service}"
+    instance_env_dst="$(dirname "$ENV_DST")/$instance_name.env"
+    instance_db_path="$(read_env_key "$instance_env_dst" "DB_PATH")"
+    effective_db_path="$instance_db_path"
+    if [[ -z "$effective_db_path" ]]; then
+      effective_db_path="$shared_db_path"
+    fi
+    if [[ -z "$effective_db_path" ]]; then
+      continue
+    fi
+
+    if [[ "$effective_db_path" == /* ]]; then
+      allowed_db_prefix="$APP_HOME/$instance_name/"
+      if [[ "$effective_db_path" != "$APP_HOME/$instance_name" ]] && [[ "$effective_db_path" != "$allowed_db_prefix"* ]]; then
+        invalid_db_paths+=("$unit -> DB_PATH=$effective_db_path (must be relative or under $APP_HOME/$instance_name)")
+      fi
+    fi
+  done
+
+  if [[ "${#invalid_db_paths[@]}" -gt 0 ]]; then
+    echo "error: invalid DB_PATH values detected for instance services:"
+    for invalid_db in "${invalid_db_paths[@]}"; do
+      echo "  - $invalid_db"
+    done
+    echo "hint: set DB_PATH=rss.db (recommended) or /var/lib/pulse-rss/<instance>/rss.db."
+    echo "hint: use VALIDATE_INSTANCE_DB_PATH=false to bypass this guard if intentional."
+    exit 1
+  fi
+fi
+
+if [[ "$VALIDATE_RP_ID_PLACEHOLDER" == "true" ]]; then
+  shared_rp_id="$(read_env_key "$ENV_DST" "AUTH_RP_ID")"
+  placeholder_rp_id_hits=()
+
+  for unit in "${SERVICE_UNITS[@]}"; do
+    effective_rp_id="$shared_rp_id"
+    if [[ "$unit" == *"@"* ]]; then
+      instance_name="${unit#*@}"
+      instance_name="${instance_name%.service}"
+      instance_env_dst="$(dirname "$ENV_DST")/$instance_name.env"
+      instance_rp_id="$(read_env_key "$instance_env_dst" "AUTH_RP_ID")"
+      if [[ -n "$instance_rp_id" ]]; then
+        effective_rp_id="$instance_rp_id"
+      fi
+    fi
+
+    if [[ "$effective_rp_id" == "rss.example.com" ]]; then
+      placeholder_rp_id_hits+=("$unit -> AUTH_RP_ID=rss.example.com")
+    fi
+  done
+
+  if [[ "${#placeholder_rp_id_hits[@]}" -gt 0 ]]; then
+    echo "error: placeholder AUTH_RP_ID detected in deployed configuration:"
+    for hit in "${placeholder_rp_id_hits[@]}"; do
+      echo "  - $hit"
+    done
+    echo "hint: set AUTH_RP_ID to your real domain in /etc/pulse-rss/pulse-rss.env or /etc/pulse-rss/<instance>.env."
+    echo "hint: use VALIDATE_RP_ID_PLACEHOLDER=false to bypass this guard if intentional."
     exit 1
   fi
 fi
