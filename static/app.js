@@ -79,18 +79,21 @@
     shortcuts.hidden = false;
   };
 
-  const bindSubscribeForm = () => {
-    const form = document.querySelector("form.subscribe-form");
-    if (!form || form.dataset.bound === "true") {
-      return;
-    }
-    form.dataset.bound = "true";
-    form.addEventListener("htmx:afterRequest", (event) => {
-      if (!event || !event.detail || !event.detail.successful) {
-        return;
-      }
-      form.reset();
-    });
+  const bindSubscribeForms = () => {
+    document
+      .querySelectorAll("form[data-subscribe-form='true']")
+      .forEach((form) => {
+        if (form.dataset.bound === "true") {
+          return;
+        }
+        form.dataset.bound = "true";
+        form.addEventListener("htmx:afterRequest", (event) => {
+          if (!event || !event.detail || !event.detail.successful) {
+            return;
+          }
+          form.reset();
+        });
+      });
   };
 
   const bindImportControls = () => {
@@ -744,7 +747,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     bindTopbarShortcuts();
-    bindSubscribeForm();
+    bindSubscribeForms();
     bindImportControls();
     bindItemCardClickGuards();
     syncTopbarShortcuts();
@@ -760,7 +763,7 @@
   document.body.addEventListener("htmx:afterSwap", (event) => {
     clearFeedDragState();
     bindTopbarShortcuts();
-    bindSubscribeForm();
+    bindSubscribeForms();
     bindImportControls();
     bindItemCardClickGuards();
     syncTopbarShortcuts();

@@ -35,46 +35,39 @@ Production templates in this repo:
 
 Quick deploy helper:
 ```bash
-go build -o ./rss .
 ./scripts/deploy-linux.sh
 ```
 
+`scripts/deploy-linux.sh` defaults to:
+- optional `sudo` escalation when run as a non-root user
+- building the binary from repo source (`BUILD_BINARY=true`)
+- installing `/usr/local/bin/pulse-rss`
+- installing systemd unit/env templates (if needed)
+- reloading Caddy config (with placeholder-domain safety check)
+- restarting one service: `pulse-rss.service`
+
+For multi-instance services, set `SERVICES`:
+```bash
+SERVICES='pulse-rss@instance1.service pulse-rss@instance2.service' ./scripts/deploy-linux.sh
+```
+
+When `SERVICES` includes instance units (`@...`), the script automatically:
+- installs the unit as `/etc/systemd/system/pulse-rss@.service`
+- ensures per-instance data dirs under `/var/lib/pulse-rss/<instance>`
+- seeds missing env files at `/etc/pulse-rss/<instance>.env`
+- validates that effective `PORT` values are unique across restarted instance units
+
 Useful overrides:
+- `SERVICES='pulse-rss.service'` to pick explicit unit names (space or comma separated).
+- `GIT_PULL=true` to run `git pull --ff-only` before build.
+- `RUN_CHECKS=true` to run `./scripts/check.sh` before install/restart.
+- `BUILD_BINARY=false` to skip `go build` and use an existing `BIN_SRC`.
+- `ENABLE_SERVICES=false` to skip `systemctl enable` and only restart units.
+- `VALIDATE_INSTANCE_PORTS=false` to skip duplicate-port safety checks.
 - `APPLY_CADDY=false` to skip installing/reloading Caddy.
 - `BIN_SRC=/path/to/rss` to deploy a different binary path.
 - `CADDY_SRC=/path/to/Caddyfile` to deploy a different Caddy config file.
 - `CADDY_ALLOW_PLACEHOLDER=true` to bypass placeholder-domain safety check.
-
-1. Install Pulse RSS binary:
-```bash
-sudo install -d -m 0750 /var/lib/pulse-rss
-sudo install -d -m 0750 /etc/pulse-rss
-sudo install -o root -g root -m 0755 ./rss /usr/local/bin/pulse-rss
-```
-
-2. Create runtime user and install service files:
-```bash
-sudo useradd --system --home /var/lib/pulse-rss --shell /usr/sbin/nologin pulse-rss 2>/dev/null || true
-sudo chown pulse-rss:pulse-rss /var/lib/pulse-rss
-sudo cp ./deploy/systemd/pulse-rss.service /etc/systemd/system/pulse-rss.service
-sudo cp ./deploy/systemd/pulse-rss.env.example /etc/pulse-rss/pulse-rss.env
-sudo chmod 0640 /etc/pulse-rss/pulse-rss.env
-```
-
-3. Edit `/etc/pulse-rss/pulse-rss.env` for your domain and secrets.
-
-4. Install Caddy config:
-```bash
-sudo cp ./Caddyfile.example /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-5. Start and enable Pulse RSS:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now pulse-rss
-sudo systemctl status pulse-rss --no-pager
-```
 
 Pulse RSS should remain bound to loopback (`127.0.0.1:8080`) behind Caddy.
 

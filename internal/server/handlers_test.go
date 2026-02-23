@@ -2479,7 +2479,7 @@ func TestDeleteFeedConfirmEndpointRemoved(t *testing.T) {
 	}
 }
 
-func TestIndexIncludesOPMLControls(t *testing.T) {
+func TestIndexIncludesSubscriptionAndOPMLControls(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
@@ -2493,6 +2493,10 @@ func TestIndexIncludesOPMLControls(t *testing.T) {
 	}
 
 	body := rec.Body.String()
+	if !strings.Contains(body, `hx-post="/feeds"`) {
+		t.Fatal("expected subscribe control")
+	}
+
 	if !strings.Contains(body, `href="/opml/export"`) {
 		t.Fatal("expected OPML export control")
 	}

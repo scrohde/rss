@@ -32,10 +32,6 @@
           <div class="brand-subtitle">Send a PULSE</div>
         </div>
       </button>
-      <form class="subscribe-form" hx-post="/feeds" hx-target="#subscribe-message" hx-swap="outerHTML">
-        <input type="url" name="url" placeholder="https://example.com/rss" required>
-        <button type="submit">Subscribe</button>
-      </form>
       <div class="topbar-side">
         <div class="topbar-shortcuts" id="topbar-shortcuts">
           <button
@@ -85,6 +81,29 @@
             <div class="topbar-shortcuts-divider"></div>
             <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Subscriptions</div>
             <div class="topbar-shortcuts-grid">
+              <div class="topbar-shortcuts-row topbar-shortcuts-row-subscribe">
+                <span class="topbar-shortcuts-action">Subscribe URL</span>
+                <span class="topbar-shortcuts-keys">
+                  <form
+                    class="topbar-shortcuts-subscribe-form"
+                    data-subscribe-form="true"
+                    hx-post="/feeds"
+                    hx-target="#subscribe-message"
+                    hx-swap="outerHTML"
+                  >
+                    <input
+                      class="topbar-shortcuts-subscribe-input"
+                      type="url"
+                      name="url"
+                      placeholder="https://example.com/rss"
+                      required
+                    >
+                    <button class="topbar-shortcuts-control topbar-shortcuts-control-button" type="submit">
+                      Subscribe
+                    </button>
+                  </form>
+                </span>
+              </div>
               <div class="topbar-shortcuts-row">
                 <span class="topbar-shortcuts-action">Export feeds</span>
                 <span class="topbar-shortcuts-keys">

@@ -3,3 +3,9 @@
 rss.db
 rss.db-*
 feeds.txt
+.beads
+beads_rss
+config.yaml
+/rss
+/.dolt/
+/.doltcfg/

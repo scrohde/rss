@@ -34,10 +34,10 @@ body {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(190px, 1fr) minmax(420px, 2.4fr) minmax(190px, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  padding: 20px 28px;
+  padding: 6px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -48,7 +48,7 @@ body {
 
 .brand {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
 }
 
@@ -81,46 +81,15 @@ body {
 
 .brand-title {
   font-family: "Space Grotesk", "DM Sans", sans-serif;
-  font-size: 20px;
+  font-size: 18px;
+  line-height: 1.05;
   font-weight: 700;
 }
 
 .brand-subtitle {
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.05;
   color: var(--muted);
-}
-
-.subscribe-form {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  width: min(820px, 100%);
-  justify-self: center;
-  background: linear-gradient(180deg, #f7f3ea, #f2ece1);
-  border-radius: 999px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-}
-
-.subscribe-form input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  padding: 8px 12px;
-  font-size: 15px;
-  outline: none;
-  min-width: 0;
-}
-
-.subscribe-form button {
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  padding: 9px 18px;
-  border-radius: 999px;
-  cursor: pointer;
 }
 
 .topbar-side {
@@ -271,6 +240,50 @@ body {
 
 .topbar-shortcuts-import-form {
   margin: 0;
+}
+
+.topbar-shortcuts-row-subscribe {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.topbar-shortcuts-row-subscribe .topbar-shortcuts-keys {
+  justify-content: flex-start;
+}
+
+.topbar-shortcuts-subscribe-form {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-shortcuts-subscribe-form .topbar-shortcuts-control {
+  min-width: 28px;
+  padding: 3px 8px;
+}
+
+.topbar-shortcuts-subscribe-input {
+  width: 220px;
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.25;
+  padding: 3px 8px;
+  min-width: 0;
+}
+
+.topbar-shortcuts-subscribe-input::placeholder {
+  color: var(--muted);
+}
+
+.topbar-shortcuts-subscribe-input:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
 }
 
 .topbar-shortcuts-control {
@@ -1100,6 +1113,19 @@ body {
 }
 
 @media (max-width: 960px) {
+  body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .page {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .topbar {
     grid-template-columns: 1fr;
     text-align: left;
@@ -1129,26 +1155,39 @@ body {
 
   .app {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(10rem, 38dvh) minmax(0, 1fr);
+    min-height: 0;
+    gap: 12px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    overflow: hidden;
   }
 
   .sidebar-pane,
   .content-pane {
-    overflow: visible;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar {
     position: static;
+    height: auto;
+    top: auto;
   }
 }
 
 @media (min-width: 961px) {
   body {
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
   .page {
     height: 100vh;
+    height: 100dvh;
     min-height: 0;
     overflow: hidden;
   }
@@ -1185,21 +1224,20 @@ body {
 }
 
 @media (max-width: 640px) {
-  .subscribe-form {
-    flex-direction: column;
-    align-items: stretch;
-    border-radius: 16px;
-  }
-
-  .subscribe-form button {
-    width: 100%;
-  }
-
   .item-row {
     flex-direction: column;
   }
 
   .item-actions {
     justify-content: flex-start;
+  }
+
+  .topbar-shortcuts-subscribe-form {
+    width: 100%;
+  }
+
+  .topbar-shortcuts-subscribe-input {
+    flex: 1;
+    width: auto;
   }
 }
