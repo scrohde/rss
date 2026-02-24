@@ -59,7 +59,8 @@ func BuildItemView(
 	published sql.NullTime,
 	readAt sql.NullTime,
 ) ItemView {
-	summaryHTML := pickSummaryHTML(summary, contentText, link)
+	summaryHTML, hasSummary := renderOptionalHTML(summary, link)
+	contentHTML, hasContent := renderOptionalHTML(contentText, link)
 	publishedDisplay := "Unpublished"
 	publishedCompact := "na"
 
@@ -73,10 +74,14 @@ func BuildItemView(
 		Title:            title,
 		Link:             link,
 		SummaryHTML:      summaryHTML,
+		ContentHTML:      contentHTML,
 		PublishedDisplay: publishedDisplay,
 		PublishedCompact: publishedCompact,
 		IsRead:           readAt.Valid,
 		IsActive:         false,
+		HasSummary:       hasSummary,
+		HasContent:       hasContent,
+		IsExpanded:       false,
 	}
 }
 
@@ -107,20 +112,18 @@ func FormatRelativeShort(t, now time.Time) string {
 	}
 }
 
-//nolint:gosec // Summary HTML is rewritten/sanitized before rendering in templates.
-func pickSummaryHTML(summary, contentText sql.NullString, baseURL string) template.HTML {
-	text := ""
-	if contentText.Valid && strings.TrimSpace(contentText.String) != "" {
-		text = contentText.String
-	} else if summary.Valid && strings.TrimSpace(summary.String) != "" {
-		text = summary.String
+//nolint:gosec // HTML content is rewritten/sanitized before rendering in templates.
+func renderOptionalHTML(raw sql.NullString, baseURL string) (template.HTML, bool) {
+	if !raw.Valid {
+		return "", false
 	}
 
+	text := strings.TrimSpace(raw.String)
 	if text == "" {
-		text = "<p>No summary available.</p>"
+		return "", false
 	}
 
 	text = content.RewriteSummaryHTML(text, baseURL)
 
-	return template.HTML(text)
+	return template.HTML(text), true
 }

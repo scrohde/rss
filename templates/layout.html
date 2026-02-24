@@ -145,17 +145,27 @@
     </header>
 
     <div class="app">
-      <div class="sidebar-pane">
+      <section class="feed-panel">
         <aside class="sidebar" id="feed-list">
           {{template "feed_list" .}}
         </aside>
-      </div>
+      </section>
 
-      <div class="content-pane">
+      <div
+        class="feed-panel-resizer"
+        id="feed-panel-resizer"
+        role="separator"
+        aria-label="Resize feed panel"
+        aria-orientation="vertical"
+      ></div>
+
+      <section class="main-panel">
         <main class="content" id="main-content">
           {{template "main" .}}
         </main>
-      </div>
+      </section>
+
+      {{template "item_content_empty" .}}
     </div>
   </div>
 </body>

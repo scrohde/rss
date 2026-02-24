@@ -1,8 +1,16 @@
 {{define "item_toggle_response"}}
   {{if eq .View "expanded"}}
     {{template "item_expanded" .Item}}
+    {{if and .UpdatePanel .Item.HasContent}}
+      {{template "item_content_panel_oob" .Item}}
+    {{else if .UpdatePanel}}
+      {{template "item_content_empty_oob" .Item}}
+    {{end}}
   {{else}}
     {{template "item_compact" .Item}}
+    {{if .UpdatePanel}}
+      {{template "item_content_empty_oob" .Item}}
+    {{end}}
   {{end}}
   <div id="feed-list" hx-swap-oob="innerHTML">
     {{template "feed_list" .}}

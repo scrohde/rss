@@ -47,6 +47,7 @@ type toggleReadResponseData struct {
 	Item           view.ItemView
 	SelectedFeedID int64
 	FeedEditMode   bool
+	UpdatePanel    bool
 }
 
 type authLoginPageData struct {

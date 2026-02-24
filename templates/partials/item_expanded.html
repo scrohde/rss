@@ -1,13 +1,25 @@
 {{define "item_expanded"}}
-  <article class="item-card expanded {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}" id="item-{{.ID}}">
+  <article
+    class="item-entry is-expanded {{if .HasContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
+    id="item-{{.ID}}"
+    data-item-id="{{.ID}}"
+    data-has-content="{{if .HasContent}}true{{else}}false{{end}}"
+  >
     <div
       class="item-row clickable"
       hx-get="/items/{{.ID}}/compact"
       hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
       hx-swap="outerHTML"
+      data-item-compact="true"
     >
-      <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
+      <div class="item-title-row">
+        <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
+        <span class="item-time-badge" title="{{.PublishedDisplay}}">
+          {{.PublishedCompact}}
+          <span class="sr-only">Published {{.PublishedDisplay}}</span>
+        </span>
+      </div>
       <div class="item-actions">
         <button class="chip" hx-post="/items/{{.ID}}/toggle" hx-vals='{"view":"compact"}' hx-target="#item-{{.ID}}" hx-swap="outerHTML">
           {{if .IsRead}}Mark unread{{else}}Mark read{{end}}
@@ -17,8 +29,10 @@
     <div class="item-meta">
       <span>{{.PublishedDisplay}}</span>
     </div>
-    <div class="item-summary">
-      {{.SummaryHTML}}
-    </div>
+    {{if .HasSummary}}
+      <div class="item-summary">
+        {{.SummaryHTML}}
+      </div>
+    {{end}}
   </article>
 {{end}}

@@ -2,6 +2,7 @@
   <div id="feed-list" hx-swap-oob="innerHTML">
     {{template "feed_list" .}}
   </div>
+  {{template "item_content_empty_oob" .}}
   {{if .ItemList}}
     {{template "item_list" .ItemList}}
   {{else}}

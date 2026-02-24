@@ -888,7 +888,8 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
-	a.renderTemplate(w, "item_expanded", item)
+	item.IsExpanded = true
+	a.renderTemplate(w, "item_expanded_response", item)
 }
 
 func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
@@ -907,7 +908,8 @@ func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
-	a.renderTemplate(w, "item_compact", item)
+	item.IsExpanded = false
+	a.renderTemplate(w, "item_compact_response", item)
 }
 
 //nolint:gosec // Read toggle logs include request-derived view values for debugging.
@@ -952,6 +954,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
+	item.IsExpanded = currentView == "expanded"
 
 	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
@@ -966,6 +969,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 		SelectedFeedID: feedID,
 		View:           currentView,
 		FeedEditMode:   feedEditModeEnabled(r),
+		UpdatePanel:    true,
 	}
 	a.renderTemplate(w, "item_toggle_response", data)
 }

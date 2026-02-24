@@ -19,11 +19,15 @@ type ItemView struct {
 	Title            string
 	Link             string
 	SummaryHTML      template.HTML
+	ContentHTML      template.HTML
 	PublishedDisplay string
 	PublishedCompact string
 	ID               int64
 	IsRead           bool
 	IsActive         bool
+	HasSummary       bool
+	HasContent       bool
+	IsExpanded       bool
 }
 
 // NewItemsData is template data for the new-items banner.

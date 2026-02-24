@@ -9,9 +9,20 @@
     row: null,
     list: null,
   };
+  const feedPanelResizeState = {
+    active: false,
+    pointerId: null,
+    startX: 0,
+    startWidth: 0,
+    hasStoredWidth: false,
+  };
+  const feedPanelStorageKey = "pulse.feedPanelWidth";
+  const feedPanelMin = 180;
+  const feedPanelMax = 460;
 
   const getItemList = () => document.getElementById("item-list");
   const getFeedList = () => document.getElementById("feed-list");
+  const getFeedPanelResizer = () => document.getElementById("feed-panel-resizer");
   const getFeedEditForm = () => document.getElementById("feed-edit-form");
   const getSelectedFeedInput = () => document.getElementById("selected-feed-id");
   const getTopbarShortcuts = () => document.getElementById("topbar-shortcuts");
@@ -140,16 +151,16 @@
       });
   };
 
-  const bindItemCardClickGuards = () => {
-    document.querySelectorAll(".item-card a, .item-card button").forEach((element) => {
+  const bindItemRowClickGuards = () => {
+    document.querySelectorAll(".item-entry a, .item-entry button").forEach((element) => {
       if (element.dataset.cardClickGuardBound === "true") {
         return;
       }
       element.dataset.cardClickGuardBound = "true";
       element.addEventListener("click", (event) => {
-        const card = event.currentTarget.closest(".item-card");
-        if (card) {
-          setActive(card);
+        const row = event.currentTarget.closest(".item-entry");
+        if (row) {
+          setActive(row);
         }
         event.stopPropagation();
       });
@@ -183,28 +194,28 @@
     input.select();
   };
 
-  const getItemCards = () => {
+  const getItemRows = () => {
     const list = getItemList();
     if (!list) {
       return [];
     }
-    return Array.from(list.querySelectorAll(".item-card"));
+    return Array.from(list.querySelectorAll(".item-entry"));
   };
 
-  const setActive = (card, options = {}) => {
+  const setActive = (row, options = {}) => {
     const list = getItemList();
-    if (!list || !card) {
+    if (!list || !row) {
       return;
     }
-    list.querySelectorAll(".item-card.is-active").forEach((node) => {
+    list.querySelectorAll(".item-entry.is-active").forEach((node) => {
       node.classList.remove("is-active");
     });
-    card.classList.add("is-active");
-    if (card.id) {
-      state.activeId = card.id;
+    row.classList.add("is-active");
+    if (row.id) {
+      state.activeId = row.id;
     }
     if (options.scroll) {
-      card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      row.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   };
 
@@ -219,7 +230,7 @@
       target = document.getElementById(state.activeId);
     }
     if (!target || !list.contains(target)) {
-      target = list.querySelector(".item-card");
+      target = list.querySelector(".item-entry");
     }
     if (target) {
       setActive(target);
@@ -252,65 +263,70 @@
   };
 
   const moveActive = (delta) => {
-    const cards = getItemCards();
-    if (!cards.length) {
+    const rows = getItemRows();
+    if (!rows.length) {
       return;
     }
     const current = ensureActive();
-    let index = current ? cards.indexOf(current) : 0;
+    let index = current ? rows.indexOf(current) : 0;
     if (index < 0) {
       index = 0;
     }
-    const nextIndex = Math.min(cards.length - 1, Math.max(0, index + delta));
-    setActive(cards[nextIndex], { scroll: true });
+    const nextIndex = Math.min(rows.length - 1, Math.max(0, index + delta));
+    setActive(rows[nextIndex], { scroll: true });
   };
+
+  const itemHasContent = (row) => Boolean(row && row.dataset.hasContent === "true");
 
   const toggleExpanded = (expand) => {
     const current = ensureActive();
     if (!current) {
       return;
     }
-    const isExpanded = current.classList.contains("expanded");
+    const isExpanded = current.classList.contains("is-expanded");
     if (expand && !isExpanded) {
+      if (!itemHasContent(current)) {
+        return;
+      }
       current.click();
       return;
     }
     if (!expand && isExpanded) {
-      const toggle = current.querySelector(".item-row.clickable");
+      const toggle = current.querySelector("[data-item-compact='true']");
       if (toggle) {
         toggle.click();
       }
     }
   };
 
-  const cardItemID = (card) => {
-    if (!card || !card.id) {
+  const rowItemID = (row) => {
+    if (!row || !row.id) {
       return null;
     }
-    const match = card.id.match(/^item-(\d+)$/);
+    const match = row.id.match(/^item-(\d+)$/);
     if (!match) {
       return null;
     }
     return match[1];
   };
 
-  const nextCard = (card) => {
-    const cards = getItemCards();
-    const index = cards.indexOf(card);
-    if (index < 0 || index >= cards.length - 1) {
+  const nextRow = (row) => {
+    const rows = getItemRows();
+    const index = rows.indexOf(row);
+    if (index < 0 || index >= rows.length - 1) {
       return null;
     }
-    return cards[index + 1];
+    return rows[index + 1];
   };
 
-  const requestToggleRead = (card, view, selectedItemId) => {
-    const itemID = cardItemID(card);
+  const requestToggleRead = (row, view, selectedItemId) => {
+    const itemID = rowItemID(row);
     if (!itemID || typeof htmx === "undefined" || !htmx.ajax) {
       return false;
     }
     const selected = selectedItemId || state.activeId;
     htmx.ajax("POST", `/items/${itemID}/toggle`, {
-      target: `#${card.id}`,
+      target: `#${row.id}`,
       swap: "outerHTML",
       values: { view, selected_item_id: selected },
     });
@@ -337,7 +353,11 @@
     }
 
     setActive(next, { scroll: true });
-    if (pending.expandNext && !next.classList.contains("expanded")) {
+    if (
+      pending.expandNext &&
+      itemHasContent(next) &&
+      !next.classList.contains("is-expanded")
+    ) {
       next.click();
     }
     return true;
@@ -374,7 +394,7 @@
     }
 
     const isRead = current.classList.contains("is-read");
-    const isExpanded = current.classList.contains("expanded");
+    const isExpanded = current.classList.contains("is-expanded");
 
     if (isRead) {
       state.pendingReadShortcut = null;
@@ -383,7 +403,7 @@
         return;
       }
     } else {
-      const next = nextCard(current);
+      const next = nextRow(current);
       const selectedAfterToggle = next ? next.id : current.id;
       state.pendingReadShortcut = {
         sourceId: current.id,
@@ -551,14 +571,167 @@
     }
   };
 
+  const clampFeedPanelWidth = (width) =>
+    Math.min(feedPanelMax, Math.max(feedPanelMin, Math.round(width)));
+
+  const currentFeedPanelWidth = () => {
+    const computed = getComputedStyle(document.documentElement);
+    const parsed = parseFloat(computed.getPropertyValue("--feed-panel-width"));
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+
+    const panel = document.querySelector(".feed-panel");
+    if (panel) {
+      return panel.getBoundingClientRect().width;
+    }
+
+    return 260;
+  };
+
+  const setFeedPanelWidth = (width, persist) => {
+    const clamped = clampFeedPanelWidth(width);
+    document.documentElement.style.setProperty("--feed-panel-width", `${clamped}px`);
+    if (!persist) {
+      return clamped;
+    }
+
+    try {
+      window.localStorage.setItem(feedPanelStorageKey, String(clamped));
+      feedPanelResizeState.hasStoredWidth = true;
+    } catch (_error) {
+      // Ignore localStorage failures.
+    }
+
+    return clamped;
+  };
+
+  const readStoredFeedPanelWidth = () => {
+    try {
+      const raw = window.localStorage.getItem(feedPanelStorageKey);
+      if (!raw) {
+        return null;
+      }
+      const parsed = parseInt(raw, 10);
+      if (!Number.isFinite(parsed)) {
+        return null;
+      }
+
+      return clampFeedPanelWidth(parsed);
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const measuredFeedPanelWidth = () => {
+    const feedList = getFeedList();
+    if (!feedList) {
+      return null;
+    }
+
+    const candidates = feedList.querySelectorAll(".feed-link, .feed-edit-title");
+    if (!candidates.length) {
+      return null;
+    }
+
+    let widest = 220;
+    candidates.forEach((element) => {
+      widest = Math.max(widest, element.scrollWidth + 54);
+    });
+
+    return clampFeedPanelWidth(widest);
+  };
+
+  const syncFeedPanelWidth = () => {
+    if (window.matchMedia("(max-width: 960px)").matches) {
+      return;
+    }
+
+    const storedWidth = readStoredFeedPanelWidth();
+    if (storedWidth !== null) {
+      setFeedPanelWidth(storedWidth, false);
+      feedPanelResizeState.hasStoredWidth = true;
+
+      return;
+    }
+
+    if (feedPanelResizeState.hasStoredWidth) {
+      return;
+    }
+
+    const measuredWidth = measuredFeedPanelWidth();
+    if (measuredWidth !== null) {
+      setFeedPanelWidth(measuredWidth, false);
+    }
+  };
+
+  const stopFeedPanelResize = (persist) => {
+    if (!feedPanelResizeState.active) {
+      return;
+    }
+    feedPanelResizeState.active = false;
+    feedPanelResizeState.pointerId = null;
+    document.body.classList.remove("is-resizing-feed-panel");
+    if (persist) {
+      setFeedPanelWidth(currentFeedPanelWidth(), true);
+    }
+  };
+
+  const bindFeedPanelResize = () => {
+    const resizer = getFeedPanelResizer();
+    if (!resizer || resizer.dataset.bound === "true") {
+      return;
+    }
+    resizer.dataset.bound = "true";
+
+    resizer.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || window.matchMedia("(max-width: 960px)").matches) {
+        return;
+      }
+
+      feedPanelResizeState.active = true;
+      feedPanelResizeState.pointerId = event.pointerId;
+      feedPanelResizeState.startX = event.clientX;
+      feedPanelResizeState.startWidth = currentFeedPanelWidth();
+      document.body.classList.add("is-resizing-feed-panel");
+      if (typeof resizer.setPointerCapture === "function") {
+        resizer.setPointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+    });
+
+    resizer.addEventListener("pointermove", (event) => {
+      if (!feedPanelResizeState.active || feedPanelResizeState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const delta = event.clientX - feedPanelResizeState.startX;
+      setFeedPanelWidth(feedPanelResizeState.startWidth + delta, false);
+    });
+
+    resizer.addEventListener("pointerup", (event) => {
+      if (feedPanelResizeState.pointerId !== event.pointerId) {
+        return;
+      }
+      stopFeedPanelResize(true);
+    });
+
+    resizer.addEventListener("pointercancel", (event) => {
+      if (feedPanelResizeState.pointerId !== event.pointerId) {
+        return;
+      }
+      stopFeedPanelResize(false);
+    });
+  };
+
   document.addEventListener("click", (event) => {
     const list = getItemList();
     if (!list) {
       return;
     }
-    const card = event.target.closest(".item-card");
-    if (card && list.contains(card)) {
-      setActive(card);
+    const row = event.target.closest(".item-entry");
+    if (row && list.contains(row)) {
+      setActive(row);
     }
   });
 
@@ -749,7 +922,9 @@
     bindTopbarShortcuts();
     bindSubscribeForms();
     bindImportControls();
-    bindItemCardClickGuards();
+    bindItemRowClickGuards();
+    bindFeedPanelResize();
+    syncFeedPanelWidth();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     if (isFeedEditMode()) {
@@ -765,7 +940,9 @@
     bindTopbarShortcuts();
     bindSubscribeForms();
     bindImportControls();
-    bindItemCardClickGuards();
+    bindItemRowClickGuards();
+    bindFeedPanelResize();
+    syncFeedPanelWidth();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     const swapTarget = event && event.detail ? event.detail.target : null;
@@ -802,11 +979,11 @@
     }
     if (!event.detail.parameters.selected_item_id) {
       const source = event.detail.elt;
-      const sourceCard =
-        source && source.closest ? source.closest(".item-card") : null;
-      if (sourceCard && sourceCard.id) {
-        event.detail.parameters.selected_item_id = sourceCard.id;
-        state.activeId = sourceCard.id;
+      const sourceRow =
+        source && source.closest ? source.closest(".item-entry") : null;
+      if (sourceRow && sourceRow.id) {
+        event.detail.parameters.selected_item_id = sourceRow.id;
+        state.activeId = sourceRow.id;
         return;
       }
       if (state.activeId) {

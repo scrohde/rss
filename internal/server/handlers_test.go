@@ -84,6 +84,8 @@ const (
 	itemLimitFirstGUID   = "guid-010"
 	feedListIDAttr       = `id="feed-list"`
 	feedListSwapAttr     = `hx-swap-oob="innerHTML"`
+	contentPanelIDAttr   = `id="content-panel"`
+	contentPanelSwapAttr = `hx-swap-oob="outerHTML"`
 	msgFeedListOOB       = "expected feed list OOB update"
 	msgFeedListOOBSwap   = "expected OOB innerHTML swap for feed list"
 	expectedItemsFmt     = "expected %d items, got %d"
@@ -250,6 +252,13 @@ func assertFeedListOOBUpdate(t *testing.T, body string) {
 		feedListSwapAttr,
 		msgFeedListOOBSwap,
 	)
+}
+
+func assertContentPanelOOBUpdate(t *testing.T, body string) {
+	t.Helper()
+
+	assertContains(t, body, contentPanelIDAttr, "expected content panel update")
+	assertContains(t, body, contentPanelSwapAttr, "expected content panel OOB swap")
 }
 
 func requireNoErr(t *testing.T, err error, format string) {
@@ -951,6 +960,7 @@ func assertToggleReadFeedListBody(t *testing.T, body string) {
 	t.Helper()
 
 	assertFeedListOOBUpdate(t, body)
+	assertContentPanelOOBUpdate(t, body)
 	assertNotContains(
 		t,
 		body,
@@ -974,6 +984,12 @@ func assertToggleReadFeedListBody(t *testing.T, body string) {
 func assertExpandedItemBody(t *testing.T, body string, itemID int64) {
 	t.Helper()
 
+	assertContains(
+		t,
+		body,
+		"item-entry is-expanded",
+		"expected expanded item row class",
+	)
 	assertContains(
 		t,
 		body,
@@ -1332,6 +1348,7 @@ func TestToggleReadExpandedView(t *testing.T) {
 		Link:            "http://example.com/expanded",
 		GUID:            "expanded",
 		Description:     "<p>Expanded summary</p>",
+		Content:         "<p>Expanded content</p>",
 		PublishedParsed: new(time.Now().Add(-time.Hour)),
 	}})
 	items := mustListItems(t, app, feedID)
@@ -1361,7 +1378,7 @@ func TestToggleReadExpandedView(t *testing.T) {
 	assertContains(
 		t,
 		body,
-		"item-card expanded",
+		"item-entry is-expanded",
 		"expected expanded item response",
 	)
 	assertContains(
@@ -1370,6 +1387,13 @@ func TestToggleReadExpandedView(t *testing.T) {
 		classIsActive,
 		"expected expanded toggled item to stay active",
 	)
+	assertContains(
+		t,
+		body,
+		"content-panel is-open",
+		"expected expanded toggle response to open content panel",
+	)
+	assertContentPanelOOBUpdate(t, body)
 }
 
 func TestItemExpandedKeepsActiveClass(t *testing.T) {
@@ -1383,6 +1407,7 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 		Link:            "http://example.com/expanded",
 		GUID:            "expanded-active",
 		Description:     "<p>Expanded summary</p>",
+		Content:         "<p>Expanded content</p>",
 		PublishedParsed: new(time.Now().Add(-time.Hour)),
 	}})
 	items := mustListItems(t, app, feedID)
@@ -1402,7 +1427,49 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 		t.Fatalf("expanded status: %d", rec.Code)
 	}
 
-	assertExpandedItemBody(t, rec.Body.String(), items[firstItemIndex].ID)
+	body := rec.Body.String()
+	assertExpandedItemBody(t, body, items[firstItemIndex].ID)
+	assertContentPanelOOBUpdate(t, body)
+}
+
+func TestItemCompactClosesContentPanel(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Compact Panel Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Compact Panel Item",
+		Link:            "http://example.com/compact-panel",
+		GUID:            "compact-panel",
+		Description:     "<p>Compact panel summary</p>",
+		Content:         "<p>Compact panel content</p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, expectedSingleItem)
+
+	itemPath := fmt.Sprintf(
+		"/items/%d/compact?selected_item_id=item-%d",
+		items[firstItemIndex].ID,
+		items[firstItemIndex].ID,
+	)
+	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("compact status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	assertContentPanelOOBUpdate(t, body)
+	assertNotContains(
+		t,
+		body,
+		"content-panel is-open",
+		"expected compact response to close content panel",
+	)
 }
 
 func TestItemCompactExpandRequestIncludesSelectedItemID(t *testing.T) {
@@ -1423,6 +1490,7 @@ func TestItemCompactExpandRequestIncludesSelectedItemID(t *testing.T) {
 		Link:            "http://example.com/compact",
 		GUID:            "compact-selected",
 		Description:     "<p>Compact summary</p>",
+		Content:         "<p>Compact content</p>",
 		PublishedParsed: new(time.Now().Add(-time.Hour)),
 	}})
 	if upsertErr != nil {

@@ -1,5 +1,6 @@
 {{define "feed_edit_save_response"}}
   {{template "feed_list" .}}
+  {{template "item_content_empty_oob" .}}
   {{if .ItemList}}
     <div id="main-content" hx-swap-oob="innerHTML">
       {{template "item_list" .ItemList}}

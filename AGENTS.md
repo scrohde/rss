@@ -15,17 +15,12 @@ go run .
 ```
 Open http://localhost:8080
 
-## Tests
-```bash
-go test ./...
-```
-
 Shortcut:
 ```bash
 ./scripts/check.sh
 ```
 
-## Linting and formatting
+## Testing, Linting, and formatting
 Lines can be up to 120 chars long.
 
 In sandboxed runs (like Codex), `golangci-lint` may fail to read/write default caches under `~/Library/Caches`.
@@ -35,9 +30,6 @@ Use `./scripts/check.sh` to handle this automatically. If running commands manua
 mkdir -p /tmp/go-build-cache /tmp/golangci-lint-cache
 export GOCACHE=/tmp/go-build-cache
 export GOLANGCI_LINT_CACHE=/tmp/golangci-lint-cache
-
-# Rewrite code to newer/cleaner Go idioms when safe
-go fix ./...
 
 # Format (uses formatters section of .golangci.yml)
 golangci-lint fmt ./...
