@@ -22,13 +22,13 @@ import (
 
 const (
 	// RefreshInterval is the base interval between refresh attempts.
-	RefreshInterval = 20 * time.Minute
+	RefreshInterval = 2 * time.Hour
 	// RefreshLoopInterval controls how often the refresh loop runs.
 	RefreshLoopInterval = 30 * time.Second
 	// RefreshBatchSize is the max number of feeds processed per loop.
 	RefreshBatchSize        = 5
-	refreshBackoffMax       = 12 * time.Hour
-	refreshJitterMin        = 0.10
+	refreshBackoffMax       = 24 * time.Hour
+	refreshJitterMin        = 0.01
 	refreshJitterMax        = 0.20
 	feedFetchTimeout        = 15 * time.Second
 	maxErrorLength          = 300
@@ -447,13 +447,13 @@ func ComputeBackoffInterval(unchangedCount int) time.Duration {
 
 // ApplyJitter applies randomized jitter to a base interval.
 func ApplyJitter(base time.Duration) time.Duration {
-	if base <= countReset {
+	if base <= 0 {
 		return base
 	}
 
 	magnitude := refreshJitterMin + randomFloat64()*
 		(refreshJitterMax-refreshJitterMin)
-	if randomBit() == countReset {
+	if randomBit() == 0 {
 		magnitude = -magnitude
 	}
 
