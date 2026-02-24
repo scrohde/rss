@@ -21,8 +21,10 @@ var errUnexpectedFeedURL = errors.New("unexpected feed url")
 
 // FeedServer serves mutable feed XML for HTTP-based tests.
 type FeedServer struct {
-	feedXML string
-	mu      sync.RWMutex
+	headers    http.Header
+	feedXML    string
+	statusCode int
+	mu         sync.RWMutex
 }
 
 var (
@@ -53,6 +55,10 @@ func NewFeedServer(t *testing.T, feedXML string) (server *FeedServer, feedURL st
 
 	server = new(FeedServer)
 	server.feedXML = feedXML
+	server.statusCode = http.StatusOK
+	server.headers = http.Header{
+		"Content-Type": []string{"application/rss+xml"},
+	}
 	feedURL = "https://feed.test/" + url.PathEscape(t.Name())
 
 	feedRegistryMu.Lock()
@@ -76,30 +82,34 @@ func (f *FeedServer) SetFeedXML(xml string) {
 	f.feedXML = xml
 }
 
+// SetHTTPResponse configures the response status and headers for this feed URL.
+func (f *FeedServer) SetHTTPResponse(statusCode int, headers http.Header) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if statusCode <= 0 {
+		statusCode = http.StatusOK
+	}
+
+	f.statusCode = statusCode
+
+	f.headers = cloneHeaders(headers)
+	if f.headers == nil {
+		f.headers = make(http.Header)
+	}
+
+	if strings.TrimSpace(f.headers.Get("Content-Type")) == "" {
+		f.headers.Set("Content-Type", "application/rss+xml")
+	}
+}
+
 func installFeedTransport() {
 	feedTransportOnce.Do(func() {
 		feedTransportBase = http.DefaultTransport
 		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			feedRegistryMu.RLock()
-
-			server, ok := feedRegistry[req.URL.String()]
-
-			feedRegistryMu.RUnlock()
-
+			server, ok := lookupFeedServer(req.URL.String())
 			if ok {
-				server.mu.RLock()
-				defer server.mu.RUnlock()
-
-				resp := new(http.Response)
-				resp.StatusCode = http.StatusOK
-				resp.Status = "200 OK"
-				resp.Header = http.Header{
-					"Content-Type": []string{"application/rss+xml"},
-				}
-				resp.Body = io.NopCloser(strings.NewReader(server.feedXML))
-				resp.Request = req
-
-				return resp, nil
+				return buildFeedResponse(req, server), nil
 			}
 
 			if strings.EqualFold(req.URL.Hostname(), "feed.test") {
@@ -113,6 +123,64 @@ func installFeedTransport() {
 			return feedTransportBase.RoundTrip(req)
 		})
 	})
+}
+
+func lookupFeedServer(feedURL string) (*FeedServer, bool) {
+	feedRegistryMu.RLock()
+	defer feedRegistryMu.RUnlock()
+
+	server, ok := feedRegistry[feedURL]
+
+	return server, ok
+}
+
+func buildFeedResponse(req *http.Request, server *FeedServer) *http.Response {
+	server.mu.RLock()
+	feedXML := server.feedXML
+	statusCode := server.statusCode
+	headers := cloneHeaders(server.headers)
+	server.mu.RUnlock()
+
+	statusCode, headers = normalizeFeedResponse(statusCode, headers)
+
+	resp := new(http.Response)
+	resp.StatusCode = statusCode
+	resp.Status = fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode))
+	resp.Header = headers
+	resp.Body = io.NopCloser(strings.NewReader(feedXML))
+	resp.Request = req
+
+	return resp
+}
+
+func normalizeFeedResponse(statusCode int, headers http.Header) (int, http.Header) {
+	if statusCode <= 0 {
+		statusCode = http.StatusOK
+	}
+
+	if headers == nil {
+		headers = make(http.Header)
+	}
+
+	if strings.TrimSpace(headers.Get("Content-Type")) == "" {
+		headers.Set("Content-Type", "application/rss+xml")
+	}
+
+	return statusCode, headers
+}
+
+func cloneHeaders(src http.Header) http.Header {
+	if src == nil {
+		return nil
+	}
+
+	dst := make(http.Header, len(src))
+	for key, values := range src {
+		copied := append([]string(nil), values...)
+		dst[key] = copied
+	}
+
+	return dst
 }
 
 // RSSItem represents one item used by RSSXML test feed generation.

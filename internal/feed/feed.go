@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,6 +61,22 @@ type FetchResult struct {
 	LastModified string
 	NotModified  bool
 	StatusCode   int
+}
+
+// FetchStatusError indicates a non-2xx, non-304 HTTP response from a feed URL.
+type FetchStatusError struct {
+	StatusCode int
+	RetryAfter time.Duration
+}
+
+// Error returns the unexpected status message and response status code.
+func (e *FetchStatusError) Error() string {
+	return fmt.Sprintf("%v: %d", errUnexpectedFeedStatus, e.StatusCode)
+}
+
+// Unwrap enables errors.Is checks against errUnexpectedFeedStatus.
+func (*FetchStatusError) Unwrap() error {
+	return errUnexpectedFeedStatus
 }
 
 // CacheMeta stores cached response validators and unchanged counter.
@@ -152,7 +169,7 @@ func parseFetchResponse(resp *http.Response) (*FetchResult, error) {
 
 	if resp.StatusCode < http.StatusOK ||
 		resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("%w: %d", errUnexpectedFeedStatus, resp.StatusCode)
+		return nil, buildFetchStatusError(resp)
 	}
 
 	parser := gofeed.NewParser()
@@ -165,6 +182,58 @@ func parseFetchResponse(resp *http.Response) (*FetchResult, error) {
 	result.Feed = feed
 
 	return result, nil
+}
+
+func buildFetchStatusError(resp *http.Response) error {
+	retryAfter := parseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now().UTC())
+
+	return &FetchStatusError{
+		StatusCode: resp.StatusCode,
+		RetryAfter: retryAfter,
+	}
+}
+
+func parseRetryAfterHeader(value string, now time.Time) time.Duration {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0
+	}
+
+	seconds, err := strconv.Atoi(trimmed)
+	if err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+
+		return time.Duration(seconds) * time.Second
+	}
+
+	retryAt, err := http.ParseTime(trimmed)
+	if err != nil || !retryAt.After(now) {
+		return 0
+	}
+
+	return retryAt.Sub(now)
+}
+
+func nextRefreshAtForFetchError(
+	checkedAt time.Time,
+	unchangedCount int,
+	fetchErr error,
+) time.Time {
+	nextRefreshAt := NextRefreshAt(checkedAt, unchangedCount)
+
+	statusErr := new(FetchStatusError)
+	if !errors.As(fetchErr, &statusErr) {
+		return nextRefreshAt
+	}
+
+	retryAfterAt := checkedAt.Add(statusErr.RetryAfter)
+	if retryAfterAt.After(nextRefreshAt) {
+		return retryAfterAt
+	}
+
+	return nextRefreshAt
 }
 
 //nolint:cyclop,funlen,gocognit,revive // Branching flow keeps refresh side effects explicit.
@@ -194,8 +263,12 @@ func Refresh(ctx context.Context, db *sql.DB, feedID int64) (int64, error) {
 
 	if err != nil {
 		meta.LastError = truncateString(err.Error())
-		meta.UnchangedCount = countReset
-		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
+		meta.UnchangedCount = cache.UnchangedCount + countStep
+		meta.NextRefreshAt = nextRefreshAtForFetchError(
+			checkedAt,
+			meta.UnchangedCount,
+			err,
+		)
 		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
 		slog.Error("refresh feed fetch failed",
 			logFieldFeedID, feedID,
