@@ -42,9 +42,38 @@ VALIDATE_INSTANCE_PORTS="${VALIDATE_INSTANCE_PORTS:-true}"
 VALIDATE_INSTANCE_DB_PATH="${VALIDATE_INSTANCE_DB_PATH:-true}"
 VALIDATE_RP_ID_PLACEHOLDER="${VALIDATE_RP_ID_PLACEHOLDER:-true}"
 ALLOW_BASE_SERVICE_WITH_INSTANCES="${ALLOW_BASE_SERVICE_WITH_INSTANCES:-false}"
+DRY_RUN="${DRY_RUN:-false}"
 
 DEFAULT_SERVICE="${APP_UNIT_BASE}.service"
 SERVICES_RAW="${SERVICES:-$DEFAULT_SERVICE}"
+
+usage() {
+  cat <<'EOF'
+Usage: deploy-linux.sh [--dry-run]
+
+Options:
+  --dry-run, -n  Print planned actions without making changes.
+  --help, -h     Show this help message.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run|-n)
+      DRY_RUN=true
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1"
+      usage
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 if [[ "$EUID" -eq 0 ]]; then
   SUDO=()
@@ -86,6 +115,7 @@ parse_bool "$VALIDATE_INSTANCE_PORTS"
 parse_bool "$VALIDATE_INSTANCE_DB_PATH"
 parse_bool "$VALIDATE_RP_ID_PLACEHOLDER"
 parse_bool "$ALLOW_BASE_SERVICE_WITH_INSTANCES"
+parse_bool "$DRY_RUN"
 
 file_exists() {
   local path="$1"
@@ -121,45 +151,167 @@ read_env_key() {
   printf '%s' "$raw_value"
 }
 
-require_cmd install
-require_cmd id
-require_cmd systemctl
-if [[ "${#SUDO[@]}" -gt 0 ]]; then
-  require_cmd sudo
-fi
-if [[ "$GIT_PULL" == "true" ]]; then
-  require_cmd git
-fi
-if [[ "$BUILD_BINARY" == "true" ]]; then
-  require_cmd go
-fi
-if [[ "$RUN_CHECKS" == "true" ]]; then
-  if [[ ! -x "$REPO_ROOT/scripts/check.sh" ]]; then
-    echo "error: RUN_CHECKS=true but $REPO_ROOT/scripts/check.sh is not executable"
-    exit 1
+print_dry_run_plan() {
+  echo "Dry-run mode enabled. No changes will be made."
+  echo
+  echo "Planned build/install operations:"
+  if [[ "$GIT_PULL" == "true" ]]; then
+    echo "  - Pull latest code from $GIT_REMOTE/$GIT_BRANCH."
+  fi
+  if [[ "$BUILD_BINARY" == "true" ]]; then
+    echo "  - Build binary at $BIN_SRC from $REPO_ROOT."
+  fi
+  if [[ "$RUN_CHECKS" == "true" ]]; then
+    echo "  - Run quality checks via $REPO_ROOT/scripts/check.sh."
+  fi
+  echo "  - Ensure app directory exists: $APP_HOME"
+  echo "  - Ensure env directory exists: $(dirname "$ENV_DST")"
+  echo "  - Install binary: $BIN_SRC -> $BIN_DST"
+  if [[ "$ENSURE_APP_USER" == "true" ]]; then
+    echo "  - Ensure system user/group exists: $APP_USER:$APP_GROUP"
+    echo "  - Set ownership on $APP_HOME to $APP_USER:$APP_GROUP"
+  fi
+  if [[ "$USES_INSTANCE_UNITS" == "true" ]]; then
+    for instance_name in "${INSTANCE_NAMES[@]}"; do
+      echo "  - Ensure instance data directory: $APP_HOME/$instance_name"
+    done
+  fi
+  if [[ "$INSTALL_SERVICE_UNIT" == "true" ]]; then
+    echo "  - Install systemd unit: $SERVICE_SRC -> $SERVICE_DST"
+  fi
+  if [[ "$INSTALL_ENV_TEMPLATE" == "true" ]]; then
+    echo "  - Ensure shared env file exists: $ENV_DST"
+    if [[ "$USES_INSTANCE_UNITS" == "true" ]]; then
+      for instance_name in "${INSTANCE_NAMES[@]}"; do
+        echo "  - Ensure instance env file exists: $(dirname "$ENV_DST")/$instance_name.env"
+      done
+    fi
+  fi
+  if [[ "$APPLY_CADDY" == "true" ]]; then
+    echo "  - Install Caddy config: $CADDY_SRC -> $CADDY_DST"
+  fi
+
+  echo
+  echo "Planned env/config checks:"
+  if [[ "${#SUDO[@]}" -gt 0 ]]; then
+    echo "  - Validate sudo access."
+  fi
+  if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$ALLOW_BASE_SERVICE_WITH_INSTANCES" == "false" ]] &&
+    [[ "$TARGETS_BASE_SERVICE" == "false" ]]; then
+    echo "  - Verify $BASE_SERVICE_UNIT is not active/enabled while using instance units."
+  fi
+  if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$VALIDATE_INSTANCE_PORTS" == "true" ]]; then
+    echo "  - Validate PORT values across $(dirname "$ENV_DST")/*.env for duplicates."
+  fi
+  if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$VALIDATE_INSTANCE_DB_PATH" == "true" ]]; then
+    echo "  - Validate DB_PATH values for instance isolation under $APP_HOME/<instance>/."
+  fi
+  if [[ "$VALIDATE_RP_ID_PLACEHOLDER" == "true" ]]; then
+    echo "  - Validate AUTH_RP_ID does not use rss.example.com in env files."
+  fi
+
+  echo
+  echo "Planned systemd operations:"
+  echo "  - systemctl daemon-reload"
+  for unit in "${SERVICE_UNITS[@]}"; do
+    if [[ "$ENABLE_SERVICES" == "true" ]]; then
+      echo "  - systemctl enable $unit"
+    fi
+    echo "  - systemctl restart $unit"
+    echo "  - systemctl is-active $unit"
+  done
+  if [[ "$APPLY_CADDY" == "true" ]]; then
+    echo "  - systemctl reload caddy (if service exists)"
+  fi
+
+  echo
+  echo "Files/directories that would be touched:"
+  echo "  - $APP_HOME"
+  echo "  - $(dirname "$ENV_DST")"
+  echo "  - $BIN_DST"
+  if [[ "$INSTALL_SERVICE_UNIT" == "true" ]]; then
+    echo "  - $SERVICE_DST"
+  fi
+  if [[ "$INSTALL_ENV_TEMPLATE" == "true" ]]; then
+    echo "  - $ENV_DST"
+    if [[ "$USES_INSTANCE_UNITS" == "true" ]]; then
+      for instance_name in "${INSTANCE_NAMES[@]}"; do
+        echo "  - $(dirname "$ENV_DST")/$instance_name.env"
+      done
+    fi
+  fi
+  if [[ "$APPLY_CADDY" == "true" ]]; then
+    echo "  - $CADDY_DST"
+  fi
+
+  echo
+  echo "Services that would be touched:"
+  for unit in "${SERVICE_UNITS[@]}"; do
+    echo "  - $unit"
+  done
+  if [[ "$APPLY_CADDY" == "true" ]]; then
+    echo "  - caddy"
+  fi
+}
+
+if [[ "$DRY_RUN" != "true" ]]; then
+  require_cmd install
+  require_cmd id
+  require_cmd systemctl
+  if [[ "${#SUDO[@]}" -gt 0 ]]; then
+    require_cmd sudo
+  fi
+  if [[ "$GIT_PULL" == "true" ]]; then
+    require_cmd git
+  fi
+  if [[ "$BUILD_BINARY" == "true" ]]; then
+    require_cmd go
+  fi
+  if [[ "$RUN_CHECKS" == "true" ]]; then
+    if [[ ! -x "$REPO_ROOT/scripts/check.sh" ]]; then
+      echo "error: RUN_CHECKS=true but $REPO_ROOT/scripts/check.sh is not executable"
+      exit 1
+    fi
   fi
 fi
 
 if [[ "$INSTALL_SERVICE_UNIT" == "true" ]] && [[ ! -f "$SERVICE_SRC" ]]; then
-  echo "error: service template not found at $SERVICE_SRC"
-  exit 1
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "warning: service template not found at $SERVICE_SRC (dry-run continues)"
+  else
+    echo "error: service template not found at $SERVICE_SRC"
+    exit 1
+  fi
 fi
 
 if [[ "$INSTALL_ENV_TEMPLATE" == "true" ]] && [[ ! -f "$ENV_EXAMPLE_SRC" ]]; then
-  echo "error: env template not found at $ENV_EXAMPLE_SRC"
-  exit 1
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "warning: env template not found at $ENV_EXAMPLE_SRC (dry-run continues)"
+  else
+    echo "error: env template not found at $ENV_EXAMPLE_SRC"
+    exit 1
+  fi
 fi
 
 if [[ "$APPLY_CADDY" == "true" ]] && [[ ! -f "$CADDY_SRC" ]]; then
-  echo "error: Caddy template not found at $CADDY_SRC"
-  exit 1
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "warning: Caddy template not found at $CADDY_SRC (dry-run continues)"
+  else
+    echo "error: Caddy template not found at $CADDY_SRC"
+    exit 1
+  fi
 fi
 
 if [[ "$APPLY_CADDY" == "true" ]] && [[ "$CADDY_ALLOW_PLACEHOLDER" != "true" ]] &&
   grep -q "rss.example.com" "$CADDY_SRC"; then
-  echo "error: $CADDY_SRC still contains rss.example.com placeholder"
-  echo "hint: replace with your real domain or set CADDY_ALLOW_PLACEHOLDER=true to bypass"
-  exit 1
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "warning: $CADDY_SRC still contains rss.example.com placeholder (dry-run continues)"
+    echo "hint: replace with your real domain or set CADDY_ALLOW_PLACEHOLDER=true to bypass"
+  else
+    echo "error: $CADDY_SRC still contains rss.example.com placeholder"
+    echo "hint: replace with your real domain or set CADDY_ALLOW_PLACEHOLDER=true to bypass"
+    exit 1
+  fi
 fi
 
 SERVICES_RAW="${SERVICES_RAW//,/ }"
@@ -213,13 +365,23 @@ fi
 
 if [[ "${#SUDO[@]}" -gt 0 ]]; then
   echo "Checking sudo access..."
-  run_root -v
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "Skipping sudo validation in dry-run mode."
+  else
+    run_root -v
+  fi
 fi
 
 echo "Target services:"
 for unit in "${SERVICE_UNITS[@]}"; do
   echo "  - $unit"
 done
+
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo
+  print_dry_run_plan
+  exit 0
+fi
 
 if [[ "$USES_INSTANCE_UNITS" == "true" ]] && [[ "$ALLOW_BASE_SERVICE_WITH_INSTANCES" == "false" ]] && [[ "$TARGETS_BASE_SERVICE" == "false" ]]; then
   base_active=false

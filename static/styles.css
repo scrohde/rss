@@ -156,8 +156,8 @@ body {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  min-width: 360px;
-  max-width: min(520px, calc(100vw - 44px));
+  min-width: min(360px, calc(100vw - 32px));
+  max-width: min(520px, calc(100vw - 32px));
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid rgba(15, 118, 110, 0.24);
@@ -1127,25 +1127,33 @@ body {
   }
 
   .topbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     text-align: left;
   }
 
+  .brand {
+    min-width: 0;
+  }
+
+  .brand > div {
+    min-width: 0;
+  }
+
+  .brand-title,
+  .brand-subtitle {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .topbar-side {
-    justify-content: flex-start;
+    justify-content: flex-end;
     flex-wrap: wrap;
   }
 
   .topbar-shortcuts {
-    width: 100%;
-    align-items: flex-start;
-  }
-
-  .topbar-shortcuts-panel {
-    position: static;
-    min-width: 0;
-    max-width: 100%;
-    margin-top: 8px;
+    width: auto;
+    align-items: flex-end;
   }
 
   .message {
