@@ -889,7 +889,23 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request) {
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
 	item.IsExpanded = true
-	a.renderTemplate(w, "item_expanded_response", item)
+
+	var collapseItem *view.ItemView
+
+	collapseID := parseOptionalItemID(r, "collapse_item_id")
+	if collapseID != 0 && collapseID != item.ID {
+		collapsedItem, collapsedErr := store.GetItem(r.Context(), a.db, collapseID)
+		if collapsedErr == nil {
+			collapsedItem.IsActive = false
+			collapsedItem.IsExpanded = false
+			collapseItem = &collapsedItem
+		}
+	}
+
+	a.renderTemplate(w, "item_expanded_response", itemExpandedResponseData{
+		Item:         item,
+		CollapseItem: collapseItem,
+	})
 }
 
 func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
@@ -1403,12 +1419,16 @@ func parseSelectedFeedID(r *http.Request) int64 {
 }
 
 func parseSelectedItemID(r *http.Request) int64 {
+	return parseOptionalItemID(r, "selected_item_id")
+}
+
+func parseOptionalItemID(r *http.Request, field string) int64 {
 	err := r.ParseForm()
 	if err != nil {
 		return 0
 	}
 
-	raw := strings.TrimSpace(r.FormValue("selected_item_id"))
+	raw := strings.TrimSpace(r.FormValue(field))
 	if raw == "" {
 		return 0
 	}

@@ -50,6 +50,11 @@ type toggleReadResponseData struct {
 	UpdatePanel    bool
 }
 
+type itemExpandedResponseData struct {
+	CollapseItem *view.ItemView
+	Item         view.ItemView
+}
+
 type authLoginPageData struct {
 	Message string
 }

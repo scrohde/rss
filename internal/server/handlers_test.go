@@ -96,6 +96,7 @@ const (
 	imageProxyURLQuery   = "?url="
 	examplePublicIP      = "93.184.216.34"
 	selectedItemIDParam  = "selected_item_id"
+	collapseItemIDParam  = "collapse_item_id"
 	selectedItemIDPlain  = int64(42)
 	selectedItemIDRaw    = "42"
 	selectedItemIDPrefix = "item-42"
@@ -1009,6 +1010,34 @@ func assertExpandedItemBody(t *testing.T, body string, itemID int64) {
 	)
 }
 
+func assertItemArticleNotActive(t *testing.T, body string, itemID int64) {
+	t.Helper()
+
+	marker := fmt.Sprintf(`id="item-%d"`, itemID)
+
+	itemIndex := strings.Index(body, marker)
+	if itemIndex == -1 {
+		t.Fatalf("expected item article marker %q in response", marker)
+	}
+
+	articleStart := strings.LastIndex(body[:itemIndex], "<article")
+	if articleStart == -1 {
+		t.Fatalf("expected article start before item marker %q", marker)
+	}
+
+	articleEndOffset := strings.Index(body[itemIndex:], "</article>")
+	if articleEndOffset == -1 {
+		t.Fatalf("expected article end after item marker %q", marker)
+	}
+
+	articleEnd := itemIndex + articleEndOffset + len("</article>")
+
+	articleHTML := body[articleStart:articleEnd]
+	if strings.Contains(articleHTML, classIsActive) {
+		t.Fatalf("expected item-%d article to not include %q", itemID, classIsActive)
+	}
+}
+
 func subscribeFeedItems(now time.Time) []testutil.RSSItem {
 	return []testutil.RSSItem{
 		{
@@ -1430,6 +1459,66 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 	body := rec.Body.String()
 	assertExpandedItemBody(t, body, items[firstItemIndex].ID)
 	assertContentPanelOOBUpdate(t, body)
+}
+
+func TestItemExpandedCompactsCollapsedItemViaOOB(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Expanded Collapse Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Expanded Item",
+		Link:            "http://example.com/expanded-oob",
+		GUID:            "expanded-oob",
+		Description:     "<p>Expanded summary</p>",
+		Content:         "<p>Expanded content</p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}, {
+		Title:           "Collapsed Item",
+		Link:            "http://example.com/collapsed-oob",
+		GUID:            "collapsed-oob",
+		Description:     "<p>Collapsed summary</p>",
+		Content:         "<p>Collapsed content</p>",
+		PublishedParsed: new(time.Now().Add(-2 * time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+
+	assertItemCount(t, items, expectedTwoItems)
+
+	targetID := items[firstItemIndex].ID
+	collapseID := items[firstItemIndex+1].ID
+	itemPath := fmt.Sprintf(
+		"/items/%d?selected_item_id=item-%d&%s=%d",
+		targetID,
+		targetID,
+		collapseItemIDParam,
+		collapseID,
+	)
+	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expanded status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	assertExpandedItemBody(t, body, targetID)
+	assertContentPanelOOBUpdate(t, body)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="item-%d"`, collapseID),
+		"expected collapsed row OOB update in expanded response",
+	)
+	assertContains(
+		t,
+		body,
+		"item-entry item-entry-compact",
+		"expected collapsed row to render compact markup",
+	)
+	assertItemArticleNotActive(t, body, collapseID)
 }
 
 func TestItemCompactClosesContentPanel(t *testing.T) {

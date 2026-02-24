@@ -1,6 +1,9 @@
 {{define "item_expanded_response"}}
-  {{template "item_expanded" .}}
-  {{if .HasContent}}
-    {{template "item_content_panel_oob" .}}
+  {{template "item_expanded" .Item}}
+  {{if .Item.HasContent}}
+    {{template "item_content_panel_oob" .Item}}
+  {{end}}
+  {{if .CollapseItem}}
+    {{template "item_compact_oob" .CollapseItem}}
   {{end}}
 {{end}}

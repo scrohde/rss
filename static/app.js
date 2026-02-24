@@ -16,13 +16,25 @@
     startWidth: 0,
     hasStoredWidth: false,
   };
+  const contentPanelResizeState = {
+    active: false,
+    pointerId: null,
+    startX: 0,
+    startWidth: 0,
+    hasStoredWidth: false,
+  };
   const feedPanelStorageKey = "pulse.feedPanelWidth";
+  const contentPanelStorageKey = "pulse.contentPanelWidth";
   const feedPanelMin = 180;
   const feedPanelMax = 460;
+  const contentPanelMin = 360;
+  const contentPanelMax = 760;
 
   const getItemList = () => document.getElementById("item-list");
   const getFeedList = () => document.getElementById("feed-list");
   const getFeedPanelResizer = () => document.getElementById("feed-panel-resizer");
+  const getContentPanelResizer = () => document.getElementById("content-panel-resizer");
+  const getContentPanel = () => document.getElementById("content-panel");
   const getFeedEditForm = () => document.getElementById("feed-edit-form");
   const getSelectedFeedInput = () => document.getElementById("selected-feed-id");
   const getTopbarShortcuts = () => document.getElementById("topbar-shortcuts");
@@ -724,6 +736,141 @@
     });
   };
 
+  const isContentPanelOpen = () => {
+    const panel = getContentPanel();
+    return Boolean(panel && panel.classList.contains("is-open"));
+  };
+
+  const clampContentPanelWidth = (width) =>
+    Math.min(contentPanelMax, Math.max(contentPanelMin, Math.round(width)));
+
+  const currentContentPanelWidth = () => {
+    const computed = getComputedStyle(document.documentElement);
+    const parsed = parseFloat(computed.getPropertyValue("--content-panel-width"));
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+
+    const panel = getContentPanel();
+    if (panel) {
+      return panel.getBoundingClientRect().width;
+    }
+
+    return 520;
+  };
+
+  const setContentPanelWidth = (width, persist) => {
+    const clamped = clampContentPanelWidth(width);
+    document.documentElement.style.setProperty("--content-panel-width", `${clamped}px`);
+    if (!persist) {
+      return clamped;
+    }
+
+    try {
+      window.localStorage.setItem(contentPanelStorageKey, String(clamped));
+      contentPanelResizeState.hasStoredWidth = true;
+    } catch (_error) {
+      // Ignore localStorage failures.
+    }
+
+    return clamped;
+  };
+
+  const readStoredContentPanelWidth = () => {
+    try {
+      const raw = window.localStorage.getItem(contentPanelStorageKey);
+      if (!raw) {
+        return null;
+      }
+      const parsed = parseInt(raw, 10);
+      if (!Number.isFinite(parsed)) {
+        return null;
+      }
+
+      return clampContentPanelWidth(parsed);
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  const syncContentPanelWidth = () => {
+    if (window.matchMedia("(max-width: 960px)").matches) {
+      return;
+    }
+
+    const storedWidth = readStoredContentPanelWidth();
+    if (storedWidth !== null) {
+      setContentPanelWidth(storedWidth, false);
+      contentPanelResizeState.hasStoredWidth = true;
+    }
+  };
+
+  const stopContentPanelResize = (persist) => {
+    if (!contentPanelResizeState.active) {
+      return;
+    }
+    contentPanelResizeState.active = false;
+    contentPanelResizeState.pointerId = null;
+    document.body.classList.remove("is-resizing-content-panel");
+    if (persist) {
+      setContentPanelWidth(currentContentPanelWidth(), true);
+    }
+  };
+
+  const bindContentPanelResize = () => {
+    const resizer = getContentPanelResizer();
+    if (!resizer || resizer.dataset.bound === "true") {
+      return;
+    }
+    resizer.dataset.bound = "true";
+
+    resizer.addEventListener("pointerdown", (event) => {
+      if (
+        event.button !== 0 ||
+        window.matchMedia("(max-width: 960px)").matches ||
+        !isContentPanelOpen()
+      ) {
+        return;
+      }
+
+      contentPanelResizeState.active = true;
+      contentPanelResizeState.pointerId = event.pointerId;
+      contentPanelResizeState.startX = event.clientX;
+      contentPanelResizeState.startWidth = currentContentPanelWidth();
+      document.body.classList.add("is-resizing-content-panel");
+      if (typeof resizer.setPointerCapture === "function") {
+        resizer.setPointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+    });
+
+    resizer.addEventListener("pointermove", (event) => {
+      if (
+        !contentPanelResizeState.active ||
+        contentPanelResizeState.pointerId !== event.pointerId
+      ) {
+        return;
+      }
+
+      const delta = event.clientX - contentPanelResizeState.startX;
+      setContentPanelWidth(contentPanelResizeState.startWidth - delta, false);
+    });
+
+    resizer.addEventListener("pointerup", (event) => {
+      if (contentPanelResizeState.pointerId !== event.pointerId) {
+        return;
+      }
+      stopContentPanelResize(true);
+    });
+
+    resizer.addEventListener("pointercancel", (event) => {
+      if (contentPanelResizeState.pointerId !== event.pointerId) {
+        return;
+      }
+      stopContentPanelResize(false);
+    });
+  };
+
   document.addEventListener("click", (event) => {
     const list = getItemList();
     if (!list) {
@@ -924,7 +1071,9 @@
     bindImportControls();
     bindItemRowClickGuards();
     bindFeedPanelResize();
+    bindContentPanelResize();
     syncFeedPanelWidth();
+    syncContentPanelWidth();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     if (isFeedEditMode()) {
@@ -942,7 +1091,9 @@
     bindImportControls();
     bindItemRowClickGuards();
     bindFeedPanelResize();
+    bindContentPanelResize();
     syncFeedPanelWidth();
+    syncContentPanelWidth();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     const swapTarget = event && event.detail ? event.detail.target : null;
@@ -970,6 +1121,9 @@
     if (!event || !event.detail || !event.detail.parameters) {
       return;
     }
+    const source = event.detail.elt;
+    const sourceRow =
+      source && source.closest ? source.closest(".item-entry") : null;
     const csrfToken = getCSRFToken();
     if (csrfToken) {
       if (!event.detail.headers) {
@@ -978,16 +1132,30 @@
       event.detail.headers["X-CSRF-Token"] = csrfToken;
     }
     if (!event.detail.parameters.selected_item_id) {
-      const source = event.detail.elt;
-      const sourceRow =
-        source && source.closest ? source.closest(".item-entry") : null;
       if (sourceRow && sourceRow.id) {
         event.detail.parameters.selected_item_id = sourceRow.id;
         state.activeId = sourceRow.id;
+      } else if (state.activeId) {
+        event.detail.parameters.selected_item_id = state.activeId;
+      }
+    }
+
+    if (
+      sourceRow &&
+      sourceRow.dataset.itemExpand === "true" &&
+      !sourceRow.classList.contains("is-expanded")
+    ) {
+      const list = getItemList();
+      if (!list || !list.contains(sourceRow)) {
         return;
       }
-      if (state.activeId) {
-        event.detail.parameters.selected_item_id = state.activeId;
+      const expandedRow = list.querySelector(".item-entry.is-expanded");
+      if (!expandedRow || expandedRow === sourceRow) {
+        return;
+      }
+      const collapseID = expandedRow.dataset.itemId;
+      if (collapseID) {
+        event.detail.parameters.collapse_item_id = collapseID;
       }
     }
   });
