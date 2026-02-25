@@ -44,7 +44,7 @@ body {
   gap: 10px;
   align-items: center;
   padding: 6px 16px;
-  background: var(--surface);
+  background: var(--sidebar);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow);
   position: sticky;
@@ -371,6 +371,22 @@ body {
     var(--content-panel-width);
 }
 
+.app.is-content-panel-fullpage:has(#content-panel.is-open) {
+  grid-template-columns: 0 0 0 0 minmax(0, 1fr);
+}
+
+.app.is-content-panel-fullpage .feed-panel,
+.app.is-content-panel-fullpage .feed-panel-resizer,
+.app.is-content-panel-fullpage .main-panel,
+.app.is-content-panel-fullpage .content-panel-resizer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app.is-content-panel-fullpage #content-panel {
+  padding: 24px 20px 32px;
+}
+
 .feed-panel,
 .main-panel,
 #content-panel {
@@ -392,7 +408,7 @@ body {
 
 .feed-panel {
   padding: 24px 0 32px 28px;
-  background: rgba(247, 243, 235, 0.9);
+  background: var(--sidebar);
   border-right: 1px solid var(--border);
 }
 
@@ -1119,6 +1135,59 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 
 .content-panel {
   background: transparent;
+}
+
+.content-panel-actions {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  margin: 0 20px 10px 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.content-panel-action-button {
+  border: none;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--muted);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+}
+
+.content-panel-action-button .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.content-panel-action-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.16);
+}
+
+.content-panel-action-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
+
+.content-panel-full-icon-exit {
+  display: none;
+}
+
+.content-panel-full-toggle[aria-pressed="true"] .content-panel-full-icon-enter {
+  display: none;
+}
+
+.content-panel-full-toggle[aria-pressed="true"] .content-panel-full-icon-exit {
+  display: block;
 }
 
 .content-panel-empty,

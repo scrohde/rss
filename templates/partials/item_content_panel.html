@@ -16,8 +16,50 @@
   </aside>
 {{end}}
 
+{{define "item_content_panel_actions"}}
+  <div class="content-panel-actions" role="group" aria-label="Article panel actions">
+    <button
+      class="content-panel-action-button content-panel-full-toggle"
+      type="button"
+      data-content-panel-full-toggle="true"
+      aria-label="Expand article panel"
+      aria-pressed="false"
+      title="Expand article panel"
+    >
+      <img
+        class="icon content-panel-full-icon-enter"
+        src="/static/icons/panel-full.svg"
+        alt=""
+        aria-hidden="true"
+      >
+      <img
+        class="icon content-panel-full-icon-exit"
+        src="/static/icons/panel-normal.svg"
+        alt=""
+        aria-hidden="true"
+      >
+      <span class="sr-only">Toggle full-page article panel</span>
+    </button>
+    <button
+      class="content-panel-action-button content-panel-close-button"
+      type="button"
+      aria-label="Close article panel"
+      title="Close article panel"
+      data-content-panel-close="true"
+      hx-get="/items/{{.ID}}/compact"
+      hx-vals='{"selected_item_id":"item-{{.ID}}"}'
+      hx-target="#item-{{.ID}}"
+      hx-swap="outerHTML"
+    >
+      <img class="icon" src="/static/icons/panel-close.svg" alt="" aria-hidden="true">
+      <span class="sr-only">Close article panel</span>
+    </button>
+  </div>
+{{end}}
+
 {{define "item_content_panel"}}
   <aside class="content-panel is-open" id="content-panel" aria-live="polite">
+    {{template "item_content_panel_actions" .}}
     <article class="content-panel-article" data-item-id="{{.ID}}">
       <header class="content-panel-header">
         <a class="content-panel-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
@@ -32,6 +74,7 @@
 
 {{define "item_content_panel_oob"}}
   <aside class="content-panel is-open" id="content-panel" aria-live="polite" hx-swap-oob="outerHTML">
+    {{template "item_content_panel_actions" .}}
     <article class="content-panel-article" data-item-id="{{.ID}}">
       <header class="content-panel-header">
         <a class="content-panel-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>

@@ -1010,6 +1010,47 @@ func assertExpandedItemBody(t *testing.T, body string, itemID int64) {
 	)
 }
 
+func assertExpandedPanelActions(t *testing.T, body string, itemID int64) {
+	t.Helper()
+
+	assertContains(
+		t,
+		body,
+		`data-content-panel-full-toggle="true"`,
+		"expected full-page toggle action in expanded content panel",
+	)
+	assertContains(
+		t,
+		body,
+		`aria-pressed="false"`,
+		"expected full-page toggle to render with default unpressed state",
+	)
+	assertContains(
+		t,
+		body,
+		`data-content-panel-close="true"`,
+		"expected close action in expanded content panel",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-get="/items/%d/compact"`, itemID),
+		"expected close action to request compact row response",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-target="#item-%d"`, itemID),
+		"expected close action to target the expanded row",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-vals='{"selected_item_id":"item-%d"}'`, itemID),
+		"expected close action to preserve selected item id",
+	)
+}
+
 func assertItemArticleNotActive(t *testing.T, body string, itemID int64) {
 	t.Helper()
 
@@ -1461,6 +1502,38 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 	assertContentPanelOOBUpdate(t, body)
 }
 
+func TestItemExpandedRendersPanelActionButtons(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Expanded Actions Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Expanded Actions Item",
+		Link:            "http://example.com/expanded-actions",
+		GUID:            "expanded-actions",
+		Description:     "<p>Expanded actions summary</p>",
+		Content:         "<p>Expanded actions content</p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+
+	assertItemCount(t, items, expectedSingleItem)
+
+	itemID := items[firstItemIndex].ID
+	itemPath := fmt.Sprintf("/items/%d?selected_item_id=item-%d", itemID, itemID)
+	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expanded status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	assertExpandedPanelActions(t, body, itemID)
+}
+
 func TestItemExpandedCompactsCollapsedItemViaOOB(t *testing.T) {
 	t.Parallel()
 
@@ -1553,6 +1626,12 @@ func TestItemCompactClosesContentPanel(t *testing.T) {
 
 	body := rec.Body.String()
 	assertContentPanelOOBUpdate(t, body)
+	assertContains(
+		t,
+		body,
+		classIsActive,
+		"expected compact response to keep selected item active",
+	)
 	assertNotContains(
 		t,
 		body,

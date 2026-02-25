@@ -25,11 +25,16 @@
   };
   const feedPanelStorageKey = "pulse.feedPanelWidth";
   const contentPanelStorageKey = "pulse.contentPanelWidth";
+  const contentPanelFullPageClass = "is-content-panel-fullpage";
+  const contentPanelExpandLabel = "Expand article panel";
+  const contentPanelRestoreLabel = "Restore three-panel layout";
   const feedPanelMin = 180;
   const feedPanelMax = 460;
   const contentPanelMin = 360;
   const contentPanelMax = 760;
+  const expandedPanelScrollStep = 72;
 
+  const getApp = () => document.querySelector(".app");
   const getItemList = () => document.getElementById("item-list");
   const getFeedList = () => document.getElementById("feed-list");
   const getFeedPanelResizer = () => document.getElementById("feed-panel-resizer");
@@ -214,6 +219,14 @@
     return Array.from(list.querySelectorAll(".item-entry"));
   };
 
+  const getExpandedRow = () => {
+    const list = getItemList();
+    if (!list) {
+      return null;
+    }
+    return list.querySelector(".item-entry.is-expanded");
+  };
+
   const setActive = (row, options = {}) => {
     const list = getItemList();
     if (!list || !row) {
@@ -289,6 +302,42 @@
   };
 
   const itemHasContent = (row) => Boolean(row && row.dataset.hasContent === "true");
+
+  const hasExpandedItem = () => Boolean(getExpandedRow());
+
+  const isExpandedContextTarget = (target) => {
+    const resolvedTarget = target || document.activeElement;
+    if (!resolvedTarget || !resolvedTarget.closest) {
+      return false;
+    }
+
+    const contentPanel = getContentPanel();
+    if (contentPanel && contentPanel.contains(resolvedTarget)) {
+      return true;
+    }
+
+    const expandedRow = getExpandedRow();
+    if (expandedRow && expandedRow.contains(resolvedTarget)) {
+      return true;
+    }
+
+    const list = getItemList();
+    return Boolean(
+      list &&
+      expandedRow &&
+      expandedRow.classList.contains("is-active") &&
+      resolvedTarget === list
+    );
+  };
+
+  const scrollExpandedPanel = (delta) => {
+    const panel = getContentPanel();
+    if (panel && panel.classList.contains("is-open")) {
+      panel.scrollBy({ top: delta });
+      return true;
+    }
+    return false;
+  };
 
   const toggleExpanded = (expand) => {
     const current = ensureActive();
@@ -741,6 +790,39 @@
     return Boolean(panel && panel.classList.contains("is-open"));
   };
 
+  const isContentPanelFullPage = () => {
+    const app = getApp();
+    return Boolean(app && app.classList.contains(contentPanelFullPageClass));
+  };
+
+  const syncContentPanelToggleButtons = (isFullPage) => {
+    document
+      .querySelectorAll("button[data-content-panel-full-toggle='true']")
+      .forEach((button) => {
+        const label = isFullPage ? contentPanelRestoreLabel : contentPanelExpandLabel;
+        button.setAttribute("aria-pressed", isFullPage ? "true" : "false");
+        button.setAttribute("aria-label", label);
+        button.title = label;
+      });
+  };
+
+  const setContentPanelFullPage = (isFullPage) => {
+    const app = getApp();
+    if (!app) {
+      return;
+    }
+    app.classList.toggle(contentPanelFullPageClass, isFullPage);
+    syncContentPanelToggleButtons(isFullPage);
+  };
+
+  const syncContentPanelMode = () => {
+    if (!isContentPanelOpen()) {
+      setContentPanelFullPage(false);
+      return;
+    }
+    syncContentPanelToggleButtons(isContentPanelFullPage());
+  };
+
   const clampContentPanelWidth = (width) =>
     Math.min(contentPanelMax, Math.max(contentPanelMin, Math.round(width)));
 
@@ -883,6 +965,25 @@
   });
 
   document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target || !target.closest) {
+      return;
+    }
+
+    const fullToggle = target.closest("button[data-content-panel-full-toggle='true']");
+    if (fullToggle) {
+      event.preventDefault();
+      setContentPanelFullPage(!isContentPanelFullPage());
+      return;
+    }
+
+    const closeButton = target.closest("button[data-content-panel-close='true']");
+    if (closeButton) {
+      setContentPanelFullPage(false);
+    }
+  });
+
+  document.addEventListener("click", (event) => {
     const feedButton = event.target.closest(".feed-link");
     if (!feedButton) {
       return;
@@ -1021,11 +1122,27 @@
       case "j":
       case "arrowdown":
         prevent();
+        if (
+          key === "arrowdown" &&
+          hasExpandedItem() &&
+          isExpandedContextTarget(event.target || document.activeElement)
+        ) {
+          scrollExpandedPanel(expandedPanelScrollStep);
+          break;
+        }
         moveActive(1);
         break;
       case "k":
       case "arrowup":
         prevent();
+        if (
+          key === "arrowup" &&
+          hasExpandedItem() &&
+          isExpandedContextTarget(event.target || document.activeElement)
+        ) {
+          scrollExpandedPanel(-expandedPanelScrollStep);
+          break;
+        }
         moveActive(-1);
         break;
       case "l":
@@ -1074,6 +1191,7 @@
     bindContentPanelResize();
     syncFeedPanelWidth();
     syncContentPanelWidth();
+    syncContentPanelMode();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     if (isFeedEditMode()) {
@@ -1094,6 +1212,7 @@
     bindContentPanelResize();
     syncFeedPanelWidth();
     syncContentPanelWidth();
+    syncContentPanelMode();
     syncTopbarShortcuts();
     syncFeedDeleteMarks();
     const swapTarget = event && event.detail ? event.detail.target : null;
