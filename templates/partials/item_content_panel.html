@@ -1,5 +1,5 @@
 {{define "item_content_empty"}}
-  <aside class="content-panel" id="content-panel" aria-live="polite">
+  <aside class="content-panel" id="content-panel" aria-live="polite" tabindex="-1">
     <section class="content-panel-empty">
       <h3>Open an item to read full content.</h3>
       <p>Expand any row with full content to view the article here.</p>
@@ -8,7 +8,7 @@
 {{end}}
 
 {{define "item_content_empty_oob"}}
-  <aside class="content-panel" id="content-panel" aria-live="polite" hx-swap-oob="outerHTML">
+  <aside class="content-panel" id="content-panel" aria-live="polite" tabindex="-1" hx-swap-oob="outerHTML">
     <section class="content-panel-empty">
       <h3>Open an item to read full content.</h3>
       <p>Expand any row with full content to view the article here.</p>
@@ -58,7 +58,7 @@
 {{end}}
 
 {{define "item_content_panel"}}
-  <aside class="content-panel is-open" id="content-panel" aria-live="polite">
+  <aside class="content-panel is-open" id="content-panel" aria-live="polite" tabindex="-1">
     {{template "item_content_panel_actions" .}}
     <article class="content-panel-article" data-item-id="{{.ID}}">
       <header class="content-panel-header">
@@ -73,7 +73,7 @@
 {{end}}
 
 {{define "item_content_panel_oob"}}
-  <aside class="content-panel is-open" id="content-panel" aria-live="polite" hx-swap-oob="outerHTML">
+  <aside class="content-panel is-open" id="content-panel" aria-live="polite" tabindex="-1" hx-swap-oob="outerHTML">
     {{template "item_content_panel_actions" .}}
     <article class="content-panel-article" data-item-id="{{.ID}}">
       <header class="content-panel-header">

@@ -4,6 +4,8 @@
   const state = {
     activeId: null,
     pendingReadShortcut: null,
+    panelFocus: "items",
+    pendingPanelFocus: null,
   };
   const feedDragState = {
     row: null,
@@ -272,6 +274,120 @@
     );
   };
 
+  const isDesktopLayout = () =>
+    !window.matchMedia("(max-width: 960px)").matches;
+
+  const isVisible = (element) =>
+    Boolean(element && element.getClientRects().length > 0);
+
+  const getFeedLinks = (options = {}) => {
+    const visibleOnly = Boolean(options.visibleOnly);
+    const feedList = getFeedList();
+    if (!feedList || isFeedEditMode()) {
+      return [];
+    }
+
+    const links = Array.from(feedList.querySelectorAll(".feed-link"));
+    if (!visibleOnly) {
+      return links;
+    }
+    return links.filter((link) => isVisible(link));
+  };
+
+  const getSelectedFeedButton = (options = {}) => {
+    const links = getFeedLinks({ visibleOnly: options.visibleOnly });
+    if (!links.length) {
+      return null;
+    }
+
+    const active = links.find((link) => link.classList.contains("active"));
+    if (active) {
+      return active;
+    }
+
+    const selectedFeedInput = getSelectedFeedInput();
+    const selectedFeedID = selectedFeedInput
+      ? selectedFeedInput.value.trim()
+      : "";
+    if (selectedFeedID) {
+      const selected = links.find((link) => link.dataset.feedId === selectedFeedID);
+      if (selected) {
+        return selected;
+      }
+    }
+
+    return links[0];
+  };
+
+  const panelFromTarget = (target) => {
+    const resolvedTarget = target || document.activeElement;
+    if (!resolvedTarget || !resolvedTarget.closest) {
+      return null;
+    }
+
+    const contentPanel = getContentPanel();
+    if (
+      contentPanel &&
+      contentPanel.classList.contains("is-open") &&
+      contentPanel.contains(resolvedTarget)
+    ) {
+      return "content";
+    }
+
+    const feedList = getFeedList();
+    if (
+      feedList &&
+      !isFeedEditMode() &&
+      feedList.contains(resolvedTarget) &&
+      resolvedTarget.closest(".feed-link")
+    ) {
+      return "feed";
+    }
+
+    const itemList = getItemList();
+    if (
+      itemList &&
+      (resolvedTarget === itemList ||
+        itemList.contains(resolvedTarget) ||
+        resolvedTarget.closest("#main-content"))
+    ) {
+      return "items";
+    }
+
+    return null;
+  };
+
+  const setPanelFocus = (panel) => {
+    if (panel) {
+      state.panelFocus = panel;
+    }
+  };
+
+  const resolvePanelFocus = (target) => {
+    const detected = panelFromTarget(target);
+    if (detected) {
+      setPanelFocus(detected);
+      return detected;
+    }
+
+    let panel = state.panelFocus || "items";
+    if (panel === "content" && !isContentPanelOpen()) {
+      panel = "items";
+    }
+    if (!isDesktopLayout() || isFeedEditMode()) {
+      panel = "items";
+    }
+    setPanelFocus(panel);
+    return panel;
+  };
+
+  const syncPanelFocusFromTarget = (target) => {
+    const detected = panelFromTarget(target);
+    if (detected) {
+      setPanelFocus(detected);
+    }
+  };
+
   const focusItemList = () => {
     const list = getItemList();
     if (!list) {
@@ -279,12 +395,14 @@
     }
     const active = document.activeElement;
     if (active === list || (active && list.contains(active))) {
+      setPanelFocus("items");
       return;
     }
     if (isTextEntryTarget(active)) {
       return;
     }
     list.focus({ preventScroll: true });
+    setPanelFocus("items");
   };
 
   const moveActive = (delta) => {
@@ -303,33 +421,6 @@
 
   const itemHasContent = (row) => Boolean(row && row.dataset.hasContent === "true");
 
-  const hasExpandedItem = () => Boolean(getExpandedRow());
-
-  const isExpandedContextTarget = (target) => {
-    const resolvedTarget = target || document.activeElement;
-    if (!resolvedTarget || !resolvedTarget.closest) {
-      return false;
-    }
-
-    const contentPanel = getContentPanel();
-    if (contentPanel && contentPanel.contains(resolvedTarget)) {
-      return true;
-    }
-
-    const expandedRow = getExpandedRow();
-    if (expandedRow && expandedRow.contains(resolvedTarget)) {
-      return true;
-    }
-
-    const list = getItemList();
-    return Boolean(
-      list &&
-      expandedRow &&
-      expandedRow.classList.contains("is-active") &&
-      resolvedTarget === list
-    );
-  };
-
   const scrollExpandedPanel = (delta) => {
     const panel = getContentPanel();
     if (panel && panel.classList.contains("is-open")) {
@@ -342,22 +433,74 @@
   const toggleExpanded = (expand) => {
     const current = ensureActive();
     if (!current) {
-      return;
+      return false;
     }
     const isExpanded = current.classList.contains("is-expanded");
     if (expand && !isExpanded) {
       if (!itemHasContent(current)) {
-        return;
+        return false;
       }
       current.click();
-      return;
+      return true;
     }
     if (!expand && isExpanded) {
       const toggle = current.querySelector("[data-item-compact='true']");
       if (toggle) {
         toggle.click();
+        return true;
       }
     }
+    return false;
+  };
+
+  const focusContentPanel = () => {
+    const panel = getContentPanel();
+    if (!panel || !panel.classList.contains("is-open")) {
+      return false;
+    }
+    panel.focus({ preventScroll: true });
+    setPanelFocus("content");
+    return true;
+  };
+
+  const collapseContentPanelToItems = () => {
+    const expandedRow = getExpandedRow();
+    if (!expandedRow) {
+      focusItemList();
+      return false;
+    }
+
+    setActive(expandedRow);
+    const compactToggle = expandedRow.querySelector("[data-item-compact='true']");
+    if (!compactToggle) {
+      focusItemList();
+      return false;
+    }
+
+    state.pendingPanelFocus = "items";
+    compactToggle.click();
+    return true;
+  };
+
+  const expandActiveToContentPanel = () => {
+    if (isContentPanelOpen()) {
+      return focusContentPanel();
+    }
+
+    const current = ensureActive();
+    if (!current) {
+      return false;
+    }
+    if (!itemHasContent(current)) {
+      return false;
+    }
+
+    state.pendingPanelFocus = "content";
+    const expanded = toggleExpanded(true);
+    if (!expanded) {
+      state.pendingPanelFocus = null;
+    }
+    return expanded;
   };
 
   const rowItemID = (row) => {
@@ -630,6 +773,130 @@
     if (selectedFeedInput && feedID) {
       selectedFeedInput.value = feedID;
     }
+  };
+
+  const focusFeedPanel = () => {
+    if (!isDesktopLayout() || isFeedEditMode()) {
+      return false;
+    }
+
+    const selectedFeed =
+      getSelectedFeedButton({ visibleOnly: true }) || getSelectedFeedButton();
+    if (!selectedFeed) {
+      return false;
+    }
+
+    setSelectedFeed(selectedFeed);
+    selectedFeed.focus({ preventScroll: true });
+    selectedFeed.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setPanelFocus("feed");
+    return true;
+  };
+
+  const moveSelectedFeed = (delta) => {
+    if (!isDesktopLayout() || isFeedEditMode()) {
+      return false;
+    }
+
+    const feedButtons = getFeedLinks({ visibleOnly: true });
+    if (!feedButtons.length) {
+      return false;
+    }
+
+    const current =
+      getSelectedFeedButton({ visibleOnly: true }) || feedButtons[0];
+    let index = feedButtons.indexOf(current);
+    if (index < 0) {
+      index = 0;
+    }
+    const nextIndex = Math.min(
+      feedButtons.length - 1,
+      Math.max(0, index + delta)
+    );
+    const next = feedButtons[nextIndex];
+    setSelectedFeed(next);
+    next.focus({ preventScroll: true });
+    next.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setPanelFocus("feed");
+    return true;
+  };
+
+  const openSelectedFeed = () => {
+    if (!isDesktopLayout() || isFeedEditMode()) {
+      return false;
+    }
+
+    const selectedFeed =
+      getSelectedFeedButton({ visibleOnly: true }) || getSelectedFeedButton();
+    if (!selectedFeed) {
+      return false;
+    }
+
+    setSelectedFeed(selectedFeed);
+    state.pendingPanelFocus = "items";
+    selectedFeed.click();
+    return true;
+  };
+
+  const moveWithinFocusedPanel = (delta, panel) => {
+    if (panel === "feed") {
+      return moveSelectedFeed(delta);
+    }
+    if (panel === "content") {
+      return scrollExpandedPanel(delta * expandedPanelScrollStep);
+    }
+    moveActive(delta);
+    return true;
+  };
+
+  const focusPanelAfterSwap = () => {
+    const pendingPanel = state.pendingPanelFocus;
+    if (pendingPanel === "content") {
+      if (focusContentPanel()) {
+        state.pendingPanelFocus = null;
+      } else {
+        deferFocusContentPanel();
+      }
+      return;
+    }
+    state.pendingPanelFocus = null;
+
+    if (pendingPanel === "feed" && focusFeedPanel()) {
+      return;
+    }
+    if (pendingPanel === "items") {
+      focusItemList();
+      return;
+    }
+
+    const panel = resolvePanelFocus();
+    if (panel === "feed" && focusFeedPanel()) {
+      return;
+    }
+    if (panel === "content" && focusContentPanel()) {
+      return;
+    }
+    focusItemList();
+  };
+
+  const deferFocusContentPanel = (remainingAttempts = 3) => {
+    if (state.pendingPanelFocus !== "content") {
+      return;
+    }
+    if (focusContentPanel()) {
+      state.pendingPanelFocus = null;
+      return;
+    }
+    if (remainingAttempts <= 0) {
+      return;
+    }
+
+    const retry = () => deferFocusContentPanel(remainingAttempts - 1);
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(retry);
+      return;
+    }
+    window.setTimeout(retry, 16);
   };
 
   const clampFeedPanelWidth = (width) =>
@@ -953,6 +1220,14 @@
     });
   };
 
+  document.addEventListener("focusin", (event) => {
+    syncPanelFocusFromTarget(event.target);
+  });
+
+  document.addEventListener("click", (event) => {
+    syncPanelFocusFromTarget(event.target);
+  });
+
   document.addEventListener("click", (event) => {
     const list = getItemList();
     if (!list) {
@@ -961,6 +1236,7 @@
     const row = event.target.closest(".item-entry");
     if (row && list.contains(row)) {
       setActive(row);
+      setPanelFocus("items");
     }
   });
 
@@ -989,6 +1265,7 @@
       return;
     }
     setSelectedFeed(feedButton);
+    setPanelFocus("feed");
   });
 
   document.addEventListener("click", (event) => {
@@ -1109,11 +1386,15 @@
     if (shouldIgnore(event)) {
       return;
     }
-    if (!getItemList()) {
+    if (!getItemList() && !getFeedLinks({ visibleOnly: true }).length) {
       return;
     }
 
     const key = event.key.toLowerCase();
+    const desktopPanelNavigationEnabled = isDesktopLayout() && !isFeedEditMode();
+    const panel = desktopPanelNavigationEnabled
+      ? resolvePanelFocus(event.target || document.activeElement)
+      : "items";
     const prevent = () => {
       event.preventDefault();
     };
@@ -1122,12 +1403,11 @@
       case "j":
       case "arrowdown":
         prevent();
-        if (
-          key === "arrowdown" &&
-          hasExpandedItem() &&
-          isExpandedContextTarget(event.target || document.activeElement)
-        ) {
-          scrollExpandedPanel(expandedPanelScrollStep);
+        if (desktopPanelNavigationEnabled) {
+          moveWithinFocusedPanel(1, panel);
+          break;
+        }
+        if (key === "arrowdown" && scrollExpandedPanel(expandedPanelScrollStep)) {
           break;
         }
         moveActive(1);
@@ -1135,12 +1415,11 @@
       case "k":
       case "arrowup":
         prevent();
-        if (
-          key === "arrowup" &&
-          hasExpandedItem() &&
-          isExpandedContextTarget(event.target || document.activeElement)
-        ) {
-          scrollExpandedPanel(-expandedPanelScrollStep);
+        if (desktopPanelNavigationEnabled) {
+          moveWithinFocusedPanel(-1, panel);
+          break;
+        }
+        if (key === "arrowup" && scrollExpandedPanel(-expandedPanelScrollStep)) {
           break;
         }
         moveActive(-1);
@@ -1148,11 +1427,31 @@
       case "l":
       case "arrowright":
         prevent();
+        if (desktopPanelNavigationEnabled) {
+          if (panel === "feed") {
+            openSelectedFeed();
+            break;
+          }
+          if (panel === "items") {
+            expandActiveToContentPanel();
+            break;
+          }
+          focusContentPanel();
+          break;
+        }
         toggleExpanded(true);
         break;
       case "h":
       case "arrowleft":
         prevent();
+        if (desktopPanelNavigationEnabled) {
+          if (panel === "content") {
+            collapseContentPanelToItems();
+            break;
+          }
+          focusFeedPanel();
+          break;
+        }
         toggleExpanded(false);
         break;
       case "o":
@@ -1198,8 +1497,13 @@
       focusFeedEditTitleInput();
       return;
     }
-    ensureActive();
-    focusItemList();
+    if (getItemList()) {
+      ensureActive();
+      focusItemList();
+    } else if (getFeedLinks({ visibleOnly: true }).length) {
+      focusFeedPanel();
+    }
+    state.pendingPanelFocus = null;
   });
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
@@ -1229,10 +1533,14 @@
       } else {
         ensureActive();
       }
-      focusItemList();
+      focusPanelAfterSwap();
     } else {
       state.activeId = null;
       state.pendingReadShortcut = null;
+      state.pendingPanelFocus = null;
+      if (getFeedLinks({ visibleOnly: true }).length) {
+        focusFeedPanel();
+      }
     }
   });
 

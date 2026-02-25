@@ -61,7 +61,90 @@ func TestAppJSIncludesContentPanelControlHandlers(t *testing.T) {
 	)
 }
 
-func TestAppJSArrowKeysSupportExpandedPanelScrolling(t *testing.T) {
+func TestAppJSKeyboardNavigationSupportsPanelFocusModel(t *testing.T) {
+	source := readAppJSSource(t)
+
+	assertSourceContains(
+		t,
+		source,
+		`panelFocus: "items",`,
+		"expected panel focus state default",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const moveWithinFocusedPanel = (delta, panel) => {",
+		"expected panel-aware vertical keyboard helper",
+	)
+	assertSourceContains(
+		t,
+		source,
+		`const desktopPanelNavigationEnabled = isDesktopLayout() && !isFeedEditMode();`,
+		"expected desktop-only panel navigation guard",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"openSelectedFeed();",
+		"expected right-key feed-panel activation branch",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"expandActiveToContentPanel();",
+		"expected right-key item-panel expansion branch",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"collapseContentPanelToItems();",
+		"expected left-key content-panel collapse branch",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"focusFeedPanel();",
+		"expected left-key item-panel focus-to-feed behavior",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"state.pendingPanelFocus = \"items\";",
+		"expected pending item-panel focus tracking after feed activation",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"state.pendingPanelFocus = \"content\";",
+		"expected pending content-panel focus tracking after expansion",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const deferFocusContentPanel = (remainingAttempts = 3) => {",
+		"expected deferred content-panel focus helper for swap timing",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"deferFocusContentPanel();",
+		"expected focus handoff retry when content panel is not ready on first swap",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"} else if (getFeedLinks({ visibleOnly: true }).length) {",
+		"expected feed-focus fallback when item list is absent on startup",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"focusFeedPanel();",
+		"expected feed panel focus handoff when item list is absent after swaps",
+	)
+}
+
+func TestAppJSKeyboardShortcutsPreserveReadOpenAndContentScroll(t *testing.T) {
 	source := readAppJSSource(t)
 
 	assertSourceContains(
@@ -73,25 +156,25 @@ func TestAppJSArrowKeysSupportExpandedPanelScrolling(t *testing.T) {
 	assertSourceContains(
 		t,
 		source,
-		"const isExpandedContextTarget = (target) => {",
-		"expected expanded context target helper",
+		"if (panel === \"content\") {",
+		"expected content-panel branch in panel-aware vertical movement",
 	)
 	assertSourceContains(
 		t,
 		source,
-		"hasExpandedItem() &&",
-		"expected expanded-item keyboard branch guard",
+		"return scrollExpandedPanel(delta * expandedPanelScrollStep);",
+		"expected content-panel vertical keys to scroll expanded panel",
 	)
 	assertSourceContains(
 		t,
 		source,
-		"scrollExpandedPanel(expandedPanelScrollStep);",
-		"expected ArrowDown expanded panel scrolling branch",
+		"openActiveLink();",
+		"expected open-article shortcut to remain available",
 	)
 	assertSourceContains(
 		t,
 		source,
-		"scrollExpandedPanel(-expandedPanelScrollStep);",
-		"expected ArrowUp expanded panel scrolling branch",
+		"toggleRead();",
+		"expected read-toggle shortcut to remain available",
 	)
 }

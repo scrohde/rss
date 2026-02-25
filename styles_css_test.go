@@ -87,3 +87,37 @@ func TestStylesReadingSurfaceScrollbarsAreVisible(t *testing.T) {
 		t.Fatal("expected visible scrollbar thumb styling")
 	}
 }
+
+func TestStylesReaderPanelsAvoidPersistentSeparators(t *testing.T) {
+	t.Parallel()
+
+	source := readStylesCSS(t)
+
+	if cssRuleContains(source, ".topbar", "border-bottom:") {
+		t.Fatal("expected topbar to avoid a bottom border separator")
+	}
+
+	if cssRuleContains(source, ".feed-panel", "border-right:") {
+		t.Fatal("expected feed panel to avoid a right border separator")
+	}
+
+	if !cssRuleContains(source, ".feed-panel-resizer::before", "opacity: 0;") {
+		t.Fatal("expected feed resizer line to be hidden until interaction")
+	}
+
+	if !cssRuleContains(source, ".content-panel-resizer::before", "opacity: 0;") {
+		t.Fatal("expected content resizer line to be hidden until interaction")
+	}
+
+	feedResizerActivePattern := `(?s)\.feed-panel-resizer:hover::before,\s*` +
+		`body\.is-resizing-feed-panel \.feed-panel-resizer::before\s*\{[^}]*opacity:\s*1;`
+	if !regexp.MustCompile(feedResizerActivePattern).MatchString(source) {
+		t.Fatal("expected feed resizer line to appear on hover")
+	}
+
+	contentResizerActivePattern := `(?s)\.content-panel-resizer:hover::before,\s*` +
+		`body\.is-resizing-content-panel \.content-panel-resizer::before\s*\{[^}]*opacity:\s*1;`
+	if !regexp.MustCompile(contentResizerActivePattern).MatchString(source) {
+		t.Fatal("expected content resizer line to appear on hover")
+	}
+}

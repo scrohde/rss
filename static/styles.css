@@ -45,7 +45,6 @@ body {
   align-items: center;
   padding: 6px 16px;
   background: var(--sidebar);
-  border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow);
   position: sticky;
   top: 0;
@@ -430,7 +429,6 @@ body {
 .feed-panel {
   padding: 24px 0 32px 28px;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
 }
 
 .main-panel {
@@ -477,10 +475,13 @@ body {
   width: 2px;
   border-radius: 999px;
   background: linear-gradient(to bottom, transparent, rgba(15, 118, 110, 0.28), transparent);
+  opacity: 0;
+  transition: opacity 0.18s ease, background 0.18s ease;
 }
 
 .feed-panel-resizer:hover::before,
 body.is-resizing-feed-panel .feed-panel-resizer::before {
+  opacity: 1;
   background: linear-gradient(to bottom, transparent, rgba(15, 118, 110, 0.56), transparent);
 }
 
@@ -504,6 +505,8 @@ body.is-resizing-feed-panel .feed-panel-resizer::before {
   width: 2px;
   border-radius: 999px;
   background: linear-gradient(to bottom, transparent, rgba(31, 41, 55, 0.24), transparent);
+  opacity: 0;
+  transition: opacity 0.18s ease, background 0.18s ease;
 }
 
 .app:has(#content-panel.is-open) .content-panel-resizer {
@@ -513,6 +516,7 @@ body.is-resizing-feed-panel .feed-panel-resizer::before {
 
 .content-panel-resizer:hover::before,
 body.is-resizing-content-panel .content-panel-resizer::before {
+  opacity: 1;
   background: linear-gradient(to bottom, transparent, rgba(31, 41, 55, 0.52), transparent);
 }
 
