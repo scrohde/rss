@@ -27,9 +27,9 @@
   };
   const feedPanelStorageKey = "pulse.feedPanelWidth";
   const contentPanelStorageKey = "pulse.contentPanelWidth";
-  const contentPanelFullPageClass = "is-content-panel-fullpage";
-  const contentPanelExpandLabel = "Expand article panel";
-  const contentPanelRestoreLabel = "Restore three-panel layout";
+  const contentPanelFloatingClass = "is-content-panel-floating";
+  const contentPanelExpandLabel = "Float article panel";
+  const contentPanelRestoreLabel = "Restore docked panel";
   const feedPanelMin = 180;
   const feedPanelMax = 460;
   const contentPanelMin = 360;
@@ -1057,37 +1057,50 @@
     return Boolean(panel && panel.classList.contains("is-open"));
   };
 
-  const isContentPanelFullPage = () => {
+  const isContentPanelFloating = () => {
     const app = getApp();
-    return Boolean(app && app.classList.contains(contentPanelFullPageClass));
+    return Boolean(app && app.classList.contains(contentPanelFloatingClass));
   };
 
-  const syncContentPanelToggleButtons = (isFullPage) => {
+  const syncContentPanelToggleButtons = (isFloating) => {
     document
       .querySelectorAll("button[data-content-panel-full-toggle='true']")
       .forEach((button) => {
-        const label = isFullPage ? contentPanelRestoreLabel : contentPanelExpandLabel;
-        button.setAttribute("aria-pressed", isFullPage ? "true" : "false");
+        const label = isFloating ? contentPanelRestoreLabel : contentPanelExpandLabel;
+        button.setAttribute("aria-pressed", isFloating ? "true" : "false");
         button.setAttribute("aria-label", label);
         button.title = label;
       });
   };
 
-  const setContentPanelFullPage = (isFullPage) => {
+  const setContentPanelFloating = (isFloating) => {
     const app = getApp();
     if (!app) {
       return;
     }
-    app.classList.toggle(contentPanelFullPageClass, isFullPage);
-    syncContentPanelToggleButtons(isFullPage);
+    app.classList.toggle(contentPanelFloatingClass, isFloating);
+    syncContentPanelToggleButtons(isFloating);
+  };
+
+  const closeContentPanel = () => {
+    const panel = getContentPanel();
+    if (!panel || !panel.classList.contains("is-open")) {
+      return false;
+    }
+    const closeButton = panel.querySelector("button[data-content-panel-close='true']");
+    if (!closeButton || typeof closeButton.click !== "function") {
+      return false;
+    }
+    closeButton.click();
+    return true;
   };
 
   const syncContentPanelMode = () => {
     if (!isContentPanelOpen()) {
-      setContentPanelFullPage(false);
+      setContentPanelFloating(false);
       return;
     }
-    syncContentPanelToggleButtons(isContentPanelFullPage());
+    syncContentPanelToggleButtons(isContentPanelFloating());
   };
 
   const clampContentPanelWidth = (width) =>
@@ -1177,7 +1190,8 @@
       if (
         event.button !== 0 ||
         window.matchMedia("(max-width: 960px)").matches ||
-        !isContentPanelOpen()
+        !isContentPanelOpen() ||
+        isContentPanelFloating()
       ) {
         return;
       }
@@ -1224,6 +1238,24 @@
     syncPanelFocusFromTarget(event.target);
   });
 
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!isContentPanelOpen() || !isContentPanelFloating()) {
+        return;
+      }
+      const panel = getContentPanel();
+      const target = event.target;
+      if (!panel || !(target instanceof Node) || panel.contains(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      closeContentPanel();
+    },
+    true
+  );
+
   document.addEventListener("click", (event) => {
     syncPanelFocusFromTarget(event.target);
   });
@@ -1249,13 +1281,13 @@
     const fullToggle = target.closest("button[data-content-panel-full-toggle='true']");
     if (fullToggle) {
       event.preventDefault();
-      setContentPanelFullPage(!isContentPanelFullPage());
+      setContentPanelFloating(!isContentPanelFloating());
       return;
     }
 
     const closeButton = target.closest("button[data-content-panel-close='true']");
     if (closeButton) {
-      setContentPanelFullPage(false);
+      setContentPanelFloating(false);
     }
   });
 
@@ -1380,6 +1412,11 @@
       setTopbarShortcutsOpen(false);
       return;
     }
+    if (event.key === "Escape" && isContentPanelOpen() && isContentPanelFloating()) {
+      event.preventDefault();
+      closeContentPanel();
+      return;
+    }
     if (handleFeedEditModeKeydown(event)) {
       return;
     }
@@ -1459,6 +1496,16 @@
         openActiveLink();
         break;
       case "enter": {
+        if (
+          desktopPanelNavigationEnabled &&
+          panel === "content" &&
+          isContentPanelOpen() &&
+          !isContentPanelFloating()
+        ) {
+          prevent();
+          setContentPanelFloating(true);
+          break;
+        }
         const main = document.getElementById("main-content");
         if (
           main &&

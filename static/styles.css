@@ -15,6 +15,8 @@
   --content-panel-min: 360px;
   --content-panel-max: 760px;
   --content-panel-width: clamp(var(--content-panel-min), 42vw, var(--content-panel-max));
+  --content-panel-overlay-max: 860px;
+  --content-panel-reading-max: 68ch;
 }
 
 * {
@@ -358,6 +360,7 @@ body {
   flex: 1;
   gap: 0;
   min-height: 0;
+  position: relative;
   transition: grid-template-columns 0.26s ease;
 }
 
@@ -370,20 +373,27 @@ body {
     var(--content-panel-width);
 }
 
-.app.is-content-panel-fullpage:has(#content-panel.is-open) {
-  grid-template-columns: 0 0 0 0 minmax(0, 1fr);
+.app.is-content-panel-floating:has(#content-panel.is-open)::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(2px);
+  z-index: 40;
 }
 
-.app.is-content-panel-fullpage .feed-panel,
-.app.is-content-panel-fullpage .feed-panel-resizer,
-.app.is-content-panel-fullpage .main-panel,
-.app.is-content-panel-fullpage .content-panel-resizer {
+.app.is-content-panel-floating:has(#content-panel.is-open) {
+  grid-template-columns:
+    minmax(var(--feed-panel-min), var(--feed-panel-width))
+    10px
+    minmax(0, 1fr)
+    0
+    0;
+}
+
+.app.is-content-panel-floating .content-panel-resizer {
   opacity: 0;
   pointer-events: none;
-}
-
-.app.is-content-panel-fullpage #content-panel {
-  padding: 24px 20px 32px;
 }
 
 .feed-panel,
@@ -454,8 +464,29 @@ body {
   pointer-events: auto;
 }
 
+.app.is-content-panel-floating:has(#content-panel.is-open) #content-panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: min(94vw, var(--content-panel-overlay-max));
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: 18px 20px 24px;
+  border: 1px solid rgba(31, 41, 55, 0.16);
+  border-radius: 0;
+  background: rgba(248, 244, 234, 0.98);
+  box-shadow: 0 30px 72px rgba(15, 23, 42, 0.36);
+  transform: translate(-50%, 0);
+  z-index: 50;
+}
+
 .app:has(#content-panel.is-open) .main-panel {
   overflow-y: hidden;
+}
+
+.app.is-content-panel-floating:has(#content-panel.is-open) .main-panel {
+  overflow-y: auto;
 }
 
 .feed-panel-resizer {
@@ -1173,7 +1204,7 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   position: sticky;
   top: 8px;
   z-index: 2;
-  margin: 0 20px 10px 0;
+  margin: 0 0 10px;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -1227,7 +1258,9 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   border: none;
   border-radius: 0;
   background: transparent;
-  padding: 0 20px 0 24px;
+  max-width: var(--content-panel-reading-max);
+  margin: 0 auto;
+  padding: 0 4px;
 }
 
 .content-panel-empty h3 {
