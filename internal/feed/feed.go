@@ -22,12 +22,12 @@ import (
 
 const (
 	// RefreshInterval is the base interval between refresh attempts.
-	RefreshInterval = 2 * time.Hour
+	RefreshInterval = 30 * time.Minute
 	// RefreshLoopInterval controls how often the refresh loop runs.
 	RefreshLoopInterval = 30 * time.Second
 	// RefreshBatchSize is the max number of feeds processed per loop.
 	RefreshBatchSize        = 5
-	refreshBackoffMax       = 24 * time.Hour
+	refreshBackoffMax       = 12 * time.Hour
 	refreshJitterMin        = 0.01
 	refreshJitterMax        = 0.20
 	feedFetchTimeout        = 15 * time.Second

@@ -12,9 +12,10 @@ const (
 	backoffCountTwo   = 2
 	backoffCountThree = 3
 	backoffCountFour  = 4
+	backoffCountFive  = 5
 	backoffCountEight = 8
 	testBackoffFactor = 2
-	backoffCap        = 24 * time.Hour
+	backoffCap        = 12 * time.Hour
 	maxJitterFraction = 0.20
 	jitterSampleCount = 10
 )
@@ -41,6 +42,14 @@ func TestComputeBackoffInterval(t *testing.T) {
 		},
 		{
 			count: backoffCountFour,
+			want: RefreshInterval *
+				testBackoffFactor *
+				testBackoffFactor *
+				testBackoffFactor *
+				testBackoffFactor,
+		},
+		{
+			count: backoffCountFive,
 			want:  backoffCap,
 		},
 		{count: backoffCountEight, want: backoffCap},
