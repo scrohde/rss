@@ -394,16 +394,37 @@ body {
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+  -ms-overflow-style: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 41, 55, 0.42) transparent;
 }
 
 .feed-panel::-webkit-scrollbar,
 .main-panel::-webkit-scrollbar,
 #content-panel::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
+  width: 10px;
+  height: 10px;
+}
+
+.feed-panel::-webkit-scrollbar-track,
+.main-panel::-webkit-scrollbar-track,
+#content-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.feed-panel::-webkit-scrollbar-thumb,
+.main-panel::-webkit-scrollbar-thumb,
+#content-panel::-webkit-scrollbar-thumb {
+  background: rgba(31, 41, 55, 0.38);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.feed-panel::-webkit-scrollbar-thumb:hover,
+.main-panel::-webkit-scrollbar-thumb:hover,
+#content-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(31, 41, 55, 0.56);
 }
 
 .feed-panel {
@@ -414,12 +435,14 @@ body {
 
 .main-panel {
   padding: 24px 0 32px;
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.76);
 }
 
 #content-panel {
   padding: 24px 28px 32px 0;
   background: rgba(240, 235, 224, 0.92);
+  overflow-y: hidden;
   opacity: 0;
   transform: translateX(20px);
   pointer-events: none;
@@ -427,9 +450,14 @@ body {
 }
 
 #content-panel.is-open {
+  overflow-y: auto;
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
+}
+
+.app:has(#content-panel.is-open) .main-panel {
+  overflow-y: hidden;
 }
 
 .feed-panel-resizer {
