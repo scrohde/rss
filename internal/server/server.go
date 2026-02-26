@@ -250,6 +250,13 @@ func (a *App) subscribeAndStoreFeed(ctx context.Context, rawURL string) (int64, 
 
 	slog.Info("subscribe feed")
 
+	robotsErr := feed.CheckRobotsAllowed(ctx, feedURL)
+	if robotsErr != nil {
+		slog.Warn("subscribe blocked by robots policy", "feed_url", feedURL, "err", robotsErr)
+
+		return 0, fmt.Errorf("check robots policy: %w", robotsErr)
+	}
+
 	result, err := feed.Fetch(ctx, feedURL, "", "")
 	if err != nil {
 		slog.Error("subscribe fetch failed", "err", err)
@@ -821,10 +828,12 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refreshDisplay := "Never"
+	lastError := ""
 
 	for _, listedFeed := range feeds {
 		if listedFeed.ID == feedID {
 			refreshDisplay = listedFeed.LastRefreshDisplay
+			lastError = listedFeed.LastError
 
 			break
 		}
@@ -835,6 +844,7 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 	data.Banner = view.NewItemsData{FeedID: feedID, Count: count, SwapOOB: false}
 	data.Feeds = feeds
 	data.RefreshDisplay = refreshDisplay
+	data.LastError = lastError
 	data.SelectedFeedID = feedID
 	data.FeedEditMode = feedEditModeEnabled(r)
 	a.renderTemplate(w, "poll_response", data)
@@ -1229,78 +1239,130 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	a.renderTemplate(w, "delete_feed_response", data)
 }
 
-//nolint:cyclop,funlen,gocognit,gosec,revive // Validates proxy request and forwards vetted image responses.
 func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	target, ok := a.parseImageProxyTarget(w, r)
+	if !ok {
+		return
+	}
+
+	resp, ok := a.fetchImageProxyResponse(w, r, target)
+	if !ok {
+		return
+	}
+
+	defer closeImageProxyBody(resp)
+
+	if !isSuccessfulImageProxyResponse(resp, target) {
+		redirectToOriginalImage(w, r, target)
+
+		return
+	}
+
+	result, ok := readImageProxyPayload(resp)
+	if !ok {
+		redirectToOriginalImage(w, r, target)
+
+		return
+	}
+
+	writeImageProxyHeaders(w, resp, result.ContentType, len(result.Body))
+
+	//nolint:gosec // Content is validated as image bytes and served as-is from trusted proxy flow.
+	_, writeErr := w.Write(result.Body)
+	if writeErr != nil {
+		log.Printf("image proxy copy: %v", writeErr)
+	}
+}
+
+type imageProxyPayload struct {
+	ContentType string
+	Body        []byte
+}
+
+func (a *App) parseImageProxyTarget(w http.ResponseWriter, r *http.Request) (*url.URL, bool) {
 	raw := r.URL.Query().Get("url")
 	if raw == "" {
 		http.Error(w, "missing url", http.StatusBadRequest)
 
-		return
+		return nil, false
 	}
 
 	if len(raw) > content.MaxImageProxyURLLength {
 		http.Error(w, "url too long", http.StatusRequestURITooLong)
 
-		return
+		return nil, false
 	}
 
 	target, err := url.Parse(raw)
 	if err != nil || !content.IsAllowedResolvedProxyURL(r.Context(), target, a.imageProxyLookup) {
 		http.Error(w, "invalid url", http.StatusBadRequest)
 
-		return
+		return nil, false
 	}
 
+	return target, true
+}
+
+//nolint:gosec // Request target was validated by parseImageProxyTarget + proxy policy checks.
+func (a *App) fetchImageProxyResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	target *url.URL,
+) (*http.Response, bool) {
 	req, err := content.BuildImageProxyRequest(r.Context(), target)
 	if err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 
-		return
+		return nil, false
 	}
 
 	resp, err := a.imageProxyClient.Do(req)
 	if err != nil {
 		redirectToOriginalImage(w, r, target)
 
-		return
+		return nil, false
 	}
 
-	defer func() {
-		closeErr := resp.Body.Close()
-		if closeErr != nil {
-			log.Printf("image proxy close body: %v", closeErr)
-		}
-	}()
+	return resp, true
+}
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		slog.Debug(
-			"image proxy upstream non-2xx",
-			"status", resp.StatusCode,
-			"target_host", target.Host,
-			"target_path", target.EscapedPath(),
-		)
+func closeImageProxyBody(resp *http.Response) {
+	closeErr := resp.Body.Close()
+	if closeErr != nil {
+		log.Printf("image proxy close body: %v", closeErr)
+	}
+}
 
-		redirectToOriginalImage(w, r, target)
-
-		return
+//nolint:gosec // Logged values are validated URL host/path for operational debugging.
+func isSuccessfulImageProxyResponse(resp *http.Response, target *url.URL) bool {
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		return true
 	}
 
+	slog.Debug(
+		"image proxy upstream non-2xx",
+		"status", resp.StatusCode,
+		"target_host", target.Host,
+		"target_path", target.EscapedPath(),
+	)
+
+	return false
+}
+
+//nolint:revive // Guard-heavy validation keeps proxy byte checks explicit and testable.
+func readImageProxyPayload(resp *http.Response) (imageProxyPayload, bool) {
 	reader := bufio.NewReader(resp.Body)
 
 	sniff, err := reader.Peek(imageProxySniffBytes)
 	if err != nil && !errors.Is(err, io.EOF) {
-		redirectToOriginalImage(w, r, target)
-
-		return
+		return emptyImageProxyPayload(), false
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" || !strings.HasPrefix(strings.ToLower(contentType), "image/") {
 		detected := http.DetectContentType(sniff)
 		if !strings.HasPrefix(detected, "image/") {
-			redirectToOriginalImage(w, r, target)
-
-			return
+			return emptyImageProxyPayload(), false
 		}
 
 		contentType = detected
@@ -1308,17 +1370,32 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(io.LimitReader(reader, content.ImageProxyMaxBodyBytes+1))
 	if err != nil {
-		redirectToOriginalImage(w, r, target)
-
-		return
+		return emptyImageProxyPayload(), false
 	}
 
 	if int64(len(body)) > content.ImageProxyMaxBodyBytes {
-		redirectToOriginalImage(w, r, target)
-
-		return
+		return emptyImageProxyPayload(), false
 	}
 
+	return imageProxyPayload{
+		ContentType: contentType,
+		Body:        body,
+	}, true
+}
+
+func emptyImageProxyPayload() imageProxyPayload {
+	return imageProxyPayload{
+		ContentType: "",
+		Body:        nil,
+	}
+}
+
+func writeImageProxyHeaders(
+	w http.ResponseWriter,
+	resp *http.Response,
+	contentType string,
+	contentLength int,
+) {
 	w.Header().Set("Content-Type", contentType)
 
 	if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" {
@@ -1335,12 +1412,7 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Last-Modified", modified)
 	}
 
-	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-
-	_, writeErr := w.Write(body)
-	if writeErr != nil {
-		log.Printf("image proxy copy: %v", writeErr)
-	}
+	w.Header().Set("Content-Length", strconv.Itoa(contentLength))
 }
 
 func redirectToOriginalImage(w http.ResponseWriter, r *http.Request, target *url.URL) {

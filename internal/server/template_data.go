@@ -28,6 +28,7 @@ type newItemsResponseData struct {
 
 type pollResponseData struct {
 	RefreshDisplay string
+	LastError      string
 	Feeds          []view.FeedView
 	Banner         view.NewItemsData
 	SelectedFeedID int64

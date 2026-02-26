@@ -18,9 +18,7 @@
               <img class="icon" src="/static/icons/refresh-circle.svg" alt="" aria-hidden="true">
             </button>
           </span>
-          {{if .Feed.LastError}}
-            <span class="items-error">Last error: {{.Feed.LastError}}</span>
-          {{end}}
+          <span id="item-last-error" class="items-error">{{if .Feed.LastError}}Last error: {{.Feed.LastError}}{{end}}</span>
         </div>
       </div>
       <div class="item-actions">

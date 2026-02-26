@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,10 +22,13 @@ var errUnexpectedFeedURL = errors.New("unexpected feed url")
 
 // FeedServer serves mutable feed XML for HTTP-based tests.
 type FeedServer struct {
-	headers    http.Header
-	feedXML    string
-	statusCode int
-	mu         sync.RWMutex
+	headers        http.Header
+	feedXML        string
+	robotsTxt      string
+	statusCode     int
+	feedRequests   int
+	robotsRequests int
+	mu             sync.RWMutex
 }
 
 var (
@@ -37,12 +41,22 @@ var (
 	feedRegistryMu sync.RWMutex
 	//nolint:gochecknoglobals // Shared registry maps synthetic feed URLs to test servers.
 	feedRegistry = make(map[string]*FeedServer)
+	//nolint:gochecknoglobals // Shared registry maps synthetic hosts to test servers for robots lookups.
+	feedHostRegistry = make(map[string]*FeedServer)
+	//nolint:gochecknoglobals // Monotonic counter ensures synthetic hosts stay unique in parallel tests.
+	feedServerCounter uint64
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+type feedLookup struct {
+	server        *FeedServer
+	robotsRequest bool
+	found         bool
 }
 
 // NewFeedServer returns an in-memory feed server and its synthetic feed URL.
@@ -55,19 +69,23 @@ func NewFeedServer(t *testing.T, feedXML string) (server *FeedServer, feedURL st
 
 	server = new(FeedServer)
 	server.feedXML = feedXML
+	server.robotsTxt = "User-agent: *\nAllow: /\n"
 	server.statusCode = http.StatusOK
 	server.headers = http.Header{
 		"Content-Type": []string{"application/rss+xml"},
 	}
-	feedURL = "https://feed.test/" + url.PathEscape(t.Name())
+	host := fmt.Sprintf("feed-%d.feed.test", atomic.AddUint64(&feedServerCounter, 1))
+	feedURL = "https://" + host + "/" + url.PathEscape(t.Name())
 
 	feedRegistryMu.Lock()
 	feedRegistry[feedURL] = server
+	feedHostRegistry[host] = server
 	feedRegistryMu.Unlock()
 
 	t.Cleanup(func() {
 		feedRegistryMu.Lock()
 		delete(feedRegistry, feedURL)
+		delete(feedHostRegistry, host)
 		feedRegistryMu.Unlock()
 	})
 
@@ -80,6 +98,14 @@ func (f *FeedServer) SetFeedXML(xml string) {
 	defer f.mu.Unlock()
 
 	f.feedXML = xml
+}
+
+// SetRobotsTxt configures robots.txt content for this synthetic feed host.
+func (f *FeedServer) SetRobotsTxt(robotsTxt string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.robotsTxt = robotsTxt
 }
 
 // SetHTTPResponse configures the response status and headers for this feed URL.
@@ -103,43 +129,104 @@ func (f *FeedServer) SetHTTPResponse(statusCode int, headers http.Header) {
 	}
 }
 
+// FeedRequestCount returns the number of feed URL requests served.
+func (f *FeedServer) FeedRequestCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	return f.feedRequests
+}
+
+// RobotsRequestCount returns the number of robots.txt requests served.
+func (f *FeedServer) RobotsRequestCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	return f.robotsRequests
+}
+
 func installFeedTransport() {
 	feedTransportOnce.Do(func() {
 		feedTransportBase = http.DefaultTransport
-		http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			server, ok := lookupFeedServer(req.URL.String())
-			if ok {
-				return buildFeedResponse(req, server), nil
-			}
-
-			if strings.EqualFold(req.URL.Hostname(), "feed.test") {
-				return nil, fmt.Errorf(
-					"%w: %s",
-					errUnexpectedFeedURL,
-					req.URL.String(),
-				)
-			}
-
-			return feedTransportBase.RoundTrip(req)
-		})
+		http.DefaultTransport = roundTripFunc(feedTransportRoundTrip)
 	})
 }
 
-func lookupFeedServer(feedURL string) (*FeedServer, bool) {
+func feedTransportRoundTrip(req *http.Request) (*http.Response, error) {
+	resp, handled := syntheticFeedResponse(req)
+	if handled {
+		return resp, nil
+	}
+
+	if isSyntheticFeedHost(req.URL.Hostname()) {
+		return nil, fmt.Errorf(
+			"%w: %s",
+			errUnexpectedFeedURL,
+			req.URL.String(),
+		)
+	}
+
+	resp, err := feedTransportBase.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("base transport round trip: %w", err)
+	}
+
+	return resp, nil
+}
+
+func syntheticFeedResponse(req *http.Request) (*http.Response, bool) {
+	lookup := lookupFeedServer(req.URL)
+	if !lookup.found {
+		return nil, false
+	}
+
+	if lookup.robotsRequest {
+		return buildRobotsResponseForServer(req, lookup.server), true
+	}
+
+	return buildFeedResponse(req, lookup.server), true
+}
+
+func lookupFeedServer(reqURL *url.URL) feedLookup {
 	feedRegistryMu.RLock()
 	defer feedRegistryMu.RUnlock()
 
-	server, ok := feedRegistry[feedURL]
+	server, ok := feedRegistry[reqURL.String()]
+	if ok {
+		return feedLookup{
+			server:        server,
+			robotsRequest: false,
+			found:         true,
+		}
+	}
 
-	return server, ok
+	if reqURL.Path == "/robots.txt" {
+		host := strings.ToLower(reqURL.Hostname())
+
+		server, ok = feedHostRegistry[host]
+		if ok {
+			return feedLookup{
+				server:        server,
+				robotsRequest: true,
+				found:         true,
+			}
+		}
+	}
+
+	return feedLookup{
+		server:        nil,
+		robotsRequest: false,
+		found:         false,
+	}
 }
 
 func buildFeedResponse(req *http.Request, server *FeedServer) *http.Response {
-	server.mu.RLock()
+	server.mu.Lock()
+	server.feedRequests++
 	feedXML := server.feedXML
 	statusCode := server.statusCode
 	headers := cloneHeaders(server.headers)
-	server.mu.RUnlock()
+	server.mu.Unlock()
 
 	statusCode, headers = normalizeFeedResponse(statusCode, headers)
 
@@ -151,6 +238,38 @@ func buildFeedResponse(req *http.Request, server *FeedServer) *http.Response {
 	resp.Request = req
 
 	return resp
+}
+
+func buildRobotsResponseForServer(req *http.Request, server *FeedServer) *http.Response {
+	server.mu.Lock()
+	server.robotsRequests++
+	robotsTxt := server.robotsTxt
+	server.mu.Unlock()
+
+	return buildRobotsResponse(req, robotsTxt)
+}
+
+func buildRobotsResponse(req *http.Request, robotsTxt string) *http.Response {
+	header := make(http.Header)
+	header.Set("Content-Type", "text/plain")
+
+	resp := new(http.Response)
+	resp.StatusCode = http.StatusOK
+	resp.Status = fmt.Sprintf("%d %s", http.StatusOK, http.StatusText(http.StatusOK))
+	resp.Header = header
+	resp.Body = io.NopCloser(strings.NewReader(robotsTxt))
+	resp.Request = req
+
+	return resp
+}
+
+func isSyntheticFeedHost(host string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(host))
+	if normalized == "feed.test" {
+		return true
+	}
+
+	return strings.HasSuffix(normalized, ".feed.test")
 }
 
 func normalizeFeedResponse(statusCode int, headers http.Header) (int, http.Header) {

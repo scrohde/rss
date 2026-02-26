@@ -26,24 +26,27 @@ const (
 	// RefreshLoopInterval controls how often the refresh loop runs.
 	RefreshLoopInterval = 30 * time.Second
 	// RefreshBatchSize is the max number of feeds processed per loop.
-	RefreshBatchSize        = 5
-	refreshBackoffMax       = 12 * time.Hour
-	refreshJitterMin        = 0.01
-	refreshJitterMax        = 0.20
-	feedFetchTimeout        = 15 * time.Second
-	maxErrorLength          = 300
-	randomFallback          = 0.5
-	countReset              = 0
-	countStep               = 1
-	backoffMultiplier       = 2
-	jitterNeutral           = 1
-	byteIndexFirst          = 0
-	randomBitMask     uint8 = 1
-	randomBitFallback       = randomBitMask
-	zeroFeedID        int64 = 0
-	logFieldFeedID          = "feed_id"
-	logFieldFeedURL         = "feed_url"
-	logFieldErr             = "err"
+	RefreshBatchSize             = 5
+	refreshBackoffMax            = 12 * time.Hour
+	refreshJitterMin             = 0.01
+	refreshJitterMax             = 0.20
+	feedFetchTimeout             = 15 * time.Second
+	maxErrorLength               = 300
+	randomFallback               = 0.5
+	countReset                   = 0
+	countStep                    = 1
+	backoffMultiplier            = 2
+	jitterNeutral                = 1
+	byteIndexFirst               = 0
+	randomBitMask          uint8 = 1
+	randomBitFallback            = randomBitMask
+	zeroFeedID             int64 = 0
+	feedUserAgent                = "PulseRSS/1.0"
+	logFieldFeedID               = "feed_id"
+	logFieldFeedURL              = "feed_url"
+	logFieldErr                  = "err"
+	logFieldSkipReason           = "skip_reason"
+	skipReasonRobotsPolicy       = "robots_policy"
 )
 
 var (
@@ -51,6 +54,7 @@ var (
 	errFeedURLInvalid        = errors.New("feed URL looks invalid")
 	errFeedReturnedNoContent = errors.New("feed returned no content")
 	errUnexpectedFeedStatus  = errors.New("unexpected status from feed")
+	errFeedBlockedByRobots   = errors.New("feed blocked by robots policy")
 	errRefreshMetaNil        = errors.New("refresh meta is nil")
 )
 
@@ -129,11 +133,10 @@ func Fetch(ctx context.Context, feedURL, etag, lastModified string) (*FetchResul
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "PulseRSS/1.0")
+	req.Header.Set("User-Agent", feedUserAgent)
 	setConditionalHeaders(req, etag, lastModified)
 
-	client := new(http.Client)
-	client.Timeout = feedFetchTimeout
+	client := newFeedHTTPClient()
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -252,10 +255,53 @@ func Refresh(ctx context.Context, db *sql.DB, feedID int64) (int64, error) {
 		return zeroFeedID, err
 	}
 
+	checkedAt := time.Now().UTC()
+
+	robotsResult, robotsErr := checkRobotsPolicy(ctx, feedURL)
+	if robotsErr != nil {
+		slog.Warn(
+			"robots policy check failed",
+			logFieldFeedID,
+			feedID,
+			logFieldFeedURL,
+			feedURL,
+			logFieldErr,
+			robotsErr,
+		)
+	}
+
+	if robotsResult.BlockedErr != nil {
+		meta := RefreshMeta{
+			LastCheckedAt:  checkedAt,
+			NextRefreshAt:  time.Time{},
+			ETag:           "",
+			LastModified:   "",
+			LastError:      truncateString(robotsResult.BlockedErr.Error()),
+			UnchangedCount: cache.UnchangedCount + countStep,
+		}
+		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
+		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
+		slog.Warn(
+			"refresh skipped by robots policy",
+			logFieldFeedID,
+			feedID,
+			logFieldFeedURL,
+			feedURL,
+			logFieldSkipReason,
+			skipReasonRobotsPolicy,
+			"robots_url",
+			robotsResult.BlockedErr.RobotsURL,
+			"disallow_rule",
+			robotsResult.BlockedErr.DisallowRule,
+		)
+
+		return zeroFeedID, robotsResult.BlockedErr
+	}
+
 	start := time.Now()
 	result, err := Fetch(ctx, feedURL, cache.ETag, cache.LastModified)
 	duration := time.Since(start).Milliseconds()
-	checkedAt := time.Now().UTC()
+	checkedAt = time.Now().UTC()
 
 	var meta RefreshMeta
 
@@ -545,6 +591,13 @@ func saveRefreshMetaBestEffort(ctx context.Context, db *sql.DB, feedID int64, me
 			err,
 		)
 	}
+}
+
+func newFeedHTTPClient() *http.Client {
+	client := new(http.Client)
+	client.Timeout = feedFetchTimeout
+
+	return client
 }
 
 func randomFloat64() float64 {

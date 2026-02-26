@@ -991,6 +991,10 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   font-weight: 600;
 }
 
+.items-error:empty {
+  display: none;
+}
+
 .item-list {
   display: flex;
   flex-direction: column;

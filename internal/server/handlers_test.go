@@ -1209,6 +1209,48 @@ func TestSubscribeAndList(t *testing.T) {
 	}
 }
 
+func TestSubscribeBlockedByRobotsPolicy(t *testing.T) {
+	t.Parallel()
+
+	items := subscribeFeedItems(time.Now())
+	feedServer, feedURL := testutil.NewFeedServer(t, testutil.RSSXML("Test Feed", items))
+	feedServer.SetRobotsTxt("User-agent: *\nDisallow: /\n")
+
+	app := newTestApp(t)
+
+	form := url.Values{}
+	form.Set("url", feedURL)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/feeds",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set(headerContentType, formURLEncoded)
+
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	assertContains(
+		t,
+		rec.Body.String(),
+		"Polling blocked by robots.txt",
+		"expected robots block message in subscribe response",
+	)
+
+	feeds, err := store.ListFeeds(context.Background(), app.db)
+	if err != nil {
+		t.Fatalf(errStoreListFeeds, err)
+	}
+
+	if len(feeds) != 0 {
+		t.Fatalf("expected 0 feeds when subscription is blocked, got %d", len(feeds))
+	}
+}
+
 func TestListFeedsUnreadCount(t *testing.T) {
 	t.Parallel()
 
@@ -1834,6 +1876,40 @@ func TestManualFeedRefresh(t *testing.T) {
 	assertItemCount(t, items, expectedTwoItems)
 }
 
+func TestManualFeedRefreshWhenRobotsBlocksFeed(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	feedServer, feedURL := testutil.NewFeedServer(t, manualRefreshInitialXML(base))
+	feedServer.SetRobotsTxt("User-agent: *\nDisallow: /\n")
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(
+		context.Background(),
+		app.db,
+		feedURL,
+		manualRefreshTitle,
+	)
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	rec := postRequest(
+		app,
+		fmt.Sprintf("/feeds/%d/refresh", feedID),
+	)
+	assertResponseCode(t, rec, "manual refresh blocked status")
+	assertContains(
+		t,
+		rec.Body.String(),
+		"Polling blocked by robots.txt",
+		"expected robots block message in manual refresh response",
+	)
+
+	if feedServer.FeedRequestCount() != 0 {
+		t.Fatalf("expected feed polling to be skipped, got %d feed requests", feedServer.FeedRequestCount())
+	}
+}
+
 type pulseFeedXML struct {
 	initial string
 	updated string
@@ -2162,6 +2238,12 @@ func assertInitialPollBanner(t *testing.T, body string) {
 		`id="item-last-refresh"`,
 		"expected last refresh OOB update",
 	)
+	assertContains(
+		t,
+		body,
+		`id="item-last-error"`,
+		"expected last error OOB update",
+	)
 	assertContains(t, body, `feed-count">2`, "expected unread count to be 2")
 }
 
@@ -2255,6 +2337,12 @@ func TestPollingInFeedEditModeDoesNotSwapFeedList(t *testing.T) {
 		body,
 		`id="item-last-refresh"`,
 		"expected last refresh OOB update",
+	)
+	assertContains(
+		t,
+		body,
+		`id="item-last-error"`,
+		"expected last error OOB update",
 	)
 }
 

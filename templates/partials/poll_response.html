@@ -1,6 +1,7 @@
 {{define "poll_response"}}
   {{template "new_items_banner" .Banner}}
   <span id="item-last-refresh" hx-swap-oob="innerHTML">Last refresh: {{.RefreshDisplay}}</span>
+  <span id="item-last-error" class="items-error" hx-swap-oob="innerHTML">{{if .LastError}}Last error: {{.LastError}}{{end}}</span>
   {{if not .FeedEditMode}}
     <div id="feed-list" hx-swap-oob="innerHTML">
       {{template "feed_list" .}}
