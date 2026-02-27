@@ -38,6 +38,13 @@
 
   const getApp = () => document.querySelector(".app");
   const getItemList = () => document.getElementById("item-list");
+  const getDisplayedFeedID = () => {
+    const list = getItemList();
+    if (!list) {
+      return "";
+    }
+    return (list.dataset.feedId || "").trim();
+  };
   const getFeedList = () => document.getElementById("feed-list");
   const getFeedPanelResizer = () => document.getElementById("feed-panel-resizer");
   const getContentPanelResizer = () => document.getElementById("content-panel-resizer");
@@ -887,6 +894,17 @@
     }
   };
 
+  const requestFeedItems = (feedButton, pendingPanelFocus) => {
+    if (!feedButton || typeof feedButton.click !== "function") {
+      return false;
+    }
+    if (pendingPanelFocus) {
+      state.pendingPanelFocus = pendingPanelFocus;
+    }
+    feedButton.click();
+    return true;
+  };
+
   const focusFeedPanel = () => {
     if (!isDesktopLayout() || isFeedEditMode()) {
       return false;
@@ -902,6 +920,9 @@
     selectedFeed.focus({ preventScroll: true });
     selectedFeed.scrollIntoView({ block: "nearest", behavior: "smooth" });
     setPanelFocus("feed");
+    if (!getItemList()) {
+      requestFeedItems(selectedFeed, "feed");
+    }
     return true;
   };
 
@@ -926,10 +947,14 @@
       Math.max(0, index + delta)
     );
     const next = feedButtons[nextIndex];
+    const selectionChanged = next !== current;
     setSelectedFeed(next);
     next.focus({ preventScroll: true });
     next.scrollIntoView({ block: "nearest", behavior: "smooth" });
     setPanelFocus("feed");
+    if (selectionChanged) {
+      requestFeedItems(next, "feed");
+    }
     return true;
   };
 
@@ -944,10 +969,13 @@
       return false;
     }
 
+    const selectedFeedID = (selectedFeed.dataset.feedId || "").trim();
     setSelectedFeed(selectedFeed);
-    state.pendingPanelFocus = "items";
-    selectedFeed.click();
-    return true;
+    if (getItemList() && selectedFeedID && getDisplayedFeedID() === selectedFeedID) {
+      focusItemList();
+      return true;
+    }
+    return requestFeedItems(selectedFeed, "items");
   };
 
   const moveWithinFocusedPanel = (delta, panel) => {

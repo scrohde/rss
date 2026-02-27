@@ -41,7 +41,7 @@
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
     <div class="poller" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="every 60s" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
-    <div class="item-list" id="item-list" tabindex="-1">
+    <div class="item-list" id="item-list" tabindex="-1" data-feed-id="{{.Feed.ID}}">
       {{range .Items}}
         {{template "item_compact" .}}
       {{else}}

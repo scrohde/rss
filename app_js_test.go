@@ -144,6 +144,65 @@ func TestAppJSKeyboardNavigationSupportsPanelFocusModel(t *testing.T) {
 	)
 }
 
+func TestAppJSFeedSelectionAutoLoadsItems(t *testing.T) {
+	source := readAppJSSource(t)
+
+	assertSourceContains(
+		t,
+		source,
+		"const requestFeedItems = (feedButton, pendingPanelFocus) => {",
+		"expected helper for requesting feed items from selected feed buttons",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const getDisplayedFeedID = () => {",
+		"expected helper for reading the feed currently shown in the item list",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"if (!getItemList()) {",
+		"expected feed-panel focus logic to detect missing item list",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"requestFeedItems(selectedFeed, \"feed\");",
+		"expected selected feed to auto-load items when main list is empty",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const selectionChanged = next !== current;",
+		"expected keyboard feed movement to detect feed selection changes",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"requestFeedItems(next, \"feed\");",
+		"expected keyboard feed selection to auto-load items for the new feed",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"if (getItemList() && selectedFeedID && getDisplayedFeedID() === selectedFeedID) {",
+		"expected open-selected-feed path to skip reload when selected feed is already displayed",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"focusItemList();",
+		"expected same-feed open action to move focus to items while preserving selection",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"return requestFeedItems(selectedFeed, \"items\");",
+		"expected explicit feed open action to continue loading selected feed items",
+	)
+}
+
 func TestAppJSKeyboardShortcutsPreserveReadOpenAndContentScroll(t *testing.T) {
 	source := readAppJSSource(t)
 
