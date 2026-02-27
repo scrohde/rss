@@ -2,6 +2,7 @@ package content
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,7 +124,9 @@ func rewriteSummaryNode(node *html.Node, base *url.URL) bool {
 		return result.changed
 	}
 
-	return result.changed || rewriteSummaryChildren(node, base)
+	childrenChanged := rewriteSummaryChildren(node, base)
+
+	return result.changed || childrenChanged
 }
 
 func rewriteSummaryChildren(node *html.Node, base *url.URL) bool {
@@ -187,12 +190,29 @@ func sanitizeSummaryElement(node *html.Node) summarySanitizeResult {
 }
 
 func shouldDropSummaryElement(node *html.Node) bool {
+	if hasClassToken(node, "image-link-expand") {
+		return true
+	}
+
 	switch node.Data {
 	case "script", "object", "embed":
 		return true
 	default:
 		return false
 	}
+}
+
+func hasClassToken(node *html.Node, token string) bool {
+	if node == nil || token == "" {
+		return false
+	}
+
+	classes, found := attrValue(node, "class")
+	if !found {
+		return false
+	}
+
+	return slices.Contains(strings.Fields(classes), token)
 }
 
 func rewriteSummaryElement(node *html.Node, base *url.URL) bool {
@@ -543,16 +563,23 @@ func mergeRelTokens(tokens []string, existing map[string]bool, required []string
 func containsRewriteTargets(text string) bool {
 	lower := strings.ToLower(text)
 
-	return strings.Contains(lower, "<img") ||
-		strings.Contains(lower, "<source") ||
-		strings.Contains(lower, "<a") ||
-		strings.Contains(lower, "<iframe") ||
-		strings.Contains(lower, "<script") ||
-		strings.Contains(lower, "<style") ||
-		strings.Contains(lower, "<object") ||
-		strings.Contains(lower, "<embed") ||
-		strings.Contains(lower, "style=") ||
-		strings.Contains(lower, " on")
+	targets := [...]string{
+		"<img",
+		"<source",
+		"<a",
+		"<iframe",
+		"<script",
+		"<style",
+		"<object",
+		"<embed",
+		"image-link-expand",
+		"style=",
+		" on",
+	}
+
+	return slices.ContainsFunc(targets[:], func(target string) bool {
+		return strings.Contains(lower, target)
+	})
 }
 
 func rewriteAnchorURL(rawURL string, base *url.URL) (string, bool) {

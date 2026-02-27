@@ -189,6 +189,51 @@ func TestRewriteSummaryHTMLStripsInlineEventAttrs(t *testing.T) {
 	}
 }
 
+func TestRewriteSummaryHTMLDropsSubstackImageOverlayControls(t *testing.T) {
+	t.Parallel()
+
+	input := `<figure><a class="image-link image2 is-viewable-img" href="https://example.com/full">` +
+		`<div class="image2-inset"><picture><img src="https://example.com/image.jpg" alt="x"></picture></div>` +
+		`<div class="image-link-expand"><button class="restack-image">Restack</button>` +
+		`<button class="view-image">View image</button></div></a><figcaption>Caption with ` +
+		`<a href="https://example.com/more">source</a></figcaption></figure>`
+
+	output := RewriteSummaryHTML(input, "")
+
+	if strings.Contains(output, "image-link-expand") ||
+		strings.Contains(output, "restack-image") ||
+		strings.Contains(output, "view-image") {
+		t.Fatalf("expected Substack overlay controls removed, got %q", output)
+	}
+
+	if !strings.Contains(output, proxied("https://example.com/image.jpg")) {
+		t.Fatalf("expected image preserved and proxied, got %q", output)
+	}
+
+	if !strings.Contains(output, `href="https://example.com/full"`) {
+		t.Fatalf("expected outer image link preserved, got %q", output)
+	}
+
+	if !strings.Contains(output, "<figcaption>Caption with") {
+		t.Fatalf("expected figcaption preserved, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLDropsSubstackImageOverlayWithoutImages(t *testing.T) {
+	t.Parallel()
+
+	input := `<div class="image-link-expand"><button class="view-image">View image</button></div><p>after</p>`
+	output := RewriteSummaryHTML(input, "")
+
+	if strings.Contains(output, "image-link-expand") || strings.Contains(output, "view-image") {
+		t.Fatalf("expected Substack overlay controls removed, got %q", output)
+	}
+
+	if !strings.Contains(output, "<p>after</p>") {
+		t.Fatalf("expected surrounding content preserved, got %q", output)
+	}
+}
+
 func TestRewriteSummaryHTMLKeepsVideoEmbedsAndDropsScripts(t *testing.T) {
 	t.Parallel()
 
