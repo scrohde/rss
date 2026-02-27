@@ -1262,6 +1262,12 @@
 
   const syncContentPanelMode = () => {
     if (!isContentPanelOpen()) {
+      // Preserve floating mode across intermediate panel-close swaps while a
+      // content-panel reopen request is still pending.
+      if (state.pendingPanelFocus === "content" && isContentPanelFloating()) {
+        syncContentPanelToggleButtons(true);
+        return;
+      }
       setContentPanelFloating(false);
       return;
     }
