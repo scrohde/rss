@@ -4,6 +4,8 @@ package feed
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -128,6 +130,78 @@ func TestCheckRobotsAllowedUsesOneDayCache(t *testing.T) {
 
 	if feedServer.RobotsRequestCount() != 1 {
 		t.Fatalf("expected robots.txt to be fetched once due cache, got %d", feedServer.RobotsRequestCount())
+	}
+}
+
+func TestEvaluateRobotsResponseTreatsUnauthorizedAsNonBlocking(t *testing.T) {
+	t.Parallel()
+
+	assertRobotsResponseStatusIsNonBlocking(t, http.StatusUnauthorized)
+}
+
+func TestEvaluateRobotsResponseTreatsForbiddenAsNonBlocking(t *testing.T) {
+	t.Parallel()
+
+	assertRobotsResponseStatusIsNonBlocking(t, http.StatusForbidden)
+}
+
+func TestEvaluateRobotsCacheEntryTreatsUnauthorizedAsNonBlocking(t *testing.T) {
+	t.Parallel()
+
+	assertRobotsCacheStatusIsNonBlocking(t, http.StatusUnauthorized)
+}
+
+func TestEvaluateRobotsCacheEntryTreatsForbiddenAsNonBlocking(t *testing.T) {
+	t.Parallel()
+
+	assertRobotsCacheStatusIsNonBlocking(t, http.StatusForbidden)
+}
+
+func assertRobotsResponseStatusIsNonBlocking(t *testing.T, statusCode int) {
+	t.Helper()
+
+	feedURL := "https://example.com/feed"
+
+	parsedFeedURL, err := url.Parse(feedURL)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+
+	robotsURL := buildRobotsURL(parsedFeedURL)
+	resp := new(http.Response)
+	resp.StatusCode = statusCode
+	resp.Body = io.NopCloser(strings.NewReader("User-agent: *\nDisallow: /\n"))
+
+	result, entry, evalErr := evaluateRobotsResponse(resp, feedURL, robotsURL, parsedFeedURL)
+	if evalErr != nil {
+		t.Fatalf("evaluateRobotsResponse: %v", evalErr)
+	}
+
+	if result.BlockedErr != nil {
+		t.Fatalf("expected %d to be non-blocking, got %v", statusCode, result.BlockedErr)
+	}
+
+	if entry.StatusCode != statusCode {
+		t.Fatalf("expected cached status %d, got %d", statusCode, entry.StatusCode)
+	}
+}
+
+func assertRobotsCacheStatusIsNonBlocking(t *testing.T, statusCode int) {
+	t.Helper()
+
+	feedURL := "https://example.com/feed"
+
+	parsedFeedURL, err := url.Parse(feedURL)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+
+	robotsURL := buildRobotsURL(parsedFeedURL)
+	entry := newRobotsCacheEntry(statusCode, "", time.Now().UTC())
+
+	result := evaluateRobotsCacheEntry(entry, feedURL, robotsURL, parsedFeedURL)
+	if result.BlockedErr != nil {
+		t.Fatalf("expected cached %d to be non-blocking, got %v", statusCode, result.BlockedErr)
 	}
 }
 

@@ -180,10 +180,6 @@ func evaluateRobotsCacheEntry(
 	robotsURL string,
 	parsedFeedURL *url.URL,
 ) robotsCheckResult {
-	if entry.StatusCode == http.StatusUnauthorized || entry.StatusCode == http.StatusForbidden {
-		return blockedRobotsResult(feedURL, robotsURL, fmt.Sprintf("robots.txt returned %d", entry.StatusCode))
-	}
-
 	if entry.StatusCode < http.StatusOK || entry.StatusCode >= http.StatusMultipleChoices {
 		return allowRobotsResult()
 	}
@@ -283,16 +279,6 @@ func evaluateRobotsResponse(
 	parsedFeedURL *url.URL,
 ) (robotsCheckResult, robotsCacheEntry, error) {
 	now := time.Now().UTC()
-
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return blockedRobotsResult(
-				feedURL,
-				robotsURL,
-				fmt.Sprintf("robots.txt returned %d", resp.StatusCode),
-			),
-			newRobotsCacheEntry(resp.StatusCode, "", now),
-			nil
-	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return allowRobotsResult(), newRobotsCacheEntry(resp.StatusCode, "", now), nil
