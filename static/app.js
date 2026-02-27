@@ -6,6 +6,7 @@
     pendingReadShortcut: null,
     panelFocus: "items",
     pendingPanelFocus: null,
+    pendingContentItemID: null,
   };
   const feedDragState = {
     row: null,
@@ -236,6 +237,15 @@
     return list.querySelector(".item-entry.is-expanded");
   };
 
+  const setPendingPanelFocus = (panel, options = {}) => {
+    state.pendingPanelFocus = panel || null;
+    if (panel === "content") {
+      state.pendingContentItemID = options.itemID || null;
+      return;
+    }
+    state.pendingContentItemID = null;
+  };
+
   const setActive = (row, options = {}) => {
     const list = getItemList();
     if (!list || !row) {
@@ -437,7 +447,8 @@
     return false;
   };
 
-  const toggleExpanded = (expand) => {
+  const toggleExpanded = (expand, options = {}) => {
+    const focusPanel = options.focusPanel || "content";
     const current = ensureActive();
     if (!current) {
       return false;
@@ -447,6 +458,8 @@
       if (!itemHasContent(current)) {
         return false;
       }
+      setActive(current, { scroll: true });
+      setPendingPanelFocus(focusPanel, { itemID: rowItemID(current) });
       current.click();
       return true;
     }
@@ -460,9 +473,25 @@
     return false;
   };
 
-  const focusContentPanel = () => {
+  const contentPanelMatchesPendingItem = (panel) => {
+    if (!panel || !state.pendingContentItemID) {
+      return true;
+    }
+    const article = panel.querySelector(".content-panel-article[data-item-id]");
+    if (!article) {
+      return false;
+    }
+    const panelItemID = (article.getAttribute("data-item-id") || "").trim();
+    return panelItemID === state.pendingContentItemID;
+  };
+
+  const focusContentPanel = (options = {}) => {
+    const requirePendingItemMatch = Boolean(options.matchPendingItem);
     const panel = getContentPanel();
     if (!panel || !panel.classList.contains("is-open")) {
+      return false;
+    }
+    if (requirePendingItemMatch && !contentPanelMatchesPendingItem(panel)) {
       return false;
     }
     panel.focus({ preventScroll: true });
@@ -484,7 +513,7 @@
       return false;
     }
 
-    state.pendingPanelFocus = "items";
+    setPendingPanelFocus("items");
     compactToggle.click();
     return true;
   };
@@ -502,12 +531,7 @@
       return false;
     }
 
-    state.pendingPanelFocus = "content";
-    const expanded = toggleExpanded(true);
-    if (!expanded) {
-      state.pendingPanelFocus = null;
-    }
-    return expanded;
+    return toggleExpanded(true, { focusPanel: "content" });
   };
 
   const rowItemID = (row) => {
@@ -574,12 +598,13 @@
     return getExpandedRow();
   };
 
-  const openRowInReadingModal = (row) => {
+  const openRowInReadingModal = (row, options = {}) => {
+    const focusPanel = options.focusPanel || "content";
     if (!row || !itemHasContent(row)) {
       return false;
     }
     setActive(row, { scroll: true });
-    state.pendingPanelFocus = "content";
+    setPendingPanelFocus(focusPanel, { itemID: rowItemID(row) });
     if (requestExpandRow(row, { collapseRow: getExpandedRow() })) {
       return true;
     }
@@ -648,7 +673,7 @@
       if (pending.keepFloating) {
         setContentPanelFloating(true);
       }
-      return openRowInReadingModal(next);
+      return openRowInReadingModal(next, { focusPanel: "content" });
     }
     return true;
   };
@@ -686,7 +711,7 @@
     const nextUnread = nextUnreadRow(current, { requireContent: true });
     if (current.classList.contains("is-read")) {
       if (nextUnread) {
-        return openRowInReadingModal(nextUnread);
+        return openRowInReadingModal(nextUnread, { focusPanel: "content" });
       }
       closeContentPanel();
       return true;
@@ -899,7 +924,7 @@
       return false;
     }
     if (pendingPanelFocus) {
-      state.pendingPanelFocus = pendingPanelFocus;
+      setPendingPanelFocus(pendingPanelFocus);
     }
     feedButton.click();
     return true;
@@ -992,14 +1017,14 @@
   const focusPanelAfterSwap = () => {
     const pendingPanel = state.pendingPanelFocus;
     if (pendingPanel === "content") {
-      if (focusContentPanel()) {
-        state.pendingPanelFocus = null;
+      if (focusContentPanel({ matchPendingItem: true })) {
+        setPendingPanelFocus(null);
       } else {
-        deferFocusContentPanel();
+        deferFocusContentPanel(24);
       }
       return;
     }
-    state.pendingPanelFocus = null;
+    setPendingPanelFocus(null);
 
     if (pendingPanel === "feed" && focusFeedPanel()) {
       return;
@@ -1019,12 +1044,12 @@
     focusItemList();
   };
 
-  const deferFocusContentPanel = (remainingAttempts = 3) => {
+  const deferFocusContentPanel = (remainingAttempts = 24) => {
     if (state.pendingPanelFocus !== "content") {
       return;
     }
-    if (focusContentPanel()) {
-      state.pendingPanelFocus = null;
+    if (focusContentPanel({ matchPendingItem: true })) {
+      setPendingPanelFocus(null);
       return;
     }
     if (remainingAttempts <= 0) {
@@ -1690,7 +1715,7 @@
     } else if (getFeedLinks({ visibleOnly: true }).length) {
       focusFeedPanel();
     }
-    state.pendingPanelFocus = null;
+    setPendingPanelFocus(null);
   });
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
@@ -1724,7 +1749,7 @@
     } else {
       state.activeId = null;
       state.pendingReadShortcut = null;
-      state.pendingPanelFocus = null;
+      setPendingPanelFocus(null);
       if (getFeedLinks({ visibleOnly: true }).length) {
         focusFeedPanel();
       }
@@ -1759,6 +1784,8 @@
       sourceRow.dataset.itemExpand === "true" &&
       !sourceRow.classList.contains("is-expanded")
     ) {
+      setActive(sourceRow, { scroll: true });
+      setPendingPanelFocus("content", { itemID: rowItemID(sourceRow) });
       const list = getItemList();
       if (!list || !list.contains(sourceRow)) {
         return;
@@ -1772,5 +1799,16 @@
         event.detail.parameters.collapse_item_id = collapseID;
       }
     }
+  });
+
+  document.body.addEventListener("htmx:afterSettle", () => {
+    if (state.pendingPanelFocus !== "content") {
+      return;
+    }
+    if (focusContentPanel({ matchPendingItem: true })) {
+      setPendingPanelFocus(null);
+      return;
+    }
+    deferFocusContentPanel(24);
   });
 })();
