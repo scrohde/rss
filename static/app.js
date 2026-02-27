@@ -523,6 +523,63 @@
     return rows[index + 1];
   };
 
+  const nextUnreadRow = (row, options = {}) => {
+    const requireContent = Boolean(options.requireContent);
+    const rows = getItemRows();
+    const index = rows.indexOf(row);
+    if (index < 0 || index >= rows.length - 1) {
+      return null;
+    }
+
+    for (let candidateIndex = index + 1; candidateIndex < rows.length; candidateIndex += 1) {
+      const candidate = rows[candidateIndex];
+      if (candidate.classList.contains("is-read")) {
+        continue;
+      }
+      if (requireContent && !itemHasContent(candidate)) {
+        continue;
+      }
+      return candidate;
+    }
+
+    return null;
+  };
+
+  const getReadingModalRow = () => {
+    if (!isContentPanelOpen()) {
+      return null;
+    }
+
+    const panel = getContentPanel();
+    if (panel) {
+      const article = panel.querySelector(".content-panel-article[data-item-id]");
+      if (article) {
+        const itemID = (article.getAttribute("data-item-id") || "").trim();
+        if (itemID) {
+          const row = document.getElementById(`item-${itemID}`);
+          if (row && row.classList.contains("is-expanded")) {
+            return row;
+          }
+        }
+      }
+    }
+
+    return getExpandedRow();
+  };
+
+  const openRowInReadingModal = (row) => {
+    if (!row || !itemHasContent(row)) {
+      return false;
+    }
+    setActive(row, { scroll: true });
+    state.pendingPanelFocus = "content";
+    if (requestExpandRow(row, { collapseRow: getExpandedRow() })) {
+      return true;
+    }
+    row.click();
+    return true;
+  };
+
   const requestToggleRead = (row, view, selectedItemId) => {
     const itemID = rowItemID(row);
     if (!itemID || typeof htmx === "undefined" || !htmx.ajax) {
@@ -533,6 +590,25 @@
       target: `#${row.id}`,
       swap: "outerHTML",
       values: { view, selected_item_id: selected },
+    });
+    return true;
+  };
+
+  const requestExpandRow = (row, options = {}) => {
+    const itemID = rowItemID(row);
+    if (!itemID || !itemHasContent(row) || typeof htmx === "undefined" || !htmx.ajax) {
+      return false;
+    }
+    const values = { selected_item_id: row.id || state.activeId };
+    const collapseRow = options.collapseRow;
+    const collapseID = rowItemID(collapseRow);
+    if (collapseID && collapseID !== itemID) {
+      values.collapse_item_id = collapseID;
+    }
+    htmx.ajax("GET", `/items/${itemID}`, {
+      target: `#${row.id}`,
+      swap: "outerHTML",
+      values,
     });
     return true;
   };
@@ -562,7 +638,10 @@
       itemHasContent(next) &&
       !next.classList.contains("is-expanded")
     ) {
-      next.click();
+      if (pending.keepFloating) {
+        setContentPanelFloating(true);
+      }
+      return openRowInReadingModal(next);
     }
     return true;
   };
@@ -591,7 +670,40 @@
     }
   };
 
+  const handleReadingModalReadShortcut = () => {
+    const current = getReadingModalRow();
+    if (!current) {
+      return false;
+    }
+
+    const nextUnread = nextUnreadRow(current, { requireContent: true });
+    if (current.classList.contains("is-read")) {
+      if (nextUnread) {
+        return openRowInReadingModal(nextUnread);
+      }
+      closeContentPanel();
+      return true;
+    }
+
+    const selectedAfterToggle = nextUnread ? nextUnread.id : current.id;
+    state.pendingReadShortcut = {
+      sourceId: current.id,
+      nextId: nextUnread ? nextUnread.id : null,
+      expandNext: Boolean(nextUnread),
+      keepFloating: Boolean(nextUnread && isContentPanelFloating()),
+    };
+    if (requestToggleRead(current, "compact", selectedAfterToggle)) {
+      return true;
+    }
+    state.pendingReadShortcut = null;
+    return false;
+  };
+
   const toggleRead = () => {
+    if (handleReadingModalReadShortcut()) {
+      return;
+    }
+
     const current = ensureActive();
     if (!current) {
       return;

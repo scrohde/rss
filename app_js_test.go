@@ -32,8 +32,8 @@ func TestAppJSIncludesContentPanelControlHandlers(t *testing.T) {
 	assertSourceContains(
 		t,
 		source,
-		`const contentPanelFullPageClass = "is-content-panel-fullpage";`,
-		"expected content panel full-page class constant",
+		`const contentPanelFloatingClass = "is-content-panel-floating";`,
+		"expected content panel floating class constant",
 	)
 	assertSourceContains(
 		t,
@@ -50,8 +50,8 @@ func TestAppJSIncludesContentPanelControlHandlers(t *testing.T) {
 	assertSourceContains(
 		t,
 		source,
-		"setContentPanelFullPage(!isContentPanelFullPage());",
-		"expected full-page click handler toggle logic",
+		"setContentPanelFloating(!isContentPanelFloating());",
+		"expected floating-panel click handler toggle logic",
 	)
 	assertSourceContains(
 		t,
@@ -174,7 +174,67 @@ func TestAppJSKeyboardShortcutsPreserveReadOpenAndContentScroll(t *testing.T) {
 	assertSourceContains(
 		t,
 		source,
+		"const nextUnreadRow = (row, options = {}) => {",
+		"expected unread-row lookup helper for read shortcut advancement",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const getReadingModalRow = () => {",
+		"expected reading-modal row resolver for floating panel shortcuts",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const handleReadingModalReadShortcut = () => {",
+		"expected reading-modal read shortcut handler",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const requestExpandRow = (row, options = {}) => {",
+		"expected direct item-expand helper for keyboard modal navigation",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"htmx.ajax(\"GET\", `/items/${itemID}`",
+		"expected modal advance to expand next item without synthetic click events",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"return openRowInReadingModal(next);",
+		"expected pending read shortcut to open the next item via modal helper",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"const nextUnread = nextUnreadRow(current, { requireContent: true });",
+		"expected reading-modal shortcut to target next unread item with content",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"keepFloating: Boolean(nextUnread && isContentPanelFloating()),",
+		"expected modal read-advance state to preserve floating mode",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"setContentPanelFloating(true);",
+		"expected pending read-advance to restore floating mode before opening next item",
+	)
+	assertSourceContains(
+		t,
+		source,
+		"if (handleReadingModalReadShortcut()) {",
+		"expected global read shortcut to delegate to reading-modal behavior first",
+	)
+	assertSourceContains(
+		t,
+		source,
 		"toggleRead();",
-		"expected read-toggle shortcut to remain available",
+		"expected read shortcut key binding to remain wired",
 	)
 }
