@@ -10,12 +10,32 @@ import (
 func readAppJSSource(t *testing.T) string {
 	t.Helper()
 
-	source, err := os.ReadFile(filepath.Join("static", "app.js"))
-	if err != nil {
-		t.Fatalf("read app.js: %v", err)
+	paths := []string{
+		filepath.Join("static", "app.js"),
 	}
 
-	return string(source)
+	entries, err := os.ReadDir(filepath.Join("static", "app"))
+	if err != nil {
+		t.Fatalf("read static/app: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".js" {
+			continue
+		}
+		paths = append(paths, filepath.Join("static", "app", entry.Name()))
+	}
+
+	var builder strings.Builder
+	for _, path := range paths {
+		source, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", path, readErr)
+		}
+		builder.Write(source)
+		builder.WriteByte('\n')
+	}
+
+	return builder.String()
 }
 
 func assertSourceContains(t *testing.T, source, token, message string) {
@@ -121,13 +141,13 @@ func TestAppJSKeyboardNavigationSupportsPanelFocusModel(t *testing.T) {
 	assertSourceContains(
 		t,
 		source,
-		"const deferFocusContentPanel = (remainingAttempts = 3) => {",
+		"const deferFocusContentPanel = (remainingAttempts = 24) => {",
 		"expected deferred content-panel focus helper for swap timing",
 	)
 	assertSourceContains(
 		t,
 		source,
-		"deferFocusContentPanel();",
+		"deferFocusContentPanel(24);",
 		"expected focus handoff retry when content panel is not ready on first swap",
 	)
 	assertSourceContains(
@@ -263,7 +283,7 @@ func TestAppJSKeyboardShortcutsPreserveReadOpenAndContentScroll(t *testing.T) {
 	assertSourceContains(
 		t,
 		source,
-		"return openRowInReadingModal(next);",
+		`return openRowInReadingModal(next, { focusPanel: "content" });`,
 		"expected pending read shortcut to open the next item via modal helper",
 	)
 	assertSourceContains(
