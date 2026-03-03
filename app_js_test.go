@@ -207,3 +207,37 @@ func TestAppJSSelectorContractsMatchTemplates(t *testing.T) {
 		}
 	}
 }
+
+func TestItemKeyboardOutlineStateModelContracts(t *testing.T) {
+	t.Parallel()
+
+	stateSource := readTextFile(t, filepath.Join("static", "app", "state.js"))
+	if !strings.Contains(stateSource, "itemKeyboardNavActive: false") {
+		t.Fatal("expected state.itemKeyboardNavActive to be defined with a false default")
+	}
+
+	if !strings.Contains(
+		stateSource,
+		`"#item-list.is-keyboard-nav:focus-within .item-entry.is-active"`,
+	) {
+		t.Fatal("expected state model to define the item keyboard outline visibility gate")
+	}
+
+	requiredTransitions := []string{
+		`id: "keyboard-item-navigation"`,
+		`id: "pointer-item-interaction"`,
+		`id: "panel-focus-shift"`,
+		`id: "htmx-after-swap-hydrate"`,
+		`id: "htmx-after-swap-no-item-list"`,
+	}
+	for _, transition := range requiredTransitions {
+		if !strings.Contains(stateSource, transition) {
+			t.Fatalf("expected item keyboard outline transition %s in state model", transition)
+		}
+	}
+
+	htmxSource := readTextFile(t, filepath.Join("static", "app", "htmx.js"))
+	if !strings.Contains(htmxSource, "state.itemKeyboardNavActive = false;") {
+		t.Fatal("expected htmx lifecycle to clear item keyboard outline mode when item list is absent")
+	}
+}
