@@ -289,6 +289,17 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 
 	pressKey(t, ctx, "l")
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "item panel focus")
+
+	pressKey(t, ctx, "l")
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-expanded"), "expanded first row via keyboard")
+	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "opened content panel via keyboard")
+	waitForJS(t, ctx, contentPanelItemExpression(fixture.secondaryFirstItemID), "content panel item via keyboard")
+	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "content panel focus via keyboard")
+
+	pressKey(t, ctx, "h")
+	waitForJS(t, ctx, missingClassExpression(firstRowSelector, "is-expanded"), "collapsed first row via keyboard")
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "closed content panel via keyboard")
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "item panel focus after keyboard collapse")
 }
 
 func runActions(t *testing.T, ctx context.Context, actions ...chromedp.Action) {
