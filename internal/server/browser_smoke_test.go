@@ -47,6 +47,8 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
 
 	runFeedSelectionFlow(t, ctx, fixture)
+	runFeedToItemsOutlineEntryFlow(t, ctx, fixture)
+	runContentToItemsOutlineEntryFlow(t, ctx, fixture)
 	runExpandCollapseFlow(t, ctx, fixture)
 	runToggleReadFlow(t, ctx, fixture)
 	runKeyboardFlow(t, ctx, fixture)
@@ -249,6 +251,57 @@ func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixtu
 	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "closed content panel")
 }
 
+func runFeedToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	firstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
+
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active before feed-to-items step")
+	waitForJS(t, ctx, missingClassExpression("#item-list", "is-keyboard-nav"), "keyboard nav marker absent before feed focus")
+
+	runActions(t, ctx, chromedp.Focus("#feed-list .feed-link.active", chromedp.ByQuery))
+	waitForJS(t, ctx, activeElementMatchesExpression("#feed-list .feed-link.active"), "feed panel focus before right arrow")
+
+	pressKey(t, ctx, "l")
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focus after right arrow from feed")
+	waitForJS(t, ctx, itemOutlineVisibleExpression(firstRowSelector), "outline visible after right arrow from feed")
+}
+
+func runContentToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	firstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
+	firstRowTitleSelector := fmt.Sprintf(`#item-%d .item-title`, fixture.secondaryFirstItemID)
+
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active before content-to-items step")
+	runActions(t, ctx, chromedp.Click(firstRowTitleSelector, chromedp.ByQuery))
+	waitForJS(
+		t,
+		ctx,
+		missingClassExpression("#item-list", "is-keyboard-nav"),
+		"keyboard nav marker absent before items-to-content step",
+	)
+
+	runActions(t, ctx, chromedp.Focus("#item-list", chromedp.ByQuery))
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focus before content entry")
+
+	pressKey(t, ctx, "l")
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-expanded"), "expanded first row before content-to-items step")
+	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "opened content panel before content-to-items step")
+	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "content panel focus before left arrow")
+
+	pressKey(t, ctx, "h")
+	waitForJS(
+		t,
+		ctx,
+		missingClassExpression(firstRowSelector, "is-expanded"),
+		"collapsed first row after left arrow from content",
+	)
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "closed content panel after left arrow from content")
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focus after left arrow from content")
+	waitForJS(t, ctx, itemOutlineVisibleExpression(firstRowSelector), "outline visible after left arrow from content")
+}
+
 func runToggleReadFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	t.Helper()
 
@@ -267,6 +320,7 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 
 	firstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 	secondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
+	firstRowToggleSelector := fmt.Sprintf(`#item-%d button[hx-post*="/toggle"]`, fixture.secondaryFirstItemID)
 
 	runActions(
 		t,
@@ -280,26 +334,59 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 
 	pressKey(t, ctx, "j")
 	waitForJS(t, ctx, hasClassExpression(secondRowSelector, "is-active"), "second row active")
+	waitForJS(t, ctx, itemOutlineVisibleExpression(secondRowSelector), "outline visible after keyboard navigation")
 
 	pressKey(t, ctx, "k")
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active after up")
 
+	runActions(t, ctx, chromedp.Click(firstRowToggleSelector, chromedp.ByQuery))
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-read"), "row marked read after pointer interaction")
+	waitForJS(
+		t,
+		ctx,
+		missingClassExpression("#item-list", "is-keyboard-nav"),
+		"pointer click clears keyboard outline state",
+	)
+	waitForJS(t, ctx, itemOutlineAbsentExpression(firstRowSelector), "outline hidden after pointer interaction")
+
+	runActions(t, ctx, chromedp.Focus("#item-list", chromedp.ByQuery))
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "item panel focus after pointer interaction")
+
+	pressKey(t, ctx, "k")
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active after keyboard restore")
+	waitForJS(t, ctx, hasClassExpression("#item-list", "is-keyboard-nav"), "keyboard outline state restored")
+	waitForJS(t, ctx, itemOutlineVisibleExpression(firstRowSelector), "outline visible after keyboard restore")
+
 	pressKey(t, ctx, "h")
 	waitForJS(t, ctx, activeElementMatchesExpression("#feed-list .feed-link.active"), "feed panel focus")
+	waitForJS(
+		t,
+		ctx,
+		hasClassExpression("#item-list", "is-keyboard-nav"),
+		"keyboard outline state retained while feed panel focused",
+	)
+	waitForJS(t, ctx, itemOutlineAbsentExpression(firstRowSelector), "outline hidden while feed panel focused")
 
 	pressKey(t, ctx, "l")
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "item panel focus")
+	waitForJS(t, ctx, itemOutlineVisibleExpression(firstRowSelector), "outline visible when returning to items panel")
+	pressKey(t, ctx, "k")
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active before content panel open")
 
 	pressKey(t, ctx, "l")
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-expanded"), "expanded first row via keyboard")
 	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "opened content panel via keyboard")
 	waitForJS(t, ctx, contentPanelItemExpression(fixture.secondaryFirstItemID), "content panel item via keyboard")
 	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "content panel focus via keyboard")
+	waitForJS(t, ctx, itemOutlineAbsentExpression(firstRowSelector), "outline hidden while content panel focused")
 
 	pressKey(t, ctx, "h")
 	waitForJS(t, ctx, missingClassExpression(firstRowSelector, "is-expanded"), "collapsed first row via keyboard")
 	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "closed content panel via keyboard")
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "item panel focus after keyboard collapse")
+	pressKey(t, ctx, "j")
+	waitForJS(t, ctx, hasClassExpression(secondRowSelector, "is-active"), "second row active after returning to items")
+	waitForJS(t, ctx, itemOutlineVisibleExpression(secondRowSelector), "outline visible after return and keyboard nav")
 }
 
 func runActions(t *testing.T, ctx context.Context, actions ...chromedp.Action) {
@@ -397,6 +484,37 @@ func activeElementMatchesExpression(selector string) string {
 	return fmt.Sprintf(
 		`(() => { const el = document.querySelector(%q); return !!el && document.activeElement === el; })()`,
 		selector,
+	)
+}
+
+func itemOutlineVisibleExpression(rowSelector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const list = document.querySelector("#item-list");
+			const row = document.querySelector(%q);
+			if (!list || !row) {
+				return false;
+			}
+			const boxShadow = window.getComputedStyle(row).boxShadow || "";
+			return list.classList.contains("is-keyboard-nav") &&
+				list.matches(":focus-within") &&
+				boxShadow.includes("rgb(37, 99, 235)");
+		})()`,
+		rowSelector,
+	)
+}
+
+func itemOutlineAbsentExpression(rowSelector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const row = document.querySelector(%q);
+			if (!row) {
+				return false;
+			}
+			const boxShadow = window.getComputedStyle(row).boxShadow || "";
+			return !boxShadow.includes("rgb(37, 99, 235)");
+		})()`,
+		rowSelector,
 	)
 }
 

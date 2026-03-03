@@ -91,6 +91,7 @@ export const bindKeyboardShortcuts = ({
         prevent();
         if (desktopPanelNavigationEnabled) {
           if (panel === "feed") {
+            content.setItemKeyboardNavActive(true);
             feed.openSelectedFeed();
             break;
           }
@@ -108,6 +109,7 @@ export const bindKeyboardShortcuts = ({
         prevent();
         if (desktopPanelNavigationEnabled) {
           if (panel === "content") {
+            content.setItemKeyboardNavActive(true);
             content.collapseContentPanelToItems();
             break;
           }

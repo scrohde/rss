@@ -121,3 +121,18 @@ func TestStylesReaderPanelsAvoidPersistentSeparators(t *testing.T) {
 		t.Fatal("expected content resizer line to appear on hover")
 	}
 }
+
+func TestStylesItemKeyboardOutlineContract(t *testing.T) {
+	t.Parallel()
+
+	source := readStylesCSS(t)
+	selector := "#item-list.is-keyboard-nav:focus-within .item-entry.is-active"
+
+	if !cssRuleContains(source, selector, "box-shadow:") {
+		t.Fatalf("expected %s rule to declare box-shadow", selector)
+	}
+
+	if !cssRuleContains(source, selector, "#2563EB") {
+		t.Fatalf("expected %s rule to include #2563EB outline token", selector)
+	}
+}

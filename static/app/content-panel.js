@@ -704,7 +704,9 @@ export const bindContentPanelInteractions = () => {
     }
     const row = event.target.closest(".item-entry");
     if (row && list.contains(row)) {
-      setItemKeyboardNavActive(false);
+      if (event.detail > 0) {
+        setItemKeyboardNavActive(false);
+      }
       setActive(row);
       setPanelFocus("items");
     }
