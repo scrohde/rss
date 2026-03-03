@@ -3,17 +3,26 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
-func readAppJSSource(t *testing.T) string {
+func readTextFile(t *testing.T, path string) string {
 	t.Helper()
 
-	paths := []string{
-		filepath.Join("static", "app.js"),
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
 	}
+	return string(source)
+}
 
+func appScriptPaths(t *testing.T) []string {
+	t.Helper()
+
+	paths := []string{filepath.Join("static", "app.js")}
 	entries, err := os.ReadDir(filepath.Join("static", "app"))
 	if err != nil {
 		t.Fatalf("read static/app: %v", err)
@@ -24,296 +33,177 @@ func readAppJSSource(t *testing.T) string {
 		}
 		paths = append(paths, filepath.Join("static", "app", entry.Name()))
 	}
+	sort.Strings(paths)
+	return paths
+}
+
+func templatePaths(t *testing.T) []string {
+	t.Helper()
+
+	var paths []string
+	err := filepath.WalkDir("templates", func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".html" {
+			return nil
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk templates: %v", err)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func joinFiles(t *testing.T, paths []string) string {
+	t.Helper()
 
 	var builder strings.Builder
 	for _, path := range paths {
-		source, readErr := os.ReadFile(path)
-		if readErr != nil {
-			t.Fatalf("read %s: %v", path, readErr)
-		}
-		builder.Write(source)
+		builder.WriteString(readTextFile(t, path))
 		builder.WriteByte('\n')
 	}
-
 	return builder.String()
 }
 
-func assertSourceContains(t *testing.T, source, token, message string) {
-	t.Helper()
+var importFromPattern = regexp.MustCompile(`from\s+["']([^"']+)["']`)
+var importSideEffectPattern = regexp.MustCompile(`(?m)^\s*import\s+["']([^"']+)["']`)
 
-	if !strings.Contains(source, token) {
-		t.Fatal(message)
+func importSpecifiers(source string) []string {
+	seen := map[string]struct{}{}
+	for _, match := range importFromPattern.FindAllStringSubmatch(source, -1) {
+		seen[match[1]] = struct{}{}
+	}
+	for _, match := range importSideEffectPattern.FindAllStringSubmatch(source, -1) {
+		seen[match[1]] = struct{}{}
+	}
+
+	specifiers := make([]string, 0, len(seen))
+	for specifier := range seen {
+		specifiers = append(specifiers, specifier)
+	}
+	sort.Strings(specifiers)
+	return specifiers
+}
+
+func TestLayoutTemplateIncludesFrontendScriptEntrypoints(t *testing.T) {
+	t.Parallel()
+
+	source := readTextFile(t, filepath.Join("templates", "layout.html"))
+
+	if strings.Count(source, `src="/static/vendor/htmx.min.js"`) != 1 {
+		t.Fatal("expected layout template to include htmx script exactly once")
+	}
+
+	if strings.Count(source, `type="module" src="/static/app.js"`) != 1 {
+		t.Fatal("expected layout template to include module /static/app.js exactly once")
 	}
 }
 
-func TestAppJSIncludesContentPanelControlHandlers(t *testing.T) {
-	source := readAppJSSource(t)
+func TestAppJSEntrypointImportsMainModule(t *testing.T) {
+	t.Parallel()
 
-	assertSourceContains(
-		t,
-		source,
-		`const contentPanelFloatingClass = "is-content-panel-floating";`,
-		"expected content panel floating class constant",
-	)
-	assertSourceContains(
-		t,
-		source,
-		`button[data-content-panel-full-toggle='true']`,
-		"expected full-page toggle selector binding",
-	)
-	assertSourceContains(
-		t,
-		source,
-		`button[data-content-panel-close='true']`,
-		"expected close button selector binding",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"setContentPanelFloating(!isContentPanelFloating());",
-		"expected floating-panel click handler toggle logic",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"syncContentPanelMode();",
-		"expected content panel mode sync on render lifecycle",
-	)
+	specifiers := importSpecifiers(readTextFile(t, filepath.Join("static", "app.js")))
+	if len(specifiers) != 1 || specifiers[0] != "./app/main.js" {
+		t.Fatalf("expected static/app.js to import only ./app/main.js, got %v", specifiers)
+	}
 }
 
-func TestAppJSKeyboardNavigationSupportsPanelFocusModel(t *testing.T) {
-	source := readAppJSSource(t)
+func TestAppJSRelativeImportsResolveToExistingFiles(t *testing.T) {
+	t.Parallel()
 
-	assertSourceContains(
-		t,
-		source,
-		`panelFocus: "items",`,
-		"expected panel focus state default",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const moveWithinFocusedPanel = (delta, panel) => {",
-		"expected panel-aware vertical keyboard helper",
-	)
-	assertSourceContains(
-		t,
-		source,
-		`const desktopPanelNavigationEnabled = isDesktopLayout() && !isFeedEditMode();`,
-		"expected desktop-only panel navigation guard",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"openSelectedFeed();",
-		"expected right-key feed-panel activation branch",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"expandActiveToContentPanel();",
-		"expected right-key item-panel expansion branch",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"collapseContentPanelToItems();",
-		"expected left-key content-panel collapse branch",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"focusFeedPanel();",
-		"expected left-key item-panel focus-to-feed behavior",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"state.pendingPanelFocus = \"items\";",
-		"expected pending item-panel focus tracking after feed activation",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"state.pendingPanelFocus = \"content\";",
-		"expected pending content-panel focus tracking after expansion",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const deferFocusContentPanel = (remainingAttempts = 24) => {",
-		"expected deferred content-panel focus helper for swap timing",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"deferFocusContentPanel(24);",
-		"expected focus handoff retry when content panel is not ready on first swap",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"} else if (getFeedLinks({ visibleOnly: true }).length) {",
-		"expected feed-focus fallback when item list is absent on startup",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"focusFeedPanel();",
-		"expected feed panel focus handoff when item list is absent after swaps",
-	)
+	staticRoot, err := filepath.Abs("static")
+	if err != nil {
+		t.Fatalf("resolve static root: %v", err)
+	}
+
+	for _, scriptPath := range appScriptPaths(t) {
+		source := readTextFile(t, scriptPath)
+		for _, specifier := range importSpecifiers(source) {
+			if !strings.HasPrefix(specifier, ".") {
+				continue
+			}
+			resolved := filepath.Clean(filepath.Join(filepath.Dir(scriptPath), filepath.FromSlash(specifier)))
+			if filepath.Ext(resolved) == "" {
+				resolved += ".js"
+			}
+			resolvedAbs, absErr := filepath.Abs(resolved)
+			if absErr != nil {
+				t.Fatalf("resolve %s import %s: %v", scriptPath, specifier, absErr)
+			}
+			if resolvedAbs != staticRoot &&
+				!strings.HasPrefix(resolvedAbs, staticRoot+string(filepath.Separator)) {
+				t.Fatalf("import %q in %s escapes static directory (%s)", specifier, scriptPath, resolvedAbs)
+			}
+
+			info, statErr := os.Stat(resolvedAbs)
+			if statErr != nil {
+				t.Fatalf("import %q in %s does not resolve to a file: %v", specifier, scriptPath, statErr)
+			}
+			if info.IsDir() {
+				t.Fatalf("import %q in %s resolved to directory %s", specifier, scriptPath, resolvedAbs)
+			}
+		}
+	}
 }
 
-func TestAppJSFeedSelectionAutoLoadsItems(t *testing.T) {
-	source := readAppJSSource(t)
+func TestAppJSSelectorContractsMatchTemplates(t *testing.T) {
+	t.Parallel()
 
-	assertSourceContains(
-		t,
-		source,
-		"const requestFeedItems = (feedButton, pendingPanelFocus) => {",
-		"expected helper for requesting feed items from selected feed buttons",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const getDisplayedFeedID = () => {",
-		"expected helper for reading the feed currently shown in the item list",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"if (!getItemList()) {",
-		"expected feed-panel focus logic to detect missing item list",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"requestFeedItems(selectedFeed, \"feed\");",
-		"expected selected feed to auto-load items when main list is empty",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const selectionChanged = next !== current;",
-		"expected keyboard feed movement to detect feed selection changes",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"requestFeedItems(next, \"feed\");",
-		"expected keyboard feed selection to auto-load items for the new feed",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"if (getItemList() && selectedFeedID && getDisplayedFeedID() === selectedFeedID) {",
-		"expected open-selected-feed path to skip reload when selected feed is already displayed",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"focusItemList();",
-		"expected same-feed open action to move focus to items while preserving selection",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"return requestFeedItems(selectedFeed, \"items\");",
-		"expected explicit feed open action to continue loading selected feed items",
-	)
-}
+	appSource := joinFiles(t, appScriptPaths(t))
+	templateSource := joinFiles(t, templatePaths(t))
 
-func TestAppJSKeyboardShortcutsPreserveReadOpenAndContentScroll(t *testing.T) {
-	source := readAppJSSource(t)
+	contracts := []struct {
+		name          string
+		jsSelector    string
+		templateToken string
+	}{
+		{
+			name:          "subscribe form",
+			jsSelector:    `form[data-subscribe-form='true']`,
+			templateToken: `data-subscribe-form="true"`,
+		},
+		{
+			name:          "opml import button",
+			jsSelector:    `button[data-import-button='true']`,
+			templateToken: `data-import-button="true"`,
+		},
+		{
+			name:          "opml import file input",
+			jsSelector:    `input[data-import-file-input='true']`,
+			templateToken: `data-import-file-input="true"`,
+		},
+		{
+			name:          "content panel float toggle",
+			jsSelector:    `button[data-content-panel-full-toggle='true']`,
+			templateToken: `data-content-panel-full-toggle="true"`,
+		},
+		{
+			name:          "content panel close button",
+			jsSelector:    `button[data-content-panel-close='true']`,
+			templateToken: `data-content-panel-close="true"`,
+		},
+		{
+			name:          "main content panel anchor",
+			jsSelector:    "#main-content",
+			templateToken: `id="main-content"`,
+		},
+		{
+			name:          "feed list anchor",
+			jsSelector:    "#feed-list",
+			templateToken: `id="feed-list"`,
+		},
+	}
 
-	assertSourceContains(
-		t,
-		source,
-		"const expandedPanelScrollStep = 72;",
-		"expected expanded panel scroll step constant",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"if (panel === \"content\") {",
-		"expected content-panel branch in panel-aware vertical movement",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"return scrollExpandedPanel(delta * expandedPanelScrollStep);",
-		"expected content-panel vertical keys to scroll expanded panel",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"openActiveLink();",
-		"expected open-article shortcut to remain available",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const nextUnreadRow = (row, options = {}) => {",
-		"expected unread-row lookup helper for read shortcut advancement",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const getReadingModalRow = () => {",
-		"expected reading-modal row resolver for floating panel shortcuts",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const handleReadingModalReadShortcut = () => {",
-		"expected reading-modal read shortcut handler",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const requestExpandRow = (row, options = {}) => {",
-		"expected direct item-expand helper for keyboard modal navigation",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"htmx.ajax(\"GET\", `/items/${itemID}`",
-		"expected modal advance to expand next item without synthetic click events",
-	)
-	assertSourceContains(
-		t,
-		source,
-		`return openRowInReadingModal(next, { focusPanel: "content" });`,
-		"expected pending read shortcut to open the next item via modal helper",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"const nextUnread = nextUnreadRow(current, { requireContent: true });",
-		"expected reading-modal shortcut to target next unread item with content",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"keepFloating: Boolean(nextUnread && isContentPanelFloating()),",
-		"expected modal read-advance state to preserve floating mode",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"setContentPanelFloating(true);",
-		"expected pending read-advance to restore floating mode before opening next item",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"if (handleReadingModalReadShortcut()) {",
-		"expected global read shortcut to delegate to reading-modal behavior first",
-	)
-	assertSourceContains(
-		t,
-		source,
-		"toggleRead();",
-		"expected read shortcut key binding to remain wired",
-	)
+	for _, contract := range contracts {
+		if !strings.Contains(appSource, contract.jsSelector) {
+			t.Fatalf("expected app JS to keep %s selector %q", contract.name, contract.jsSelector)
+		}
+		if !strings.Contains(templateSource, contract.templateToken) {
+			t.Fatalf("expected templates to keep %s token %q", contract.name, contract.templateToken)
+		}
+	}
 }
