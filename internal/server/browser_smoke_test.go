@@ -24,6 +24,7 @@ const (
 )
 
 type smokeFixture struct {
+	archiveFeedID         int64
 	secondaryFeedID       int64
 	secondaryFirstItemID  int64
 	secondarySecondItemID int64
@@ -47,11 +48,13 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
 
 	runFeedSelectionFlow(t, ctx, fixture)
+	runMoreTogglePersistenceFlow(t, ctx, fixture)
 	runFeedToItemsOutlineEntryFlow(t, ctx, fixture)
 	runContentToItemsOutlineEntryFlow(t, ctx, fixture)
 	runExpandCollapseFlow(t, ctx, fixture)
 	runToggleReadFlow(t, ctx, fixture)
 	runKeyboardFlow(t, ctx, fixture)
+	runFeedBoundaryKeyboardFlow(t, ctx, fixture)
 }
 
 func newSmokeApp(t *testing.T) *App {
@@ -70,6 +73,7 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	primaryFeedID := mustUpsertFeed(t, app, "https://example.com/feed-primary.xml", "Primary Feed")
 	secondaryFeedID := mustUpsertFeed(t, app, "https://example.com/feed-secondary.xml", "Secondary Feed")
+	archiveFeedID := mustUpsertFeed(t, app, "https://example.com/feed-archive.xml", "Archive Feed")
 
 	mustUpsertItems(t, app, primaryFeedID, []*gofeed.Item{
 		newSmokeItem("Primary One", "https://example.com/p1", "primary-1", base.Add(-3*time.Hour)),
@@ -83,6 +87,7 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	assertItemCount(t, secondaryItems, 2)
 
 	return smokeFixture{
+		archiveFeedID:         archiveFeedID,
 		secondaryFeedID:       secondaryFeedID,
 		secondaryFirstItemID:  secondaryItems[0].ID,
 		secondarySecondItemID: secondaryItems[1].ID,
@@ -216,6 +221,112 @@ func runFeedSelectionFlow(t *testing.T, ctx context.Context, fixture smokeFixtur
 		chromedp.WaitVisible(itemListSelector, chromedp.ByQuery),
 		chromedp.WaitVisible(firstItemSelector, chromedp.ByQuery),
 	)
+}
+
+func runMoreTogglePersistenceFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	rowSelector := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
+	itemTarget := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
+	selectedItemID := fmt.Sprintf("item-%d", fixture.secondaryFirstItemID)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.WaitVisible("#feed-list .feed-more-button", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, feedMoreCollapsedExpression(), "more panel collapsed by default")
+
+	runActions(t, ctx, chromedp.Click("#feed-list .feed-more-button", chromedp.ByQuery))
+	waitForJS(t, ctx, feedMoreExpandedExpression(), "more panel expanded after click")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/items/%d/toggle", fixture.secondaryFirstItemID),
+		itemTarget,
+		selectedItemID,
+	)
+	waitForJS(t, ctx, hasClassExpression(rowSelector, "is-read"), "row marked read in persistence flow")
+	waitForJS(t, ctx, feedMoreExpandedExpression(), "more panel stays expanded after feed-list swap")
+
+	runActions(t, ctx, chromedp.Click("#feed-list .feed-more-button", chromedp.ByQuery))
+	waitForJS(t, ctx, feedMoreCollapsedExpression(), "more panel collapsed after second click")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/items/%d/toggle", fixture.secondaryFirstItemID),
+		itemTarget,
+		selectedItemID,
+	)
+	waitForJS(t, ctx, missingClassExpression(rowSelector, "is-read"), "row marked unread in persistence flow")
+	waitForJS(t, ctx, feedMoreCollapsedExpression(), "more panel stays collapsed after feed-list swap")
+}
+
+func runFeedBoundaryKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	secondaryFeedSelector := fmt.Sprintf(
+		`#feed-list .feed-link[data-feed-id="%d"]`,
+		fixture.secondaryFeedID,
+	)
+	archiveFeedSelector := fmt.Sprintf(
+		`#feed-list #feed-zero-list .feed-link[data-feed-id="%d"]`,
+		fixture.archiveFeedID,
+	)
+	archiveListSelector := fmt.Sprintf(
+		`#main-content #item-list[data-feed-id="%d"]`,
+		fixture.archiveFeedID,
+	)
+
+	runActions(t, ctx, chromedp.Focus(secondaryFeedSelector, chromedp.ByQuery))
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression(secondaryFeedSelector),
+		"secondary feed focused before boundary down",
+	)
+	waitForJS(t, ctx, feedMoreCollapsedExpression(), "more panel collapsed before boundary down")
+
+	pressKey(t, ctx, "ArrowDown")
+	waitForJS(t, ctx, feedMoreExpandedExpression(), "boundary down expands more panel")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression("#feed-list .feed-more-button"),
+		"boundary down focuses more button",
+	)
+
+	pressKey(t, ctx, "ArrowDown")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression(archiveFeedSelector),
+		"arrow down from more focuses first zero-unread feed",
+	)
+	waitForJS(t, ctx, elementPresentExpression(archiveListSelector), "archive feed main content loaded")
+
+	pressKey(t, ctx, "ArrowUp")
+	waitForJS(t, ctx, feedMoreCollapsedExpression(), "boundary up collapses more panel")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression("#feed-list .feed-more-button"),
+		"boundary up focuses more button",
+	)
+
+	pressKey(t, ctx, "ArrowUp")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression(secondaryFeedSelector),
+		"arrow up from more returns focus to last unread feed",
+	)
+	waitForJS(t, ctx, hasClassExpression(secondaryFeedSelector, "active"), "secondary feed active after boundary flow")
+	waitForJS(t, ctx, activeElementMatchesExpression(secondaryFeedSelector), "secondary feed retains focus")
 }
 
 func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
@@ -472,6 +583,13 @@ func hasClassExpression(selector, className string) string {
 	)
 }
 
+func elementPresentExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => !!document.querySelector(%q))()`,
+		selector,
+	)
+}
+
 func missingClassExpression(selector, className string) string {
 	return fmt.Sprintf(
 		`(() => { const el = document.querySelector(%q); return !!el && !el.classList.contains(%q); })()`,
@@ -485,6 +603,32 @@ func activeElementMatchesExpression(selector string) string {
 		`(() => { const el = document.querySelector(%q); return !!el && document.activeElement === el; })()`,
 		selector,
 	)
+}
+
+func feedMoreExpandedExpression() string {
+	return `(() => {
+		const button = document.querySelector("#feed-list .feed-more-button");
+		const zeroList = document.querySelector("#feed-list #feed-zero-list");
+		if (!button || !zeroList) {
+			return false;
+		}
+		return button.getAttribute("aria-expanded") === "true" &&
+			zeroList.hidden === false &&
+			window.getComputedStyle(zeroList).display !== "none";
+	})()`
+}
+
+func feedMoreCollapsedExpression() string {
+	return `(() => {
+		const button = document.querySelector("#feed-list .feed-more-button");
+		const zeroList = document.querySelector("#feed-list #feed-zero-list");
+		if (!button || !zeroList) {
+			return false;
+		}
+		return button.getAttribute("aria-expanded") === "false" &&
+			zeroList.hidden === true &&
+			window.getComputedStyle(zeroList).display === "none";
+	})()`
 }
 
 func itemOutlineVisibleExpression(rowSelector string) string {

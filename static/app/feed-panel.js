@@ -1,4 +1,5 @@
 import {
+  state,
   feedDragState,
   feedPanelResizeState,
   feedPanelStorageKey,
@@ -61,6 +62,58 @@ export const getFeedLinks = (options = {}) => {
   }
   return links.filter((link) => isVisible(link));
 };
+
+const getFeedMoreButton = () => {
+  const feedList = getFeedList();
+  if (!feedList || isFeedEditMode()) {
+    return null;
+  }
+  return feedList.querySelector(".feed-more-button[data-feed-more-toggle]");
+};
+
+const getFeedZeroList = () => {
+  const feedList = getFeedList();
+  if (!feedList || isFeedEditMode()) {
+    return null;
+  }
+  return feedList.querySelector("#feed-zero-list");
+};
+
+const applyFeedMoreExpandedState = (expanded) => {
+  const moreButton = getFeedMoreButton();
+  const zeroList = getFeedZeroList();
+  if (!moreButton || !zeroList) {
+    return false;
+  }
+
+  const nextExpanded = Boolean(expanded);
+  const activeElement = document.activeElement;
+  const activeInsideZeroList =
+    !nextExpanded && activeElement && zeroList.contains(activeElement);
+  if (activeInsideZeroList) {
+    moreButton.focus({ preventScroll: true });
+  }
+  moreButton.setAttribute("aria-expanded", nextExpanded ? "true" : "false");
+  zeroList.hidden = !nextExpanded;
+
+  return true;
+};
+
+export const syncFeedMoreState = () => applyFeedMoreExpandedState(state.feedMoreExpanded);
+
+const toggleFeedMoreState = () => {
+  state.feedMoreExpanded = !state.feedMoreExpanded;
+  applyFeedMoreExpandedState(state.feedMoreExpanded);
+};
+
+const isZeroUnreadFeedLink = (feedButton) =>
+  Boolean(feedButton && feedButton.closest("#feed-zero-list"));
+
+const getVisibleUnreadFeedLinks = () =>
+  getFeedLinks({ visibleOnly: true }).filter((link) => !isZeroUnreadFeedLink(link));
+
+const getVisibleZeroUnreadFeedLinks = () =>
+  getFeedLinks({ visibleOnly: true }).filter((link) => isZeroUnreadFeedLink(link));
 
 const getSelectedFeedButton = (options = {}) => {
   const links = getFeedLinks({ visibleOnly: options.visibleOnly });
@@ -235,25 +288,66 @@ const requestFeedItems = (feedButton, pendingPanelFocus) => {
   return true;
 };
 
+const focusFeedLink = (feedButton, options = {}) => {
+  if (!feedButton) {
+    return false;
+  }
+
+  const shouldRequestItems = Boolean(options.shouldRequestItems);
+  const currentSelection =
+    getSelectedFeedButton({ visibleOnly: true }) || getSelectedFeedButton();
+  const selectionChanged = currentSelection !== feedButton;
+  setSelectedFeed(feedButton);
+  feedButton.focus({ preventScroll: true });
+  feedButton.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  setPanelFocus("feed");
+  if (shouldRequestItems && selectionChanged) {
+    requestFeedItems(feedButton, "feed");
+  }
+  return true;
+};
+
+const focusFeedMoreButton = () => {
+  const moreButton = getFeedMoreButton();
+  if (!moreButton) {
+    return false;
+  }
+  moreButton.focus({ preventScroll: true });
+  moreButton.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  setPanelFocus("feed");
+  return true;
+};
+
+const queueFeedMoreButtonFocus = () => {
+  if (typeof window.requestAnimationFrame !== "function") {
+    return;
+  }
+  window.requestAnimationFrame(() => {
+    focusFeedMoreButton();
+  });
+};
+
 export const focusFeedPanel = () => {
   if (!isDesktopLayout() || isFeedEditMode()) {
     return false;
   }
 
-  const selectedFeed =
-    getSelectedFeedButton({ visibleOnly: true }) || getSelectedFeedButton();
+  const visibleSelection = getSelectedFeedButton({ visibleOnly: true });
+  if (visibleSelection) {
+    focusFeedLink(visibleSelection, { shouldRequestItems: !getItemList() });
+    return true;
+  }
+
+  if (focusFeedMoreButton()) {
+    return true;
+  }
+
+  const selectedFeed = getSelectedFeedButton();
   if (!selectedFeed) {
     return false;
   }
 
-  setSelectedFeed(selectedFeed);
-  selectedFeed.focus({ preventScroll: true });
-  selectedFeed.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  setPanelFocus("feed");
-  if (!getItemList()) {
-    requestFeedItems(selectedFeed, "feed");
-  }
-  return true;
+  return focusFeedLink(selectedFeed, { shouldRequestItems: !getItemList() });
 };
 
 export const moveSelectedFeed = (delta) => {
@@ -261,31 +355,81 @@ export const moveSelectedFeed = (delta) => {
     return false;
   }
 
-  const feedButtons = getFeedLinks({ visibleOnly: true });
-  if (!feedButtons.length) {
+  const step = Math.sign(delta);
+  if (step === 0) {
     return false;
+  }
+
+  const moreButton = getFeedMoreButton();
+  const feedButtons = getFeedLinks({ visibleOnly: true });
+  const unreadFeedButtons = getVisibleUnreadFeedLinks();
+  const zeroFeedButtons = getVisibleZeroUnreadFeedLinks();
+  if (moreButton && document.activeElement === moreButton) {
+    if (step > 0) {
+      if (!state.feedMoreExpanded) {
+        state.feedMoreExpanded = true;
+        applyFeedMoreExpandedState(true);
+        return focusFeedMoreButton();
+      }
+      if (zeroFeedButtons.length) {
+        return focusFeedLink(zeroFeedButtons[0], { shouldRequestItems: true });
+      }
+      return focusFeedMoreButton();
+    }
+
+    if (unreadFeedButtons.length) {
+      return focusFeedLink(unreadFeedButtons[unreadFeedButtons.length - 1], {
+        shouldRequestItems: true,
+      });
+    }
+
+    return focusFeedMoreButton();
+  }
+
+  if (!feedButtons.length) {
+    if (!moreButton) {
+      return false;
+    }
+    if (step > 0 && !state.feedMoreExpanded) {
+      state.feedMoreExpanded = true;
+      applyFeedMoreExpandedState(true);
+    }
+    return focusFeedMoreButton();
   }
 
   const current =
     getSelectedFeedButton({ visibleOnly: true }) || feedButtons[0];
+
+  if (moreButton && step > 0 && unreadFeedButtons.length && !isZeroUnreadFeedLink(current)) {
+    const lastUnread = unreadFeedButtons[unreadFeedButtons.length - 1];
+    if (current === lastUnread) {
+      state.feedMoreExpanded = true;
+      applyFeedMoreExpandedState(true);
+      return focusFeedMoreButton();
+    }
+  }
+
+  if (moreButton && step < 0 && zeroFeedButtons.length && isZeroUnreadFeedLink(current)) {
+    const firstZero = zeroFeedButtons[0];
+    if (current === firstZero) {
+      state.feedMoreExpanded = false;
+      applyFeedMoreExpandedState(false);
+      const focused = focusFeedMoreButton();
+      queueFeedMoreButtonFocus();
+      return focused;
+    }
+  }
+
   let index = feedButtons.indexOf(current);
   if (index < 0) {
     index = 0;
   }
   const nextIndex = Math.min(
     feedButtons.length - 1,
-    Math.max(0, index + delta)
+    Math.max(0, index + step)
   );
   const next = feedButtons[nextIndex];
-  const selectionChanged = next !== current;
-  setSelectedFeed(next);
-  next.focus({ preventScroll: true });
-  next.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  setPanelFocus("feed");
-  if (selectionChanged) {
-    requestFeedItems(next, "feed");
-  }
-  return true;
+  return focusFeedLink(next, { shouldRequestItems: true });
 };
 
 export const openSelectedFeed = () => {
@@ -466,6 +610,20 @@ export const bindFeedPanelInteractions = () => {
     return;
   }
   document.body.dataset.feedPanelInteractionsBound = "true";
+
+  document.addEventListener("click", (event) => {
+    const moreButton = event.target.closest(".feed-more-button[data-feed-more-toggle]");
+    if (!moreButton) {
+      return;
+    }
+    const feedList = getFeedList();
+    if (!feedList || !feedList.contains(moreButton)) {
+      return;
+    }
+    event.preventDefault();
+    toggleFeedMoreState();
+    setPanelFocus("feed");
+  });
 
   document.addEventListener("click", (event) => {
     const feedButton = event.target.closest(".feed-link");

@@ -20,6 +20,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
     content.syncActiveItemOutline();
     topbar.syncTopbarShortcuts();
     feed.syncFeedDeleteMarks();
+    feed.syncFeedMoreState();
   };
 
   const focusFeedPanel = () => feed.focusFeedPanel();

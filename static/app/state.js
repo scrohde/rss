@@ -2,6 +2,7 @@ export const state = {
   activeId: null,
   itemKeyboardNavActive: false,
   pendingReadShortcut: null,
+  feedMoreExpanded: false,
   panelFocus: "items",
   pendingPanelFocus: null,
   pendingContentItemID: null,

@@ -65,7 +65,7 @@ const panelFromTarget = (target) => {
     feedList &&
     !isFeedEditModeResolver() &&
     feedList.contains(resolvedTarget) &&
-    resolvedTarget.closest(".feed-link")
+    resolvedTarget.closest(".feed-link, .feed-more-button[data-feed-more-toggle]")
   ) {
     return "feed";
   }

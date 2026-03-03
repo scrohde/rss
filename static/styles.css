@@ -863,33 +863,53 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   margin-top: 6px;
 }
 
-.feed-more-details {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .feed-more-button {
-  list-style: none;
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
-  border: 1px solid rgba(15, 118, 110, 0.3);
-  background: transparent;
+  justify-content: center;
+  align-self: center;
+  width: 44px;
+  height: 24px;
+  border: 1px solid rgba(15, 118, 110, 0.35);
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96),
+      rgba(240, 251, 250, 0.94)
+    ),
+    var(--surface);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 9px;
+  padding: 0;
   cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
-.feed-more-button::-webkit-details-marker {
-  display: none;
+.feed-more-button:hover {
+  border-color: rgba(15, 118, 110, 0.55);
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.12);
+  transform: translateY(-1px);
 }
 
-.feed-more-label-expanded {
-  display: none;
+.feed-more-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
+
+.feed-more-icon {
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.feed-more-button[aria-expanded="true"] .feed-more-icon {
+  transform: translateY(1px) rotate(-135deg);
 }
 
 .feed-zero-list {
@@ -901,15 +921,7 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   gap: 2px;
 }
 
-.feed-more-details[open] .feed-more-label-collapsed {
-  display: none;
-}
-
-.feed-more-details[open] .feed-more-label-expanded {
-  display: inline;
-}
-
-.feed-more-details[open] .feed-zero-list {
+.feed-more-button[aria-expanded="true"] + .feed-zero-list {
   display: flex;
 }
 

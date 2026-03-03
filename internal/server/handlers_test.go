@@ -2998,7 +2998,21 @@ func assertCollapsedZeroUnreadFeedList(t *testing.T, body string) {
 	t.Helper()
 
 	assertContains(t, body, `class="feed-more-button"`, "expected more button when zero-unread feeds exist")
+	assertContains(
+		t,
+		body,
+		`aria-label="Toggle feeds with no unread items"`,
+		"expected accessible label for zero-unread toggle",
+	)
+	assertContains(t, body, `aria-expanded="false"`, "expected collapsed more button by default")
+	assertContains(t, body, `aria-controls="feed-zero-list"`, "expected button to control zero-unread list")
 	assertContains(t, body, `class="feed-zero-list"`, "expected collapsed zero-unread feed section")
+	assertContains(t, body, `id="feed-zero-list"`, "expected zero-unread list id for aria-controls linkage")
+	assertContains(t, body, `class="feed-zero-list" hidden`, "expected zero-unread list to start hidden")
+	assertNotContains(t, body, "feed-more-label-collapsed", "expected legacy More label markup to be removed")
+	assertNotContains(t, body, "feed-more-label-expanded", "expected legacy Less label markup to be removed")
+	assertNotContains(t, body, "<summary", "expected native summary element to be removed")
+	assertNotContains(t, body, "<details", "expected native details element to be removed")
 
 	alphaIdx := strings.Index(body, "Alpha Active")
 	betaIdx := strings.Index(body, "Beta Active")

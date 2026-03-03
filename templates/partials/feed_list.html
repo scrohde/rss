@@ -125,24 +125,28 @@
       {{end}}
       {{if $hasNoUnreadFeeds}}
         <li class="feed-more-section">
-          <details class="feed-more-details">
-            <summary class="feed-more-button">
-              <span class="feed-more-label-collapsed">More</span>
-              <span class="feed-more-label-expanded">Less</span>
-            </summary>
-            <ul class="feed-zero-list">
-              {{range .Feeds}}
-                {{if eq .UnreadCount 0}}
-                  <li class="feed-row">
-                    <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
-                      <span class="feed-title">{{.Title}}</span>
-                      <span class="feed-count">{{.UnreadCount}}</span>
-                    </button>
-                  </li>
-                {{end}}
+          <button
+            class="feed-more-button"
+            type="button"
+            aria-label="Toggle feeds with no unread items"
+            aria-expanded="false"
+            aria-controls="feed-zero-list"
+            data-feed-more-toggle
+          >
+            <span class="feed-more-icon" aria-hidden="true"></span>
+          </button>
+          <ul id="feed-zero-list" class="feed-zero-list" hidden>
+            {{range .Feeds}}
+              {{if eq .UnreadCount 0}}
+                <li class="feed-row">
+                  <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
+                    <span class="feed-title">{{.Title}}</span>
+                    <span class="feed-count">{{.UnreadCount}}</span>
+                  </button>
+                </li>
               {{end}}
-            </ul>
-          </details>
+            {{end}}
+          </ul>
         </li>
       {{end}}
     </ul>
