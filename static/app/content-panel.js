@@ -71,6 +71,7 @@ export const ensureActive = () => {
   const list = getItemList();
   if (!list) {
     state.activeId = null;
+    syncActiveItemOutline();
     return null;
   }
   let target = null;
@@ -83,6 +84,7 @@ export const ensureActive = () => {
   if (target) {
     setActive(target);
   }
+  syncActiveItemOutline();
   return target;
 };
 
@@ -95,6 +97,7 @@ export const bindItemRowClickGuards = () => {
     element.addEventListener("click", (event) => {
       const row = event.currentTarget.closest(".item-entry");
       if (row) {
+        setItemKeyboardNavActive(false);
         setActive(row);
       }
       event.stopPropagation();
@@ -701,6 +704,7 @@ export const bindContentPanelInteractions = () => {
     }
     const row = event.target.closest(".item-entry");
     if (row && list.contains(row)) {
+      setItemKeyboardNavActive(false);
       setActive(row);
       setPanelFocus("items");
     }

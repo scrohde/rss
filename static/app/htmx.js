@@ -28,6 +28,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
   const focusFeedEditTitleInput = () => feed.focusFeedEditTitleInput();
   const clearFeedDragState = () => feed.clearFeedDragState();
   const ensureActive = () => content.ensureActive();
+  const syncActiveItemOutline = () => content.syncActiveItemOutline();
   const applyPendingReadShortcut = () => content.applyPendingReadShortcut();
   const isPendingReadSwap = (event, pending) => content.isPendingReadSwap(event, pending);
   const focusContentPanel = (options = {}) => content.focusContentPanel(options);
@@ -74,6 +75,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
     }
     if (getItemList()) {
       ensureActive();
+      syncActiveItemOutline();
       focusItemList();
     } else if (getFeedLinks({ visibleOnly: true }).length) {
       focusFeedPanel();
@@ -98,6 +100,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       } else {
         ensureActive();
       }
+      syncActiveItemOutline();
       focusPanelAfterSwap();
     } else {
       state.activeId = null;
