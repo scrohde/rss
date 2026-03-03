@@ -21,6 +21,7 @@ export const bindKeyboardShortcuts = ({
     if (panel === "content") {
       return content.scrollExpandedPanel(delta * expandedPanelScrollStep);
     }
+    content.setItemKeyboardNavActive(true);
     content.moveActive(delta);
     return true;
   };
@@ -69,6 +70,7 @@ export const bindKeyboardShortcuts = ({
         if (key === "arrowdown" && content.scrollExpandedPanel(expandedPanelScrollStep)) {
           break;
         }
+        content.setItemKeyboardNavActive(true);
         content.moveActive(1);
         break;
       case "k":
@@ -81,6 +83,7 @@ export const bindKeyboardShortcuts = ({
         if (key === "arrowup" && content.scrollExpandedPanel(-expandedPanelScrollStep)) {
           break;
         }
+        content.setItemKeyboardNavActive(true);
         content.moveActive(-1);
         break;
       case "l":
