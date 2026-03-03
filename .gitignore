@@ -9,3 +9,7 @@ config.yaml
 /rss
 /.dolt/
 /.doltcfg/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

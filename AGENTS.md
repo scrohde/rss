@@ -38,6 +38,18 @@ golangci-lint fmt ./...
 golangci-lint run --fix ./...
 ```
 
+Browser smoke tests:
+
+```bash
+./scripts/smoke.sh
+```
+
+If Chrome/Chromium is not on `PATH`, set `PULSE_SMOKE_BROWSER_BIN`:
+
+```bash
+PULSE_SMOKE_BROWSER_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ./scripts/smoke.sh
+```
+
 ## Project layout
 - `main.go` thin entrypoint (logging, wiring, config/env parsing, server startup)
 - `internal/server/` HTTP routes, handlers, template rendering, auth/session flows, background loops
@@ -51,6 +63,7 @@ golangci-lint run --fix ./...
 - `templates/` HTML templates and htmx partials (including auth screens)
 - `static/` frontend assets (`app.js`, `auth.js`, CSS, icons, vendor JS)
 - `internal/server/handlers_test.go` and `internal/server/auth_handlers_test.go` integration-style handler tests
+- `internal/server/browser_smoke_test.go` browser smoke test suite (build tag: `smoke`)
 - `internal/content/*_test.go` HTML rewrite, srcset, and proxy policy tests
 - `internal/feed/*.go` refresh + scheduling tests
 - `internal/store/store_test.go` and `internal/store/auth_test.go` DB/store tests

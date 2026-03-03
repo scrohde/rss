@@ -198,6 +198,16 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.pulse-rss.plist
 go test ./...
 ```
 
+Browser smoke tests (headless Chrome/Chromium required):
+```bash
+./scripts/smoke.sh
+```
+
+If Chrome/Chromium is not on `PATH`, point the smoke suite to a binary:
+```bash
+PULSE_SMOKE_BROWSER_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ./scripts/smoke.sh
+```
+
 All-in-one dev check (lint autofix + tests):
 ```bash
 ./scripts/check.sh
