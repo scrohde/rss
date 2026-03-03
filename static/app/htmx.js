@@ -17,6 +17,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
     feed.syncFeedPanelWidth();
     content.syncContentPanelWidth();
     content.syncContentPanelMode();
+    content.syncActiveItemOutline();
     topbar.syncTopbarShortcuts();
     feed.syncFeedDeleteMarks();
   };
@@ -100,7 +101,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       focusPanelAfterSwap();
     } else {
       state.activeId = null;
-      state.itemKeyboardNavActive = false;
+      content.setItemKeyboardNavActive(false);
       state.pendingReadShortcut = null;
       setPendingPanelFocus(null);
       if (getFeedLinks({ visibleOnly: true }).length) {

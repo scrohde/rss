@@ -37,6 +37,19 @@ const getExpandedRow = () => {
   return list.querySelector(".item-entry.is-expanded");
 };
 
+export const syncActiveItemOutline = () => {
+  const list = getItemList();
+  if (!list) {
+    return;
+  }
+  list.classList.toggle("is-keyboard-nav", Boolean(state.itemKeyboardNavActive));
+};
+
+export const setItemKeyboardNavActive = (active) => {
+  state.itemKeyboardNavActive = Boolean(active);
+  syncActiveItemOutline();
+};
+
 export const setActive = (row, options = {}) => {
   const list = getItemList();
   if (!list || !row) {
