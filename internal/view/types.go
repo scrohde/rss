@@ -1,6 +1,15 @@
 package view
 
-import "html/template"
+import (
+	"database/sql"
+	"html/template"
+)
+
+// FeedStatus captures refresh/error state for feed list rendering.
+type FeedStatus struct {
+	LastChecked sql.NullTime
+	LastError   sql.NullString
+}
 
 // FeedView is template data for one feed in the feed list.
 type FeedView struct {
@@ -10,6 +19,7 @@ type FeedView struct {
 	LastRefreshDisplay string
 	LastError          string
 	ID                 int64
+	SortOrder          int
 	ItemCount          int
 	UnreadCount        int
 }

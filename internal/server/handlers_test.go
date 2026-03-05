@@ -1100,9 +1100,7 @@ func subscribeFeedItems(now time.Time) []testutil.RSSItem {
 
 func activeFeedButton(feedID int64) string {
 	return fmt.Sprintf(
-		"class=\"feed-link active\" type=\"button\" "+
-			"data-feed-id=\"%d\" hx-get=\"/feeds/%d/items\"",
-		feedID,
+		"class=\"feed-link active\" type=\"button\" data-feed-id=\"%d\"",
 		feedID,
 	)
 }
@@ -3141,20 +3139,22 @@ func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
 	t.Parallel()
 
 	var (
-		emptyChecked sql.NullTime
-		emptyError   sql.NullString
-		noError      sql.NullString
+		emptyChecked        sql.NullTime
+		emptyError, noError sql.NullString
 	)
 
 	feed := view.BuildFeedView(
 		1,
+		0,
 		itemLimitFeedTitle,
 		itemLimitFeedTitle,
 		"https://example.com",
 		0,
 		0,
-		emptyChecked,
-		emptyError,
+		view.FeedStatus{
+			LastChecked: emptyChecked,
+			LastError:   emptyError,
+		},
 	)
 	if feed.LastRefreshDisplay != "Never" {
 		t.Fatalf("expected Never, got %q", feed.LastRefreshDisplay)
@@ -3176,16 +3176,18 @@ func TestBuildFeedViewLastRefreshDisplay(t *testing.T) {
 			t.Parallel()
 
 			checked := sql.NullTime{Time: time.Now().Add(-tc.age), Valid: true}
-
 			feedView := view.BuildFeedView(
 				1,
+				0,
 				itemLimitFeedTitle,
 				itemLimitFeedTitle,
 				"https://example.com",
 				0,
 				0,
-				checked,
-				noError,
+				view.FeedStatus{
+					LastChecked: checked,
+					LastError:   noError,
+				},
 			)
 
 			got := feedView.LastRefreshDisplay

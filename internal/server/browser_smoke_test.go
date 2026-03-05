@@ -26,6 +26,8 @@ const (
 type smokeFixture struct {
 	archiveFeedID         int64
 	secondaryFeedID       int64
+	tertiaryFeedID        int64
+	quaternaryFeedID      int64
 	secondaryFirstItemID  int64
 	secondarySecondItemID int64
 }
@@ -57,6 +59,27 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	runFeedBoundaryKeyboardFlow(t, ctx, fixture)
 }
 
+func TestBrowserSmokeHiddenSelectionFallback(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := httptest.NewServer(app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+		chromedp.WaitVisible("#main-content", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
+
+	runFeedSelectionFlow(t, ctx, fixture)
+	runHiddenSelectionFallbackFlow(t, ctx, fixture)
+}
+
 func newSmokeApp(t *testing.T) *App {
 	t.Helper()
 
@@ -73,6 +96,8 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	primaryFeedID := mustUpsertFeed(t, app, "https://example.com/feed-primary.xml", "Primary Feed")
 	secondaryFeedID := mustUpsertFeed(t, app, "https://example.com/feed-secondary.xml", "Secondary Feed")
+	tertiaryFeedID := mustUpsertFeed(t, app, "https://example.com/feed-tertiary.xml", "Tertiary Feed")
+	quaternaryFeedID := mustUpsertFeed(t, app, "https://example.com/feed-quaternary.xml", "Quaternary Feed")
 	archiveFeedID := mustUpsertFeed(t, app, "https://example.com/feed-archive.xml", "Archive Feed")
 
 	mustUpsertItems(t, app, primaryFeedID, []*gofeed.Item{
@@ -82,6 +107,12 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 		newSmokeItem("Secondary One", "https://example.com/s1", "secondary-1", base),
 		newSmokeItem("Secondary Two", "https://example.com/s2", "secondary-2", base.Add(-time.Hour)),
 	})
+	mustUpsertItems(t, app, tertiaryFeedID, []*gofeed.Item{
+		newSmokeItem("Tertiary One", "https://example.com/t1", "tertiary-1", base.Add(-2*time.Hour)),
+	})
+	mustUpsertItems(t, app, quaternaryFeedID, []*gofeed.Item{
+		newSmokeItem("Quaternary One", "https://example.com/q1", "quaternary-1", base.Add(-4*time.Hour)),
+	})
 
 	secondaryItems := mustListItems(t, app, secondaryFeedID)
 	assertItemCount(t, secondaryItems, 2)
@@ -89,6 +120,8 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	return smokeFixture{
 		archiveFeedID:         archiveFeedID,
 		secondaryFeedID:       secondaryFeedID,
+		tertiaryFeedID:        tertiaryFeedID,
+		quaternaryFeedID:      quaternaryFeedID,
 		secondaryFirstItemID:  secondaryItems[0].ID,
 		secondarySecondItemID: secondaryItems[1].ID,
 	}
@@ -269,9 +302,9 @@ func runMoreTogglePersistenceFlow(t *testing.T, ctx context.Context, fixture smo
 func runFeedBoundaryKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	t.Helper()
 
-	secondaryFeedSelector := fmt.Sprintf(
+	lastUnreadFeedSelector := fmt.Sprintf(
 		`#feed-list .feed-link[data-feed-id="%d"]`,
-		fixture.secondaryFeedID,
+		fixture.quaternaryFeedID,
 	)
 	archiveFeedSelector := fmt.Sprintf(
 		`#feed-list #feed-zero-list .feed-link[data-feed-id="%d"]`,
@@ -282,12 +315,14 @@ func runFeedBoundaryKeyboardFlow(t *testing.T, ctx context.Context, fixture smok
 		fixture.archiveFeedID,
 	)
 
-	runActions(t, ctx, chromedp.Focus(secondaryFeedSelector, chromedp.ByQuery))
+	runActions(t, ctx, chromedp.Click(lastUnreadFeedSelector, chromedp.ByQuery))
+	waitForJS(t, ctx, hasClassExpression(lastUnreadFeedSelector, "active"), "last unread feed active before boundary down")
+	runActions(t, ctx, chromedp.Focus(lastUnreadFeedSelector, chromedp.ByQuery))
 	waitForJS(
 		t,
 		ctx,
-		activeElementMatchesExpression(secondaryFeedSelector),
-		"secondary feed focused before boundary down",
+		activeElementMatchesExpression(lastUnreadFeedSelector),
+		"last unread feed focused before boundary down",
 	)
 	waitForJS(t, ctx, feedMoreCollapsedExpression(), "more panel collapsed before boundary down")
 
@@ -322,11 +357,112 @@ func runFeedBoundaryKeyboardFlow(t *testing.T, ctx context.Context, fixture smok
 	waitForJS(
 		t,
 		ctx,
-		activeElementMatchesExpression(secondaryFeedSelector),
+		activeElementMatchesExpression(lastUnreadFeedSelector),
 		"arrow up from more returns focus to last unread feed",
 	)
-	waitForJS(t, ctx, hasClassExpression(secondaryFeedSelector, "active"), "secondary feed active after boundary flow")
-	waitForJS(t, ctx, activeElementMatchesExpression(secondaryFeedSelector), "secondary feed retains focus")
+	waitForJS(t, ctx, hasClassExpression(lastUnreadFeedSelector, "active"), "last unread feed active after boundary flow")
+	waitForJS(t, ctx, activeElementMatchesExpression(lastUnreadFeedSelector), "last unread feed retains focus")
+}
+
+func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	secondaryFeedSelector := fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, fixture.secondaryFeedID)
+	tertiaryFeedSelector := fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, fixture.tertiaryFeedID)
+	quaternaryFeedSelector := fmt.Sprintf(
+		`#feed-list .feed-link[data-feed-id="%d"]`,
+		fixture.quaternaryFeedID,
+	)
+	secondaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.secondaryFeedID)
+	tertiaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.tertiaryFeedID)
+	secondaryFirstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
+	secondarySecondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
+	secondaryFirstRowTarget := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
+	secondarySecondRowTarget := fmt.Sprintf("#item-%d", fixture.secondarySecondItemID)
+	secondaryFirstSelectedID := fmt.Sprintf("item-%d", fixture.secondaryFirstItemID)
+	secondarySecondSelectedID := fmt.Sprintf("item-%d", fixture.secondarySecondItemID)
+	tertiaryMarkAllSelector := fmt.Sprintf(
+		`.item-actions button[hx-post="/feeds/%d/items/read"]`,
+		fixture.tertiaryFeedID,
+	)
+
+	clickElement(t, ctx, secondaryFeedSelector, "open secondary feed before hidden-selection flow")
+	waitForJS(
+		t,
+		ctx,
+		hasClassExpression(secondaryFeedSelector, "active"),
+		"secondary feed active before hidden-selection flow",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(secondaryListSelector),
+		"secondary items loaded before hidden-selection flow",
+	)
+	waitForJS(t, ctx, feedMoreCollapsedExpression(), "more panel collapsed before hidden-selection flow")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/items/%d/toggle", fixture.secondaryFirstItemID),
+		secondaryFirstRowTarget,
+		secondaryFirstSelectedID,
+	)
+	waitForJS(t, ctx, hasClassExpression(secondaryFirstRowSelector, "is-read"), "secondary first row marked read")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/items/%d/toggle", fixture.secondarySecondItemID),
+		secondarySecondRowTarget,
+		secondarySecondSelectedID,
+	)
+	waitForJS(t, ctx, hasClassExpression(secondarySecondRowSelector, "is-read"), "secondary second row marked read")
+	waitForJS(
+		t,
+		ctx,
+		elementHiddenExpression(secondaryFeedSelector),
+		"secondary feed hidden after individual toggles reach zero unread",
+	)
+
+	runActions(t, ctx, chromedp.Focus("#item-list", chromedp.ByQuery))
+	pressKey(t, ctx, "h")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression(tertiaryFeedSelector),
+		"hidden selected feed resolves to next visible feed after individual toggles",
+	)
+	waitForJS(t, ctx, hasClassExpression(tertiaryFeedSelector, "active"), "tertiary feed active after toggle fallback")
+
+	pressKey(t, ctx, "l")
+	waitForJS(t, ctx, elementPresentExpression(tertiaryListSelector), "tertiary items loaded before mark-all")
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focused on tertiary feed")
+
+	runActions(t, ctx, chromedp.Click(tertiaryMarkAllSelector, chromedp.ByQuery))
+	waitForJS(
+		t,
+		ctx,
+		elementHiddenExpression(tertiaryFeedSelector),
+		"tertiary feed hidden after mark-all-read reaches zero unread",
+	)
+
+	runActions(t, ctx, chromedp.Focus("#item-list", chromedp.ByQuery))
+	pressKey(t, ctx, "h")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression(quaternaryFeedSelector),
+		"hidden selected feed resolves to next visible feed after mark-all-read",
+	)
+	waitForJS(
+		t,
+		ctx,
+		hasClassExpression(quaternaryFeedSelector, "active"),
+		"quaternary feed active after mark-all fallback",
+	)
 }
 
 func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
@@ -368,10 +504,20 @@ func runFeedToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixture s
 	firstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active before feed-to-items step")
-	waitForJS(t, ctx, missingClassExpression("#item-list", "is-keyboard-nav"), "keyboard nav marker absent before feed focus")
+	waitForJS(
+		t,
+		ctx,
+		missingClassExpression("#item-list", "is-keyboard-nav"),
+		"keyboard nav marker absent before feed focus",
+	)
 
 	runActions(t, ctx, chromedp.Focus("#feed-list .feed-link.active", chromedp.ByQuery))
-	waitForJS(t, ctx, activeElementMatchesExpression("#feed-list .feed-link.active"), "feed panel focus before right arrow")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression("#feed-list .feed-link.active"),
+		"feed panel focus before right arrow",
+	)
 
 	pressKey(t, ctx, "l")
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focus after right arrow from feed")
@@ -397,7 +543,12 @@ func runContentToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixtur
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focus before content entry")
 
 	pressKey(t, ctx, "l")
-	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-expanded"), "expanded first row before content-to-items step")
+	waitForJS(
+		t,
+		ctx,
+		hasClassExpression(firstRowSelector, "is-expanded"),
+		"expanded first row before content-to-items step",
+	)
 	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "opened content panel before content-to-items step")
 	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "content panel focus before left arrow")
 
@@ -408,7 +559,12 @@ func runContentToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixtur
 		missingClassExpression(firstRowSelector, "is-expanded"),
 		"collapsed first row after left arrow from content",
 	)
-	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "closed content panel after left arrow from content")
+	waitForJS(
+		t,
+		ctx,
+		missingClassExpression("#content-panel", "is-open"),
+		"closed content panel after left arrow from content",
+	)
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focus after left arrow from content")
 	waitForJS(t, ctx, itemOutlineVisibleExpression(firstRowSelector), "outline visible after left arrow from content")
 }
@@ -508,6 +664,30 @@ func runActions(t *testing.T, ctx context.Context, actions ...chromedp.Action) {
 	}
 }
 
+func clickElement(t *testing.T, ctx context.Context, selector, label string) {
+	t.Helper()
+
+	expression := fmt.Sprintf(
+		`(() => {
+			const el = document.querySelector(%q);
+			if (!el || typeof el.click !== "function") {
+				return false;
+			}
+			el.click();
+			return true;
+		})()`,
+		selector,
+	)
+
+	var ok bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &ok)); err != nil {
+		t.Fatalf("click element %s: %v", label, err)
+	}
+	if !ok {
+		t.Fatalf("click element %s: selector not clickable (%s)", label, selector)
+	}
+}
+
 func requestHTMX(t *testing.T, ctx context.Context, method, path, target, selectedItemID string) {
 	t.Helper()
 
@@ -586,6 +766,16 @@ func hasClassExpression(selector, className string) string {
 func elementPresentExpression(selector string) string {
 	return fmt.Sprintf(
 		`(() => !!document.querySelector(%q))()`,
+		selector,
+	)
+}
+
+func elementHiddenExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const el = document.querySelector(%q);
+			return !!el && el.getClientRects().length === 0;
+		})()`,
 		selector,
 	)
 }

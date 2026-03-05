@@ -19,26 +19,27 @@ const (
 // BuildFeedView builds a FeedView from feed row values.
 func BuildFeedView(
 	id int64,
+	sortOrder int,
 	title string,
 	originalTitle string,
 	url string,
 	itemCount int,
 	unreadCount int,
-	lastChecked sql.NullTime,
-	lastError sql.NullString,
+	status FeedStatus,
 ) FeedView {
 	refreshDisplay := "Never"
-	if lastChecked.Valid {
-		refreshDisplay = FormatRelativeShort(lastChecked.Time, time.Now())
+	if status.LastChecked.Valid {
+		refreshDisplay = FormatRelativeShort(status.LastChecked.Time, time.Now())
 	}
 
 	errText := ""
-	if lastError.Valid {
-		errText = lastError.String
+	if status.LastError.Valid {
+		errText = status.LastError.String
 	}
 
 	return FeedView{
 		ID:                 id,
+		SortOrder:          sortOrder,
 		Title:              title,
 		OriginalTitle:      originalTitle,
 		URL:                url,

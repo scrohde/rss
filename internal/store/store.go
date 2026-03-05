@@ -486,7 +486,7 @@ func ListFeeds(ctx context.Context, db *sql.DB) ([]view.FeedView, error) {
 	ctx = contextOrBackground(ctx)
 
 	rows, err := db.QueryContext(ctx, `
-SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,
+SELECT f.id, f.sort_order, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
@@ -595,6 +595,7 @@ func GetFeed(
 
 	row := db.QueryRowContext(ctx, `
 SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,
+       f.sort_order,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id) AS item_count,
        (SELECT COUNT(*) FROM items i WHERE i.feed_id = f.id AND i.read_at IS NULL) AS unread_count,
        f.last_refreshed_at,
@@ -605,6 +606,7 @@ WHERE f.id = ?
 
 	var (
 		id            int64
+		sortOrder     int
 		title         string
 		originalTitle string
 		url           string
@@ -614,14 +616,36 @@ WHERE f.id = ?
 		lastError     sql.NullString
 	)
 
-	err := row.Scan(&id, &title, &originalTitle, &url, &itemCount, &unreadCount, &lastChecked, &lastError)
+	err := row.Scan(
+		&id,
+		&title,
+		&originalTitle,
+		&url,
+		&sortOrder,
+		&itemCount,
+		&unreadCount,
+		&lastChecked,
+		&lastError,
+	)
 	if err != nil {
 		return view.FeedView{}, fmt.Errorf("scan feed %d: %w", feedID, err)
 	}
 
 	slog.Info("db get feed", "feed_id", feedID)
 
-	return view.BuildFeedView(id, title, originalTitle, url, itemCount, unreadCount, lastChecked, lastError), nil
+	return view.BuildFeedView(
+		id,
+		sortOrder,
+		title,
+		originalTitle,
+		url,
+		itemCount,
+		unreadCount,
+		view.FeedStatus{
+			LastChecked: lastChecked,
+			LastError:   lastError,
+		},
+	), nil
 }
 
 // GetFeedURL is part of the store package API.
@@ -1065,6 +1089,7 @@ func scanItemView(rows *sql.Rows) (view.ItemView, error) {
 func scanFeedView(rows *sql.Rows) (view.FeedView, error) {
 	var (
 		id            int64
+		sortOrder     int
 		title         string
 		originalTitle string
 		url           string
@@ -1074,20 +1099,33 @@ func scanFeedView(rows *sql.Rows) (view.FeedView, error) {
 		lastError     sql.NullString
 	)
 
-	err := rows.Scan(&id, &title, &originalTitle, &url, &itemCount, &unreadCount, &lastChecked, &lastError)
+	err := rows.Scan(
+		&id,
+		&sortOrder,
+		&title,
+		&originalTitle,
+		&url,
+		&itemCount,
+		&unreadCount,
+		&lastChecked,
+		&lastError,
+	)
 	if err != nil {
 		return view.FeedView{}, fmt.Errorf("scan feed row: %w", err)
 	}
 
 	return view.BuildFeedView(
 		id,
+		sortOrder,
 		title,
 		originalTitle,
 		url,
 		itemCount,
 		unreadCount,
-		lastChecked,
-		lastError,
+		view.FeedStatus{
+			LastChecked: lastChecked,
+			LastError:   lastError,
+		},
 	), nil
 }
 

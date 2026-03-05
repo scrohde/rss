@@ -116,7 +116,12 @@
       {{range .Feeds}}
         {{if gt .UnreadCount 0}}
           <li class="feed-row">
-            <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
+            <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}"
+              data-feed-order="{{.SortOrder}}"
+              hx-get="/feeds/{{.ID}}/items"
+              hx-target="#main-content"
+              hx-swap="innerHTML"
+            >
               <span class="feed-title">{{.Title}}</span>
               <span class="feed-count">{{.UnreadCount}}</span>
             </button>
@@ -139,7 +144,14 @@
             {{range .Feeds}}
               {{if eq .UnreadCount 0}}
                 <li class="feed-row">
-                  <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}" hx-get="/feeds/{{.ID}}/items" hx-target="#main-content" hx-swap="innerHTML">
+                  <button
+                    class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}"
+                    type="button" data-feed-id="{{.ID}}"
+                    data-feed-order="{{.SortOrder}}"
+                    hx-get="/feeds/{{.ID}}/items"
+                    hx-target="#main-content"
+                    hx-swap="innerHTML"
+                  >
                     <span class="feed-title">{{.Title}}</span>
                     <span class="feed-count">{{.UnreadCount}}</span>
                   </button>

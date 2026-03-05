@@ -115,8 +115,63 @@ const getVisibleUnreadFeedLinks = () =>
 const getVisibleZeroUnreadFeedLinks = () =>
   getFeedLinks({ visibleOnly: true }).filter((link) => isZeroUnreadFeedLink(link));
 
+const getSelectedFeedID = () => {
+  const selectedFeedInput = getSelectedFeedInput();
+  if (!selectedFeedInput) {
+    return "";
+  }
+  return selectedFeedInput.value.trim();
+};
+
+const feedOrderValue = (link) => {
+  const raw = parseInt((link.dataset.feedOrder || "").trim(), 10);
+  if (Number.isFinite(raw)) {
+    return raw;
+  }
+  return Number.MAX_SAFE_INTEGER;
+};
+
+const orderFeedLinks = (links) =>
+  links
+    .slice()
+    .sort((left, right) => feedOrderValue(left) - feedOrderValue(right));
+
+const getVisibleNeighborForHiddenSelection = (selectedFeedID, visibleLinks, allLinks) => {
+  if (!selectedFeedID || !visibleLinks.length) {
+    return null;
+  }
+
+  if (!allLinks.length) {
+    return null;
+  }
+
+  const selectedIndex = allLinks.findIndex((link) => link.dataset.feedId === selectedFeedID);
+  if (selectedIndex < 0) {
+    return null;
+  }
+
+  const visibleSet = new Set(visibleLinks);
+  for (let index = selectedIndex + 1; index < allLinks.length; index += 1) {
+    const candidate = allLinks[index];
+    if (visibleSet.has(candidate)) {
+      return candidate;
+    }
+  }
+  for (let index = selectedIndex - 1; index >= 0; index -= 1) {
+    const candidate = allLinks[index];
+    if (visibleSet.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
 const getSelectedFeedButton = (options = {}) => {
-  const links = getFeedLinks({ visibleOnly: options.visibleOnly });
+  const allLinks = orderFeedLinks(getFeedLinks());
+  const links = options.visibleOnly
+    ? allLinks.filter((link) => isVisible(link))
+    : allLinks;
   if (!links.length) {
     return null;
   }
@@ -126,14 +181,21 @@ const getSelectedFeedButton = (options = {}) => {
     return active;
   }
 
-  const selectedFeedInput = getSelectedFeedInput();
-  const selectedFeedID = selectedFeedInput
-    ? selectedFeedInput.value.trim()
-    : "";
+  const selectedFeedID = getSelectedFeedID();
   if (selectedFeedID) {
     const selected = links.find((link) => link.dataset.feedId === selectedFeedID);
     if (selected) {
       return selected;
+    }
+    if (options.visibleOnly) {
+      const visibleNeighbor = getVisibleNeighborForHiddenSelection(
+        selectedFeedID,
+        links,
+        allLinks
+      );
+      if (visibleNeighbor) {
+        return visibleNeighbor;
+      }
     }
   }
 
@@ -334,7 +396,7 @@ export const focusFeedPanel = () => {
 
   const visibleSelection = getSelectedFeedButton({ visibleOnly: true });
   if (visibleSelection) {
-    focusFeedLink(visibleSelection, { shouldRequestItems: !getItemList() });
+    focusFeedLink(visibleSelection, { shouldRequestItems: true });
     return true;
   }
 
@@ -347,7 +409,7 @@ export const focusFeedPanel = () => {
     return false;
   }
 
-  return focusFeedLink(selectedFeed, { shouldRequestItems: !getItemList() });
+  return focusFeedLink(selectedFeed, { shouldRequestItems: true });
 };
 
 export const moveSelectedFeed = (delta) => {
