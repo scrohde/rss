@@ -359,11 +359,14 @@ const focusFeedLink = (feedButton, options = {}) => {
   const currentSelection =
     getSelectedFeedButton({ visibleOnly: true }) || getSelectedFeedButton();
   const selectionChanged = currentSelection !== feedButton;
+  const selectedFeedID = (feedButton.dataset.feedId || "").trim();
+  const displayedFeedMatchesSelection =
+    selectedFeedID !== "" && getDisplayedFeedID() === selectedFeedID;
   setSelectedFeed(feedButton);
   feedButton.focus({ preventScroll: true });
   feedButton.scrollIntoView({ block: "nearest", behavior: "smooth" });
   setPanelFocus("feed");
-  if (shouldRequestItems && selectionChanged) {
+  if (shouldRequestItems && (selectionChanged || !displayedFeedMatchesSelection)) {
     requestFeedItems(feedButton, "feed");
   }
   return true;

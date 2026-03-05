@@ -375,6 +375,7 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	)
 	secondaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.secondaryFeedID)
 	tertiaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.tertiaryFeedID)
+	quaternaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.quaternaryFeedID)
 	secondaryFirstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 	secondarySecondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
 	secondaryFirstRowTarget := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
@@ -436,6 +437,7 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 		"hidden selected feed resolves to next visible feed after individual toggles",
 	)
 	waitForJS(t, ctx, hasClassExpression(tertiaryFeedSelector, "active"), "tertiary feed active after toggle fallback")
+	waitForJS(t, ctx, elementPresentExpression(tertiaryListSelector), "tertiary items auto-load after returning to feed panel")
 
 	pressKey(t, ctx, "l")
 	waitForJS(t, ctx, elementPresentExpression(tertiaryListSelector), "tertiary items loaded before mark-all")
@@ -463,6 +465,7 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 		hasClassExpression(quaternaryFeedSelector, "active"),
 		"quaternary feed active after mark-all fallback",
 	)
+	waitForJS(t, ctx, elementPresentExpression(quaternaryListSelector), "quaternary items auto-load after mark-all fallback")
 }
 
 func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
