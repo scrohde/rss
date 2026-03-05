@@ -56,6 +56,15 @@ type itemExpandedResponseData struct {
 	Item         view.ItemView
 }
 
+type mobileStreamResponseData struct {
+	StatusMessage string
+	Items         []view.ItemView
+}
+
+type mobileReaderResponseData struct {
+	Item view.ItemView
+}
+
 type authLoginPageData struct {
 	Message string
 }

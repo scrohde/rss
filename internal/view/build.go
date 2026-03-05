@@ -72,7 +72,9 @@ func BuildItemView(
 
 	return ItemView{
 		ID:               id,
+		FeedID:           0,
 		Title:            title,
+		FeedTitle:        "",
 		Link:             link,
 		SummaryHTML:      summaryHTML,
 		ContentHTML:      contentHTML,

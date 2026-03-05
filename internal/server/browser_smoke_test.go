@@ -80,6 +80,76 @@ func TestBrowserSmokeHiddenSelectionFallback(t *testing.T) {
 	runHiddenSelectionFallbackFlow(t, ctx, fixture)
 }
 
+func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := httptest.NewServer(app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
+	waitForJS(
+		t,
+		ctx,
+		textPresentExpression("Secondary One"),
+		"secondary item present in mobile stream before reading",
+	)
+
+	requestHTMX(
+		t,
+		ctx,
+		"GET",
+		fmt.Sprintf("/mobile/items/%d/reader", fixture.secondaryFirstItemID),
+		"#main-content",
+		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "mobile reader loaded")
+	waitForJS(t, ctx, textPresentExpression("Secondary One"), "reader title present")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/mobile/items/%d/read", fixture.secondaryFirstItemID),
+		"#main-content",
+		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "stream returns after mark read")
+	waitForJS(
+		t,
+		ctx,
+		textAbsentExpression("Secondary One"),
+		"marked item removed from mobile unread stream",
+	)
+
+	requestHTMX(
+		t,
+		ctx,
+		"GET",
+		fmt.Sprintf("/mobile/items/%d/reader", fixture.secondarySecondItemID),
+		"#main-content",
+		fmt.Sprintf("item-%d", fixture.secondarySecondItemID),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "reader can open another item")
+	requestHTMX(
+		t,
+		ctx,
+		"GET",
+		"/mobile/stream",
+		"#main-content",
+		fmt.Sprintf("item-%d", fixture.secondarySecondItemID),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "back returns to stream")
+}
+
 func newSmokeApp(t *testing.T) *App {
 	t.Helper()
 
@@ -857,6 +927,24 @@ func itemOutlineAbsentExpression(rowSelector string) string {
 
 func desktopLayoutExpression() string {
 	return `(() => !window.matchMedia("(max-width: 960px)").matches)()`
+}
+
+func mobileLayoutExpression() string {
+	return `(() => window.matchMedia("(max-width: 960px)").matches)()`
+}
+
+func textPresentExpression(text string) string {
+	return fmt.Sprintf(
+		`(() => document.body && document.body.textContent && document.body.textContent.includes(%q))()`,
+		text,
+	)
+}
+
+func textAbsentExpression(text string) string {
+	return fmt.Sprintf(
+		`(() => !document.body || !document.body.textContent || !document.body.textContent.includes(%q))()`,
+		text,
+	)
 }
 
 func contentPanelItemExpression(itemID int64) string {

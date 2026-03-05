@@ -1,0 +1,70 @@
+{{define "mobile_stream"}}
+  <section class="mobile-stream" data-mobile-stream="true">
+    <header class="mobile-stream-header">
+      <div>
+        <h2 class="mobile-stream-title">Read what is here now.</h2>
+        <p class="mobile-stream-subtitle">
+          No unread counters. No pressure. Just a calm moment with the web.
+        </p>
+      </div>
+      <button
+        class="mobile-stream-pulse"
+        type="button"
+        hx-post="/mobile/pulse"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+      >
+        Refresh
+      </button>
+    </header>
+
+    {{if .StatusMessage}}
+      <p class="mobile-stream-status" role="status">{{.StatusMessage}}</p>
+    {{end}}
+
+    {{if .Items}}
+      <div class="mobile-stream-list">
+        {{range .Items}}
+          <article class="mobile-card">
+            <button
+              class="mobile-card-open"
+              type="button"
+              hx-get="/mobile/items/{{.ID}}/reader"
+              hx-target="#main-content"
+              hx-swap="innerHTML"
+            >
+              <span class="mobile-card-source">{{.FeedTitle}}</span>
+              <span class="mobile-card-title">{{.Title}}</span>
+              <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>
+            </button>
+            {{if .HasSummary}}
+              <div class="mobile-card-summary">
+                {{.SummaryHTML}}
+              </div>
+            {{end}}
+            <div class="mobile-card-actions">
+              <button
+                class="mobile-card-mark-read"
+                type="button"
+                hx-post="/mobile/items/{{.ID}}/read"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+              >
+                Mark read
+              </button>
+            </div>
+          </article>
+        {{end}}
+      </div>
+    {{else}}
+      {{template "mobile_empty" .}}
+    {{end}}
+  </section>
+{{end}}
+
+{{define "mobile_empty"}}
+  <section class="mobile-empty" data-mobile-empty="true">
+    <h3>Nothing is owed.</h3>
+    <p>Your stream is clear for now. Come back whenever you want to read again.</p>
+  </section>
+{{end}}

@@ -39,6 +39,8 @@ const (
 	pathFeedEditMode     = "/feeds/edit-mode"
 	pathEditModeCancel   = "/feeds/edit-mode/cancel"
 	pathEditModeSave     = "/feeds/edit-mode/save"
+	pathMobileStream     = "/mobile/stream"
+	pathMobilePulse      = "/mobile/pulse"
 	errIndexStatusFmt    = "index status: %d"
 	expectedNoItems      = 0
 	expectedSingleFeed   = 1
@@ -159,6 +161,7 @@ func newTestHTTPResponse(
 	return resp
 }
 
+//nolint:unparam // Test helper keeps explicit feed-like argument shape.
 func newGofeedItem(
 	title,
 	link,
@@ -625,8 +628,8 @@ func assertAllItemsRead(t *testing.T, app *App, feedID int64) {
 	t.Helper()
 
 	items := mustListItems(t, app, feedID)
-	for _, item := range items {
-		if !item.IsRead {
+	for idx := range items {
+		if !items[idx].IsRead {
 			t.Fatal("expected read_at to be set for all items")
 		}
 	}
@@ -3409,6 +3412,144 @@ func TestImageProxyServesImageWithinSizeLimit(t *testing.T) {
 	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=60" {
 		t.Fatalf("expected cache-control preserved, got %q", got)
 	}
+}
+
+func TestMobileStreamUnreadOnly(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	alphaID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/alpha", "Alpha")
+	requireNoErr(t, err, errStoreUpsertFeed)
+	bravoID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/bravo", "Bravo")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	now := time.Now().UTC()
+	alphaPublished := now.Add(-time.Hour)
+	bravoPublished := now.Add(-30 * time.Minute)
+
+	_, err = store.UpsertItems(context.Background(), app.db, alphaID, []*gofeed.Item{
+		newGofeedItem("Alpha Read", "http://example.com/a-read", "alpha-read", "<p>Summary</p>", &alphaPublished),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+	_, err = store.UpsertItems(context.Background(), app.db, bravoID, []*gofeed.Item{
+		newGofeedItem("Bravo Unread", "http://example.com/b-unread", "bravo-unread", "<p>Summary</p>", &bravoPublished),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	_, err = app.db.ExecContext(
+		context.Background(),
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
+		now,
+		alphaID,
+		"alpha-read",
+	)
+	requireNoErr(t, err, "set read_at: %v")
+
+	rec := getRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile stream status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `data-mobile-stream="true"`, "expected mobile stream container")
+	assertContains(t, body, "Bravo Unread", "expected unread item in stream")
+	assertNotContains(t, body, "Alpha Read", "expected read item to be excluded from stream")
+	assertNotContains(t, body, `feed-count">`, "expected unread counters to be absent")
+	assertNotContains(t, body, "New items (", "expected desktop new-items UI to be absent")
+}
+
+func TestMobileReaderView(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/rss", "Feed Title")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC().Add(-time.Hour)
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{
+		newGofeedItem("Unread Story", "http://example.com/story", "story-1", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	items, err := store.ListItems(context.Background(), app.db, feedID)
+	requireNoErr(t, err, errStoreListItems)
+
+	itemID := items[0].ID
+
+	rec := getRequest(app, fmt.Sprintf("/mobile/items/%d/reader", itemID))
+	assertResponseCode(t, rec, "mobile reader status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `data-mobile-reader="true"`, "expected mobile reader container")
+	assertContains(t, body, "Unread Story", "expected reader item title")
+	assertContains(t, body, "Feed Title", "expected reader source title")
+	assertContains(t, body, "/mobile/stream", "expected back-to-stream action")
+}
+
+func TestMobileMarkReadRendersUpdatedStream(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/rss", "Feed Title")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC().Add(-30 * time.Minute)
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{
+		newGofeedItem("Story To Clear", "http://example.com/story", "story-clear", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	items, err := store.ListItems(context.Background(), app.db, feedID)
+	requireNoErr(t, err, errStoreListItems)
+
+	itemID := items[0].ID
+
+	rec := postRequest(app, fmt.Sprintf("/mobile/items/%d/read", itemID))
+	assertResponseCode(t, rec, "mobile mark-read status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `data-mobile-stream="true"`, "expected stream rerender after mark-read")
+	assertNotContains(t, body, "Story To Clear", "expected marked item removed from unread stream")
+
+	reloaded, err := store.GetItem(context.Background(), app.db, itemID)
+	requireNoErr(t, err, "store.GetItem: %v")
+
+	if !reloaded.IsRead {
+		t.Fatal("expected item to be marked read")
+	}
+}
+
+func TestMobilePulseRendersStreamWithoutCounts(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/rss", "Feed Title")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC().Add(-20 * time.Minute)
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{
+		newGofeedItem("Pulse Story", "http://example.com/story", "pulse-story", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	_, err = app.db.ExecContext(
+		context.Background(),
+		"UPDATE feeds SET last_refreshed_at = ? WHERE id = ?",
+		time.Now().UTC(),
+		feedID,
+	)
+	requireNoErr(t, err, "set last_refreshed_at: %v")
+
+	rec := postRequest(app, pathMobilePulse)
+	assertResponseCode(t, rec, "mobile pulse status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `data-mobile-stream="true"`, "expected mobile stream from pulse response")
+	assertContains(t, body, "Already fresh enough.", "expected calm pulse status when no feed is due")
+	assertNotContains(t, body, `feed-count">`, "expected unread counters to be absent")
+	assertNotContains(t, body, "New items (", "expected desktop new-items UI to be absent")
 }
 
 func existsByGUID(t *testing.T, db *sql.DB, feedID int64, guid string) bool {

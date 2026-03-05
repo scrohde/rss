@@ -136,3 +136,25 @@ func TestStylesItemKeyboardOutlineContract(t *testing.T) {
 		t.Fatalf("expected %s rule to include #2563EB outline token", selector)
 	}
 }
+
+func TestStylesMobileReaderContracts(t *testing.T) {
+	t.Parallel()
+
+	source := readStylesCSS(t)
+
+	if !strings.Contains(source, "@media (max-width: 960px)") {
+		t.Fatal("expected mobile media query block")
+	}
+
+	if !strings.Contains(source, ".mobile-stream,") || !strings.Contains(source, "display: flex;") {
+		t.Fatal("expected mobile stream styles to be defined")
+	}
+
+	if !cssRuleContains(source, ".mobile-reader", "display: flex;") {
+		t.Fatal("expected mobile reader styles to be defined")
+	}
+
+	if !cssRuleContains(source, ".feed-panel", "display: none;") {
+		t.Fatal("expected mobile layout to hide feed panel")
+	}
+}

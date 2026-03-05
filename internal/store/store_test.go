@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -282,6 +283,157 @@ func TestCleanupReadItems(t *testing.T) {
 	}
 }
 
+//nolint:revive // Explicit integration flow keeps ordering expectations readable.
+func TestListUnreadItemsAllFeeds(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	alphaID := mustUpsertFeed(t, db, "http://example.com/alpha", "Alpha")
+	bravoID := mustUpsertFeed(t, db, "http://example.com/bravo", "Bravo")
+
+	now := time.Now().UTC()
+	alphaOld := now.Add(-2 * time.Hour)
+	alphaNew := now.Add(-time.Hour)
+	bravoNewest := now.Add(-10 * time.Minute)
+
+	_, err := UpsertItems(context.Background(), db, alphaID, []*gofeed.Item{
+		newGofeedItem("Alpha Old", "http://example.com/a-old", "a-old", "<p>Summary</p>", &alphaOld),
+		newGofeedItem("Alpha New", "http://example.com/a-new", "a-new", "<p>Summary</p>", &alphaNew),
+	})
+	if err != nil {
+		t.Fatalf("UpsertItems alpha: %v", err)
+	}
+
+	_, err = UpsertItems(context.Background(), db, bravoID, []*gofeed.Item{
+		newGofeedItem("Bravo Newest", "http://example.com/b-new", "b-new", "<p>Summary</p>", &bravoNewest),
+	})
+	if err != nil {
+		t.Fatalf("UpsertItems bravo: %v", err)
+	}
+
+	_, err = db.ExecContext(
+		context.Background(),
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
+		now,
+		alphaID,
+		"a-old",
+	)
+	if err != nil {
+		t.Fatalf("set read_at: %v", err)
+	}
+
+	items, err := ListUnreadItemsAllFeeds(context.Background(), db, 10)
+	if err != nil {
+		t.Fatalf("ListUnreadItemsAllFeeds: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 unread items, got %d", len(items))
+	}
+
+	if items[0].Title != "Bravo Newest" || items[0].FeedTitle != "Bravo" {
+		t.Fatalf("unexpected first unread item: %#v", items[0])
+	}
+
+	if items[1].Title != "Alpha New" || items[1].FeedTitle != "Alpha" {
+		t.Fatalf("unexpected second unread item: %#v", items[1])
+	}
+}
+
+func TestGetUnreadStreamItem(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/rss", "Feed Title")
+	published := time.Now().UTC().Add(-30 * time.Minute)
+
+	_, err := UpsertItems(context.Background(), db, feedID, []*gofeed.Item{
+		newGofeedItem("Title", "http://example.com/item", "guid-1", "<p>Summary</p>", &published),
+	})
+	if err != nil {
+		t.Fatalf("UpsertItems: %v", err)
+	}
+
+	items, err := ListItems(context.Background(), db, feedID)
+	if err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+
+	item, err := GetUnreadStreamItem(context.Background(), db, items[0].ID)
+	if err != nil {
+		t.Fatalf("GetUnreadStreamItem: %v", err)
+	}
+
+	if item.FeedID != feedID {
+		t.Fatalf("expected feed ID %d, got %d", feedID, item.FeedID)
+	}
+
+	if item.FeedTitle != "Feed Title" {
+		t.Fatalf("expected feed title %q, got %q", "Feed Title", item.FeedTitle)
+	}
+
+	if item.Title != "Title" {
+		t.Fatalf("expected item title %q, got %q", "Title", item.Title)
+	}
+}
+
+func TestMarkItemRead(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/rss", "Feed")
+	published := time.Now().UTC()
+
+	_, err := UpsertItems(context.Background(), db, feedID, []*gofeed.Item{
+		newGofeedItem("Title", "http://example.com/item", "guid-1", "<p>Summary</p>", &published),
+	})
+	if err != nil {
+		t.Fatalf("UpsertItems: %v", err)
+	}
+
+	items, err := ListItems(context.Background(), db, feedID)
+	if err != nil {
+		t.Fatalf("ListItems: %v", err)
+	}
+
+	itemID := items[0].ID
+
+	err = MarkItemRead(context.Background(), db, itemID)
+	if err != nil {
+		t.Fatalf("MarkItemRead first call: %v", err)
+	}
+
+	err = MarkItemRead(context.Background(), db, itemID)
+	if err != nil {
+		t.Fatalf("MarkItemRead second call: %v", err)
+	}
+
+	reloaded, err := GetItem(context.Background(), db, itemID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+
+	if !reloaded.IsRead {
+		t.Fatal("expected item to be read after mark-read")
+	}
+}
+
+func TestMarkItemReadMissingItem(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	err := MarkItemRead(context.Background(), db, 9999)
+	if err == nil {
+		t.Fatal("expected mark-read to fail for missing item")
+	}
+
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected sql.ErrNoRows, got %v", err)
+	}
+}
+
 func existsByGUID(t *testing.T, db *sql.DB, feedID int64, guid string) bool {
 	t.Helper()
 
@@ -488,6 +640,7 @@ func assertGUIDRangeDeletedAndTombstoned(t *testing.T, db *sql.DB, feedID int64,
 	}
 }
 
+//nolint:unparam // Test helper keeps explicit feed-like argument shape.
 func newGofeedItem(title, link, guid, description string, published *time.Time) *gofeed.Item {
 	item := new(gofeed.Item)
 	item.Title = title

@@ -208,6 +208,34 @@ func TestAppJSSelectorContractsMatchTemplates(t *testing.T) {
 	}
 }
 
+func TestMobileBootstrapContracts(t *testing.T) {
+	t.Parallel()
+
+	mainSource := readTextFile(t, filepath.Join("static", "app", "main.js"))
+	if !strings.Contains(mainSource, `import * as mobile from "./mobile.js"`) {
+		t.Fatal("expected main.js to import mobile bootstrap module")
+	}
+	if !strings.Contains(mainSource, "mobile.bindMobileBootstrap();") {
+		t.Fatal("expected main.js to invoke mobile bootstrap binding")
+	}
+
+	mobileSource := readTextFile(t, filepath.Join("static", "app", "mobile.js"))
+	if !strings.Contains(mobileSource, `"/mobile/stream"`) {
+		t.Fatal("expected mobile bootstrap to target /mobile/stream")
+	}
+	if !strings.Contains(mobileSource, `target: "#main-content"`) {
+		t.Fatal("expected mobile bootstrap to target #main-content swaps")
+	}
+
+	templateSource := joinFiles(t, templatePaths(t))
+	if !strings.Contains(templateSource, `data-mobile-stream="true"`) {
+		t.Fatal("expected templates to expose mobile stream data attribute")
+	}
+	if !strings.Contains(templateSource, `data-mobile-reader="true"`) {
+		t.Fatal("expected templates to expose mobile reader data attribute")
+	}
+}
+
 func TestItemKeyboardOutlineStateModelContracts(t *testing.T) {
 	t.Parallel()
 

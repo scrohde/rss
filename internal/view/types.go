@@ -27,12 +27,14 @@ type FeedView struct {
 // ItemView is template data for one feed item row.
 type ItemView struct {
 	Title            string
+	FeedTitle        string
 	Link             string
 	SummaryHTML      template.HTML
 	ContentHTML      template.HTML
 	PublishedDisplay string
 	PublishedCompact string
 	ID               int64
+	FeedID           int64
 	IsRead           bool
 	IsActive         bool
 	HasSummary       bool

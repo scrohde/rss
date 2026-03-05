@@ -35,6 +35,8 @@ const (
 	cleanupInterval                = 10 * time.Minute
 	pulseRecentRefreshWindow       = time.Hour
 	feedEditModeCookieMaxAge       = 60 * 60 * 24 * 365
+	mobileStreamLimit              = 200
+	mobilePulseTimeout             = 20 * time.Second
 )
 
 var errFeedReturnedNoContent = errors.New("feed returned no content")
@@ -135,6 +137,10 @@ func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /items/{itemID}", a.handleItemExpanded)
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)
 	mux.HandleFunc("POST /items/{itemID}/toggle", a.handleToggleRead)
+	mux.HandleFunc("GET /mobile/stream", a.handleMobileStream)
+	mux.HandleFunc("GET /mobile/items/{itemID}/reader", a.handleMobileReader)
+	mux.HandleFunc("POST /mobile/items/{itemID}/read", a.handleMobileMarkRead)
+	mux.HandleFunc("POST /mobile/pulse", a.handleMobilePulse)
 }
 
 func (a *App) registerAuthRoutes(mux *http.ServeMux) {
@@ -868,9 +874,9 @@ func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	newestID := afterID
-	for _, item := range items {
-		if item.ID > newestID {
-			newestID = item.ID
+	for idx := range items {
+		if items[idx].ID > newestID {
+			newestID = items[idx].ID
 		}
 	}
 
@@ -1087,6 +1093,161 @@ func (a *App) handlePulseFeeds(w http.ResponseWriter, r *http.Request) {
 	a.renderPulseMessage(w, "", "")
 }
 
+func (a *App) handleMobileStream(w http.ResponseWriter, r *http.Request) {
+	a.renderMobileStream(w, r, "")
+}
+
+func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := parsePathInt64(r, "itemID")
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	item, err := store.GetUnreadStreamItem(r.Context(), a.db, itemID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			a.renderMobileStream(w, r, "That story is no longer in your unread stream.")
+
+			return
+		}
+
+		http.Error(w, "failed to load item", http.StatusInternalServerError)
+
+		return
+	}
+
+	data := mobileReaderResponseData{Item: item}
+	a.renderTemplate(w, "mobile_reader", data)
+}
+
+func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
+	itemID, ok := parsePathInt64(r, "itemID")
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	err := store.MarkItemRead(r.Context(), a.db, itemID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			a.renderMobileStream(w, r, "That story was already cleared.")
+
+			return
+		}
+
+		http.Error(w, "failed to mark item as read", http.StatusInternalServerError)
+
+		return
+	}
+
+	a.renderMobileStream(w, r, "Saved for now.")
+}
+
+func (a *App) handleMobilePulse(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), mobilePulseTimeout)
+	defer cancel()
+
+	feedIDs, err := a.mobilePulseFeedIDs(ctx)
+	if err != nil {
+		http.Error(w, "failed to pulse feeds", http.StatusInternalServerError)
+
+		return
+	}
+
+	if len(feedIDs) == 0 {
+		a.renderMobileStream(w, r, "Already fresh enough.")
+
+		return
+	}
+
+	updated, pulseErr := a.runMobilePulseRefresh(ctx, feedIDs)
+	status := mobilePulseStatusMessage(updated, pulseErr)
+
+	a.renderMobileStream(w, r, status)
+}
+
+func (a *App) mobilePulseFeedIDs(ctx context.Context) ([]int64, error) {
+	cutoff := time.Now().UTC().Add(-pulseRecentRefreshWindow)
+
+	feedIDs, err := store.ListPulseFeedIDs(ctx, a.db, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list pulse feed IDs: %w", err)
+	}
+
+	return feedIDs, nil
+}
+
+func (a *App) runMobilePulseRefresh(ctx context.Context, feedIDs []int64) (int, error) {
+	updated := 0
+
+	for _, feedID := range feedIDs {
+		if shouldStopMobilePulse(ctx) {
+			break
+		}
+
+		updated += a.mobilePulseRefreshDelta(ctx, feedID)
+	}
+
+	ctxErr := wrapMobilePulseContextErr(ctx)
+	if ctxErr != nil {
+		return updated, ctxErr
+	}
+
+	return updated, nil
+}
+
+func shouldStopMobilePulse(ctx context.Context) bool {
+	return ctx.Err() != nil
+}
+
+func (a *App) mobilePulseRefreshDelta(ctx context.Context, feedID int64) int {
+	refreshed, refreshErr := a.refreshFeedForMobilePulse(ctx, feedID)
+	if refreshErr != nil {
+		return 0
+	}
+
+	if refreshed {
+		return 1
+	}
+
+	return 0
+}
+
+func (a *App) refreshFeedForMobilePulse(ctx context.Context, feedID int64) (bool, error) {
+	a.refreshMu.Lock()
+	refreshedID, refreshErr := feed.Refresh(ctx, a.db, feedID)
+	a.refreshMu.Unlock()
+
+	if refreshErr != nil {
+		// Do not include upstream error text in user-adjacent logs.
+		slog.Warn("mobile pulse feed refresh failed", "feed_id", feedID)
+
+		return false, fmt.Errorf("refresh feed %d: %w", feedID, refreshErr)
+	}
+
+	return refreshedID != 0, nil
+}
+
+func wrapMobilePulseContextErr(ctx context.Context) error {
+	ctxErr := ctx.Err()
+	if ctxErr == nil {
+		return nil
+	}
+
+	return fmt.Errorf("mobile pulse context: %w", ctxErr)
+}
+
+func mobilePulseStatusMessage(updated int, pulseErr error) string {
+	if errors.Is(pulseErr, context.DeadlineExceeded) {
+		return fmt.Sprintf("Updated %d feeds before timeout.", updated)
+	}
+
+	return fmt.Sprintf("Updated %d feeds.", updated)
+}
+
 func (a *App) renderPulseMessage(w http.ResponseWriter, message, className string) {
 	data := subscribeResponseData{
 		ItemList:       nil,
@@ -1098,6 +1259,21 @@ func (a *App) renderPulseMessage(w http.ResponseWriter, message, className strin
 		FeedEditMode:   false,
 	}
 	a.renderTemplate(w, "subscribe_response", data)
+}
+
+func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusMessage string) {
+	items, err := store.ListUnreadItemsAllFeeds(r.Context(), a.db, mobileStreamLimit)
+	if err != nil {
+		http.Error(w, "failed to load unread items", http.StatusInternalServerError)
+
+		return
+	}
+
+	data := mobileStreamResponseData{
+		Items:         items,
+		StatusMessage: statusMessage,
+	}
+	a.renderTemplate(w, "mobile_stream", data)
 }
 
 func (a *App) startPulse(ctx context.Context, feedIDs []int64) bool {

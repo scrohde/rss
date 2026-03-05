@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	maxItemsPerFeed = 200
-	readRetention   = 30 * time.Minute
+	maxItemsPerFeed       = 200
+	unreadItemsDefaultCap = 200
+	readRetention         = 30 * time.Minute
 )
 
 const initSchemaSQL = `
@@ -840,6 +841,148 @@ ORDER BY COALESCE(published_at, created_at) DESC, id DESC
 	return items, nil
 }
 
+// ListUnreadItemsAllFeeds is part of the store package API.
+func ListUnreadItemsAllFeeds(
+	ctx context.Context,
+	db *sql.DB,
+	limit int,
+) ([]view.ItemView, error) {
+	ctx = contextOrBackground(ctx)
+	resolvedLimit := resolveUnreadItemsLimit(limit)
+
+	rows, err := unreadItemsAllFeedsRows(ctx, db, resolvedLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := collectUnreadItemsAcrossFeeds(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func resolveUnreadItemsLimit(limit int) int {
+	if limit <= 0 {
+		return unreadItemsDefaultCap
+	}
+
+	return limit
+}
+
+func unreadItemsAllFeedsRows(ctx context.Context, db *sql.DB, limit int) (*sql.Rows, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT i.id,
+       i.feed_id,
+       COALESCE(f.custom_title, f.title) AS feed_title,
+       i.title,
+       i.link,
+       i.summary,
+       i.content,
+       i.published_at
+FROM items i
+JOIN feeds f ON f.id = i.feed_id
+WHERE i.read_at IS NULL
+ORDER BY COALESCE(i.published_at, i.created_at) DESC, i.id DESC
+LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query unread items across feeds: %w", err)
+	}
+
+	return rows, nil
+}
+
+func collectUnreadItemsAcrossFeeds(rows *sql.Rows) ([]view.ItemView, error) {
+	defer func() {
+		closeErr := rows.Close()
+		if closeErr != nil {
+			slog.Warn("rows close failed", "err", closeErr)
+		}
+	}()
+
+	items := make([]view.ItemView, 0)
+
+	for rows.Next() {
+		item, scanErr := scanMobileStreamItemView(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+
+		items = append(items, item)
+	}
+
+	rowsErr := rows.Err()
+	if rowsErr != nil {
+		return nil, fmt.Errorf("iterate unread items across feeds: %w", rowsErr)
+	}
+
+	return items, nil
+}
+
+// GetUnreadStreamItem is part of the store package API.
+func GetUnreadStreamItem(
+	ctx context.Context,
+	db *sql.DB,
+	itemID int64,
+) (view.ItemView, error) {
+	ctx = contextOrBackground(ctx)
+
+	row := db.QueryRowContext(ctx, `
+SELECT i.id,
+       i.feed_id,
+       COALESCE(f.custom_title, f.title) AS feed_title,
+       i.title,
+       i.link,
+       i.summary,
+       i.content,
+       i.published_at
+FROM items i
+JOIN feeds f ON f.id = i.feed_id
+WHERE i.id = ? AND i.read_at IS NULL
+`, itemID)
+
+	var (
+		id        int64
+		feedID    int64
+		feedTitle string
+		title     string
+		link      string
+		summary   sql.NullString
+		content   sql.NullString
+		published sql.NullTime
+	)
+
+	err := row.Scan(
+		&id,
+		&feedID,
+		&feedTitle,
+		&title,
+		&link,
+		&summary,
+		&content,
+		&published,
+	)
+	if err != nil {
+		return view.ItemView{}, fmt.Errorf("scan unread stream item %d: %w", itemID, err)
+	}
+
+	item := view.BuildItemView(
+		id,
+		title,
+		link,
+		summary,
+		content,
+		published,
+		sql.NullTime{Time: time.Time{}, Valid: false},
+	)
+	item.FeedID = feedID
+	item.FeedTitle = feedTitle
+
+	return item, nil
+}
+
 // CountItemsAfter is part of the store package API.
 func CountItemsAfter(ctx context.Context, db *sql.DB, feedID, afterID int64) (int, error) {
 	ctx = contextOrBackground(ctx)
@@ -927,6 +1070,47 @@ func ToggleRead(ctx context.Context, db *sql.DB, itemID int64) error {
 	_, err = db.ExecContext(ctx, "UPDATE items SET read_at = ? WHERE id = ?", time.Now().UTC(), itemID)
 	if err != nil {
 		return fmt.Errorf("mark item %d read: %w", itemID, err)
+	}
+
+	return nil
+}
+
+// MarkItemRead is part of the store package API.
+func MarkItemRead(ctx context.Context, db *sql.DB, itemID int64) error {
+	ctx = contextOrBackground(ctx)
+
+	result, err := db.ExecContext(
+		ctx,
+		"UPDATE items SET read_at = ? WHERE id = ? AND read_at IS NULL",
+		time.Now().UTC(),
+		itemID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark item %d read: %w", itemID, err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count mark-read rows for item %d: %w", itemID, err)
+	}
+
+	if affected > 0 {
+		return nil
+	}
+
+	var exists int
+
+	existsErr := db.QueryRowContext(
+		ctx,
+		"SELECT 1 FROM items WHERE id = ?",
+		itemID,
+	).Scan(&exists)
+	if existsErr != nil {
+		if errors.Is(existsErr, sql.ErrNoRows) {
+			return fmt.Errorf("lookup item %d for mark-read: %w", itemID, existsErr)
+		}
+
+		return fmt.Errorf("lookup item %d for mark-read: %w", itemID, existsErr)
 	}
 
 	return nil
@@ -1086,6 +1270,47 @@ func scanItemView(rows *sql.Rows) (view.ItemView, error) {
 	return view.BuildItemView(id, title, link, summary, content, published, readAt), nil
 }
 
+func scanMobileStreamItemView(rows *sql.Rows) (view.ItemView, error) {
+	var (
+		id        int64
+		feedID    int64
+		feedTitle string
+		title     string
+		link      string
+		summary   sql.NullString
+		content   sql.NullString
+		published sql.NullTime
+	)
+
+	err := rows.Scan(
+		&id,
+		&feedID,
+		&feedTitle,
+		&title,
+		&link,
+		&summary,
+		&content,
+		&published,
+	)
+	if err != nil {
+		return view.ItemView{}, fmt.Errorf("scan mobile stream item row: %w", err)
+	}
+
+	item := view.BuildItemView(
+		id,
+		title,
+		link,
+		summary,
+		content,
+		published,
+		sql.NullTime{Time: time.Time{}, Valid: false},
+	)
+	item.FeedID = feedID
+	item.FeedTitle = feedTitle
+
+	return item, nil
+}
+
 func scanFeedView(rows *sql.Rows) (view.FeedView, error) {
 	var (
 		id            int64
@@ -1131,9 +1356,9 @@ func scanFeedView(rows *sql.Rows) (view.FeedView, error) {
 
 func maxItemID(items []view.ItemView) int64 {
 	var maxID int64
-	for _, item := range items {
-		if item.ID > maxID {
-			maxID = item.ID
+	for idx := range items {
+		if items[idx].ID > maxID {
+			maxID = items[idx].ID
 		}
 	}
 

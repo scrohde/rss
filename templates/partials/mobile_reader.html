@@ -1,0 +1,40 @@
+{{define "mobile_reader"}}
+  <section class="mobile-reader" data-mobile-reader="true">
+    <header class="mobile-reader-header">
+      <button
+        class="mobile-reader-back"
+        type="button"
+        hx-get="/mobile/stream"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+      >
+        Back
+      </button>
+      <button
+        class="mobile-reader-mark-read"
+        type="button"
+        hx-post="/mobile/items/{{.Item.ID}}/read"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+      >
+        Mark read
+      </button>
+    </header>
+
+    <article class="mobile-reader-article">
+      <p class="mobile-reader-source">{{.Item.FeedTitle}}</p>
+      <h2 class="mobile-reader-title">{{.Item.Title}}</h2>
+      <p class="mobile-reader-meta">{{.Item.PublishedDisplay}}</p>
+      <a class="mobile-reader-link" href="{{.Item.Link}}" target="_blank" rel="noopener">Open original</a>
+      <div class="mobile-reader-body">
+        {{if .Item.HasContent}}
+          {{.Item.ContentHTML}}
+        {{else if .Item.HasSummary}}
+          {{.Item.SummaryHTML}}
+        {{else}}
+          <p>This item has no in-app content. Use Open original to read it on the source site.</p>
+        {{end}}
+      </div>
+    </article>
+  </section>
+{{end}}
