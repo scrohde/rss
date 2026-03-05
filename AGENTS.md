@@ -75,8 +75,8 @@ PULSE_SMOKE_BROWSER_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google C
 
 Dolt notes:
 - This repo uses Dolt-backed `bd`.
-- If `bd` health looks broken, run `bd doctor --fix --yes`.
-- Check current Dolt connection with `bd dolt show`.
+- Check current Dolt connection with `bd dolt show`. If connection failed try `bd list` then try show again.
+- Check current Dolt status with `bd dolt status`.
 
 ## "Ship it"
 Interpret "ship it" as:
