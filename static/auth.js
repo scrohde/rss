@@ -170,6 +170,18 @@
     return fallback;
   };
 
+  const setLoginFallbackVisible = (visible) => {
+    const fallback = document.querySelector("[data-auth-login-fallback]");
+    if (fallback) {
+      fallback.hidden = !visible;
+    }
+
+    const pending = document.querySelector("[data-auth-login-pending]");
+    if (pending) {
+      pending.hidden = visible;
+    }
+  };
+
   const startLogin = async () => {
     const optionsData = await postJSON("/auth/webauthn/login/options", {});
     const assertion = optionsData.options || {};
@@ -230,24 +242,52 @@
     }
 
     button.dataset.bound = "true";
-    button.addEventListener("click", async () => {
+    const runLogin = async (autoStart) => {
+      if (button.dataset.running === "true") {
+        return;
+      }
+
       if (!window.PublicKeyCredential || !navigator.credentials) {
+        setLoginFallbackVisible(true);
         showMessage("Passkeys are not supported in this browser.", true);
         return;
       }
 
+      if (autoStart) {
+        setLoginFallbackVisible(false);
+        showMessage("Approve the passkey prompt to continue.", false);
+      } else {
+        setLoginFallbackVisible(true);
+        showMessage("", false);
+      }
+
+      button.dataset.running = "true";
       button.disabled = true;
-      showMessage("", false);
 
       try {
         await startLogin();
       } catch (error) {
         console.warn("passkey login failed", error);
+        setLoginFallbackVisible(true);
         showMessage(authErrorMessage(error, "login"), true);
       } finally {
+        button.dataset.running = "false";
         button.disabled = false;
       }
+    };
+
+    button.addEventListener("click", async () => {
+      await runLogin(false);
     });
+
+    if (button.dataset.passkeyAutostartBound === "true" || button.dataset.passkeyAutostart !== "true") {
+      return;
+    }
+
+    button.dataset.passkeyAutostartBound = "true";
+    window.setTimeout(() => {
+      void runLogin(true);
+    }, 0);
   };
 
   const bindPasskeyRegister = () => {

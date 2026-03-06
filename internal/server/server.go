@@ -1119,7 +1119,7 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := mobileReaderResponseData{Item: item}
-	a.renderMobileReader(w, r, data)
+	a.renderMobileReader(w, r, &data)
 }
 
 func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
@@ -1275,7 +1275,7 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	}
 
 	if isHTMXRequest(r) {
-		w.Header().Set("HX-Replace-Url", "/mobile/stream")
+		w.Header().Set("Hx-Replace-Url", "/mobile/stream")
 		a.renderTemplate(w, "mobile_stream", data)
 
 		return
@@ -1292,9 +1292,9 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	a.renderTemplate(w, "index", page)
 }
 
-func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data mobileReaderResponseData) {
+func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *mobileReaderResponseData) {
 	if isHTMXRequest(r) {
-		w.Header().Set("HX-Push-Url", r.URL.Path)
+		w.Header().Set("Hx-Push-Url", r.URL.Path)
 		a.renderTemplate(w, "mobile_reader", data)
 
 		return
@@ -1307,20 +1307,24 @@ func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data mo
 		return
 	}
 
-	page.MobileReader = &data
+	page.MobileReader = data
 	a.renderTemplate(w, "index", page)
 }
 
 func (a *App) mobilePageData(r *http.Request) (pageData, error) {
 	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
-		return pageData{}, err
+		return pageData{}, fmt.Errorf("list feeds: %w", err)
 	}
 
 	return pageData{
-		CSRFToken:    a.csrfTokenForRequest(r),
-		Feeds:        feeds,
-		FeedEditMode: feedEditModeEnabled(r),
+		ItemList:       nil,
+		MobileStream:   nil,
+		MobileReader:   nil,
+		CSRFToken:      a.csrfTokenForRequest(r),
+		Feeds:          feeds,
+		SelectedFeedID: 0,
+		FeedEditMode:   feedEditModeEnabled(r),
 	}, nil
 }
 
@@ -1677,7 +1681,7 @@ func parsePathInt64(r *http.Request, key string) (int64, bool) {
 }
 
 func isHTMXRequest(r *http.Request) bool {
-	return strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Request")), "true")
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Hx-Request")), "true")
 }
 
 func parseAfterID(r *http.Request) int64 {

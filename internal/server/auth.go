@@ -665,8 +665,19 @@ func (*App) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	credentials, err := a.authManager.CredentialCount(r.Context())
+	if err != nil {
+		http.Error(w, "failed to load login state", http.StatusInternalServerError)
+
+		return
+	}
+
 	message := strings.TrimSpace(r.URL.Query().Get("message"))
-	a.renderTemplate(w, "auth_login", authLoginPageData{Message: message})
+	a.renderTemplate(w, "auth_login", authLoginPageData{
+		Message:        message,
+		AutoStartLogin: credentials > 0,
+		ShowSetupLink:  credentials == 0,
+	})
 }
 
 func (a *App) handleAuthLoginOptions(w http.ResponseWriter, r *http.Request) {

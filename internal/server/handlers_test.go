@@ -311,7 +311,7 @@ func postRequest(app *App, target string) *httptest.ResponseRecorder {
 
 func postHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, target, http.NoBody)
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("Hx-Request", "true")
 
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
@@ -352,7 +352,7 @@ func getRequest(
 
 func getHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
-	req.Header.Set("HX-Request", "true")
+	req.Header.Set("Hx-Request", "true")
 
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
@@ -3484,7 +3484,7 @@ func TestMobileStreamHTMXReplacesURL(t *testing.T) {
 	rec := getHTMXRequest(app, pathMobileStream)
 	assertResponseCode(t, rec, "mobile stream htmx status")
 
-	if got := rec.Header().Get("HX-Replace-Url"); got != pathMobileStream {
+	if got := rec.Header().Get("Hx-Replace-Url"); got != pathMobileStream {
 		t.Fatalf("expected HX-Replace-Url %q, got %q", pathMobileStream, got)
 	}
 
@@ -3547,7 +3547,7 @@ func TestMobileReaderHTMXPushesURL(t *testing.T) {
 	rec := getHTMXRequest(app, target)
 	assertResponseCode(t, rec, "mobile reader htmx status")
 
-	if got := rec.Header().Get("HX-Push-Url"); got != target {
+	if got := rec.Header().Get("Hx-Push-Url"); got != target {
 		t.Fatalf("expected HX-Push-Url %q, got %q", target, got)
 	}
 
@@ -3576,7 +3576,7 @@ func TestMobileMarkReadRendersUpdatedStream(t *testing.T) {
 	rec := postHTMXRequest(app, fmt.Sprintf("/mobile/items/%d/read", itemID))
 	assertResponseCode(t, rec, "mobile mark-read status")
 
-	if got := rec.Header().Get("HX-Replace-Url"); got != pathMobileStream {
+	if got := rec.Header().Get("Hx-Replace-Url"); got != pathMobileStream {
 		t.Fatalf("expected HX-Replace-Url %q, got %q", pathMobileStream, got)
 	}
 
@@ -3617,7 +3617,7 @@ func TestMobilePulseRendersStreamWithoutCounts(t *testing.T) {
 	rec := postHTMXRequest(app, pathMobilePulse)
 	assertResponseCode(t, rec, "mobile pulse status")
 
-	if got := rec.Header().Get("HX-Replace-Url"); got != pathMobileStream {
+	if got := rec.Header().Get("Hx-Replace-Url"); got != pathMobileStream {
 		t.Fatalf("expected HX-Replace-Url %q, got %q", pathMobileStream, got)
 	}
 

@@ -68,7 +68,9 @@ type mobileReaderResponseData struct {
 }
 
 type authLoginPageData struct {
-	Message string
+	Message        string
+	AutoStartLogin bool
+	ShowSetupLink  bool
 }
 
 type authSetupPageData struct {

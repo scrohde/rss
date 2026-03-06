@@ -17,11 +17,25 @@
       <p class="message error">{{.Message}}</p>
     {{end}}
     <p class="message auth-message" data-auth-message role="status" aria-live="polite"></p>
-    <p>
-      <button type="button" class="chip" data-passkey-login="true">Continue with passkey</button>
-    </p>
-    <p><a href="/auth/setup">Initial setup</a></p>
-    <p><a href="/auth/recovery">Use emergency recovery code</a></p>
+    <section data-auth-login-pending {{if not .AutoStartLogin}}hidden{{end}}>
+      <p>Trying your saved passkey now.</p>
+    </section>
+    <section data-auth-login-fallback {{if .AutoStartLogin}}hidden{{end}}>
+      <p>
+        <button
+          type="button"
+          class="chip"
+          data-passkey-login="true"
+          {{if .AutoStartLogin}}data-passkey-autostart="true"{{end}}
+        >
+          Continue with passkey
+        </button>
+      </p>
+      {{if .ShowSetupLink}}
+        <p><a href="/auth/setup">Initial setup</a></p>
+      {{end}}
+      <p><a href="/auth/recovery">Use emergency recovery code</a></p>
+    </section>
   </main>
 </body>
 </html>

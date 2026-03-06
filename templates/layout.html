@@ -52,6 +52,25 @@
           <section class="topbar-shortcuts-panel" id="topbar-shortcuts-panel" aria-label="Keyboard shortcuts" hidden>
             <div class="topbar-shortcuts-title">Keyboard shortcuts</div>
             <div class="topbar-shortcuts-subtitle">Browse and manage items without leaving the keyboard.</div>
+            {{if .CSRFToken}}
+              <div class="topbar-shortcuts-divider"></div>
+              <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Account</div>
+              <div class="topbar-shortcuts-grid">
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Sign out</span>
+                  <span class="topbar-shortcuts-keys">
+                    <form class="topbar-shortcuts-inline-form" method="post" action="/auth/logout">
+                      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                      <button class="topbar-shortcuts-control topbar-shortcuts-control-button" type="submit">
+                        Logout
+                      </button>
+                    </form>
+                  </span>
+                </div>
+              </div>
+            {{end}}
+            <div class="topbar-shortcuts-divider"></div>
+            <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Navigation</div>
             <div class="topbar-shortcuts-grid">
               <div class="topbar-shortcuts-row">
                 <span class="topbar-shortcuts-action">Move down in panel</span>

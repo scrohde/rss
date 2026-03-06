@@ -162,8 +162,72 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 		t.Fatal("expected passkey login button")
 	}
 
+	if strings.Contains(body, `data-passkey-autostart="true"`) {
+		t.Fatal("did not expect passkey auto-start without a registered credential")
+	}
+
 	if !strings.Contains(body, `data-auth-message`) {
 		t.Fatal("expected auth message placeholder")
+	}
+
+	if !strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
+		t.Fatal("expected setup link before any passkey is registered")
+	}
+}
+
+func TestAuthLoginPageAutoStartsWhenCredentialExists(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/login", http.NoBody)
+	rr := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected login page status 200, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `data-passkey-autostart="true"`) {
+		t.Fatal("expected passkey auto-start when a credential exists")
+	}
+
+	if !strings.Contains(body, `data-auth-login-pending`) {
+		t.Fatal("expected pending login section")
+	}
+
+	if strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
+		t.Fatal("did not expect setup link after initial setup is complete")
+	}
+}
+
+func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+	cookie := issueAuthCookie(t, app)
+
+	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req.AddCookie(cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected authenticated index status 200, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `action="/auth/logout"`) {
+		t.Fatal("expected logout form in menu")
+	}
+
+	if !strings.Contains(body, `name="csrf_token"`) {
+		t.Fatal("expected csrf token in logout form")
 	}
 }
 
