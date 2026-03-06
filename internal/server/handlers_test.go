@@ -309,6 +309,16 @@ func postRequest(app *App, target string) *httptest.ResponseRecorder {
 	return rec
 }
 
+func postHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, target, http.NoBody)
+	req.Header.Set("HX-Request", "true")
+
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	return rec
+}
+
 func waitForPulseIdle(t *testing.T, app *App) {
 	t.Helper()
 
@@ -333,6 +343,16 @@ func getRequest(
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
+
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	return rec
+}
+
+func getHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
+	req.Header.Set("HX-Request", "true")
 
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
@@ -3450,9 +3470,26 @@ func TestMobileStreamUnreadOnly(t *testing.T) {
 	assertResponseCode(t, rec, "mobile stream status")
 
 	body := rec.Body.String()
+	assertContains(t, body, "<!doctype html>", "expected full-page mobile stream response")
 	assertContains(t, body, `data-mobile-stream="true"`, "expected mobile stream container")
 	assertContains(t, body, "Bravo Unread", "expected unread item in stream")
 	assertNotContains(t, body, "Alpha Read", "expected read item to be excluded from stream")
+}
+
+func TestMobileStreamHTMXReplacesURL(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	rec := getHTMXRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile stream htmx status")
+
+	if got := rec.Header().Get("HX-Replace-Url"); got != pathMobileStream {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", pathMobileStream, got)
+	}
+
+	body := rec.Body.String()
+	assertNotContains(t, body, "<!doctype html>", "expected partial htmx mobile stream response")
 	assertNotContains(t, body, `feed-count">`, "expected unread counters to be absent")
 	assertNotContains(t, body, "New items (", "expected desktop new-items UI to be absent")
 }
@@ -3480,10 +3517,41 @@ func TestMobileReaderView(t *testing.T) {
 	assertResponseCode(t, rec, "mobile reader status")
 
 	body := rec.Body.String()
+	assertContains(t, body, "<!doctype html>", "expected full-page mobile reader response")
 	assertContains(t, body, `data-mobile-reader="true"`, "expected mobile reader container")
 	assertContains(t, body, "Unread Story", "expected reader item title")
 	assertContains(t, body, "Feed Title", "expected reader source title")
 	assertContains(t, body, "/mobile/stream", "expected back-to-stream action")
+}
+
+func TestMobileReaderHTMXPushesURL(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/rss", "Feed Title")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC().Add(-time.Hour)
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{
+		newGofeedItem("Unread Story", "http://example.com/story", "story-1", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	items, err := store.ListItems(context.Background(), app.db, feedID)
+	requireNoErr(t, err, errStoreListItems)
+
+	itemID := items[0].ID
+	target := fmt.Sprintf("/mobile/items/%d/reader", itemID)
+
+	rec := getHTMXRequest(app, target)
+	assertResponseCode(t, rec, "mobile reader htmx status")
+
+	if got := rec.Header().Get("HX-Push-Url"); got != target {
+		t.Fatalf("expected HX-Push-Url %q, got %q", target, got)
+	}
+
+	assertNotContains(t, rec.Body.String(), "<!doctype html>", "expected partial htmx mobile reader response")
 }
 
 func TestMobileMarkReadRendersUpdatedStream(t *testing.T) {
@@ -3505,8 +3573,12 @@ func TestMobileMarkReadRendersUpdatedStream(t *testing.T) {
 
 	itemID := items[0].ID
 
-	rec := postRequest(app, fmt.Sprintf("/mobile/items/%d/read", itemID))
+	rec := postHTMXRequest(app, fmt.Sprintf("/mobile/items/%d/read", itemID))
 	assertResponseCode(t, rec, "mobile mark-read status")
+
+	if got := rec.Header().Get("HX-Replace-Url"); got != pathMobileStream {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", pathMobileStream, got)
+	}
 
 	body := rec.Body.String()
 	assertContains(t, body, `data-mobile-stream="true"`, "expected stream rerender after mark-read")
@@ -3542,8 +3614,12 @@ func TestMobilePulseRendersStreamWithoutCounts(t *testing.T) {
 	)
 	requireNoErr(t, err, "set last_refreshed_at: %v")
 
-	rec := postRequest(app, pathMobilePulse)
+	rec := postHTMXRequest(app, pathMobilePulse)
 	assertResponseCode(t, rec, "mobile pulse status")
+
+	if got := rec.Header().Get("HX-Replace-Url"); got != pathMobileStream {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", pathMobileStream, got)
+	}
 
 	body := rec.Body.String()
 	assertContains(t, body, `data-mobile-stream="true"`, "expected mobile stream from pulse response")

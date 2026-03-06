@@ -3,7 +3,11 @@
 {{end}}
 
 {{define "main"}}
-  {{if .ItemList}}
+  {{if .MobileReader}}
+    {{template "mobile_reader" .MobileReader}}
+  {{else if .MobileStream}}
+    {{template "mobile_stream" .MobileStream}}
+  {{else if .ItemList}}
     {{template "item_list" .ItemList}}
   {{else}}
     <section class="empty-state">

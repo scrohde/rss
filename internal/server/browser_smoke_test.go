@@ -96,6 +96,7 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 	)
 	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
 	waitForJS(
 		t,
 		ctx,
@@ -112,6 +113,12 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
 	)
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "mobile reader loaded")
+	waitForJS(
+		t,
+		ctx,
+		pathnameExpression(fmt.Sprintf("/mobile/items/%d/reader", fixture.secondaryFirstItemID)),
+		"mobile reader URL",
+	)
 	waitForJS(t, ctx, textPresentExpression("Secondary One"), "reader title present")
 
 	requestHTMX(
@@ -123,6 +130,7 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
 	)
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "stream returns after mark read")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "stream URL after mark read")
 	waitForJS(
 		t,
 		ctx,
@@ -139,15 +147,15 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		fmt.Sprintf("item-%d", fixture.secondarySecondItemID),
 	)
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "reader can open another item")
-	requestHTMX(
+	waitForJS(
 		t,
 		ctx,
-		"GET",
-		"/mobile/stream",
-		"#main-content",
-		fmt.Sprintf("item-%d", fixture.secondarySecondItemID),
+		pathnameExpression(fmt.Sprintf("/mobile/items/%d/reader", fixture.secondarySecondItemID)),
+		"second reader URL",
 	)
+	runActions(t, ctx, chromedp.Evaluate(`history.back()`, nil))
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "back returns to stream")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "stream URL after history back")
 }
 
 func newSmokeApp(t *testing.T) *App {
@@ -834,6 +842,10 @@ func hasClassExpression(selector, className string) string {
 		selector,
 		className,
 	)
+}
+
+func pathnameExpression(path string) string {
+	return fmt.Sprintf(`(() => window.location.pathname === %q)()`, path)
 }
 
 func elementPresentExpression(selector string) string {

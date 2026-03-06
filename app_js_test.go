@@ -226,6 +226,12 @@ func TestMobileBootstrapContracts(t *testing.T) {
 	if !strings.Contains(mobileSource, `target: "#main-content"`) {
 		t.Fatal("expected mobile bootstrap to target #main-content swaps")
 	}
+	if !strings.Contains(mobileSource, `data-mobile-reader='true'`) {
+		t.Fatal("expected mobile bootstrap to avoid replacing an existing mobile reader view")
+	}
+	if !strings.Contains(mobileSource, `data-mobile-stream='true'`) {
+		t.Fatal("expected mobile bootstrap to avoid replacing an existing mobile stream view")
+	}
 
 	templateSource := joinFiles(t, templatePaths(t))
 	if !strings.Contains(templateSource, `data-mobile-stream="true"`) {

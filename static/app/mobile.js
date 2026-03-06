@@ -3,12 +3,17 @@ import { isDesktopLayout } from "./dom.js";
 const mobileStreamPath = "/mobile/stream";
 
 const hasMainContentTarget = () => Boolean(document.getElementById("main-content"));
+const hasMobileContent = () =>
+  Boolean(document.querySelector("#main-content [data-mobile-stream='true'], #main-content [data-mobile-reader='true']"));
 
 const loadMobileStream = () => {
   if (isDesktopLayout()) {
     return;
   }
   if (!hasMainContentTarget()) {
+    return;
+  }
+  if (hasMobileContent()) {
     return;
   }
   if (typeof htmx === "undefined" || typeof htmx.ajax !== "function") {

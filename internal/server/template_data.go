@@ -4,6 +4,8 @@ import "rss/internal/view"
 
 type pageData struct {
 	ItemList       *view.ItemListData
+	MobileStream   *mobileStreamResponseData
+	MobileReader   *mobileReaderResponseData
 	CSRFToken      string
 	Feeds          []view.FeedView
 	SelectedFeedID int64
