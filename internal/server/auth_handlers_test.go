@@ -226,6 +226,10 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 		t.Fatal("expected logout form in menu")
 	}
 
+	if !strings.Contains(body, `href="/auth/security"`) {
+		t.Fatal("expected security settings link in menu")
+	}
+
 	if !strings.Contains(body, `name="csrf_token"`) {
 		t.Fatal("expected csrf token in logout form")
 	}
