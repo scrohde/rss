@@ -64,20 +64,6 @@ PULSE_SMOKE_BROWSER_BIN="/Applications/Google Chrome.app/Contents/MacOS/Google C
 - Avoid broad refactors unless required for the task.
 - Keep `main.go` thin; put behavior in internal packages.
 
-## Issue tracking (`bd`)
-- Use `bd` for task tracking instead of markdown TODO lists.
-- Basic flow:
-  - `bd ready --json`
-  - `bd update <id> --claim --json`
-  - implement + test
-  - `bd close <id> --reason "Done" --json`
-- For follow-up work, create linked issues with `--deps discovered-from:<id>`.
-
-Dolt notes:
-- This repo uses Dolt-backed `bd`.
-- Check current Dolt connection with `bd dolt show`. If connection failed try `bd list` then try show again.
-- Check current Dolt status with `bd dolt status`.
-
 ## "Ship it"
 Interpret "ship it" as:
 1. Commit relevant changes.

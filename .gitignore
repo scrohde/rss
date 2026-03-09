@@ -3,13 +3,5 @@
 rss.db
 rss.db-*
 feeds.txt
-.beads
-beads_rss
 config.yaml
 /rss
-/.dolt/
-/.doltcfg/
-
-# Dolt database files (added by bd init)
-.dolt/
-*.db
