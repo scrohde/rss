@@ -152,6 +152,7 @@ func (a *App) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/webauthn/register/options", a.handleAuthRegisterOptions)
 	mux.HandleFunc("POST /auth/webauthn/register/verify", a.handleAuthRegisterVerify)
 	mux.HandleFunc("POST /auth/logout", a.handleAuthLogout)
+	mux.HandleFunc("POST /auth/theme", a.handleAuthTheme)
 	mux.HandleFunc("GET /auth/security", a.handleAuthSecurity)
 	mux.HandleFunc("GET /auth/recovery", a.handleAuthRecovery)
 	mux.HandleFunc("POST /auth/recovery/use", a.handleAuthRecoveryUse)
@@ -213,11 +214,15 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var data pageData
+	data, err := a.newPageData(r)
+	if err != nil {
+		http.Error(w, "failed to load page state", http.StatusInternalServerError)
+
+		return
+	}
 
 	data.Feeds = feeds
 	data.FeedEditMode = feedEditModeEnabled(r)
-	data.CSRFToken = a.csrfTokenForRequest(r)
 	a.renderTemplate(w, "index", data)
 }
 
@@ -1317,15 +1322,59 @@ func (a *App) mobilePageData(r *http.Request) (pageData, error) {
 		return pageData{}, fmt.Errorf("list feeds: %w", err)
 	}
 
+	data, err := a.newPageData(r)
+	if err != nil {
+		return pageData{}, err
+	}
+
+	data.Feeds = feeds
+	data.SelectedFeedID = 0
+	data.FeedEditMode = feedEditModeEnabled(r)
+
+	return data, nil
+}
+
+func (a *App) newPageData(r *http.Request) (pageData, error) {
+	base, err := a.newFullPageData(r)
+	if err != nil {
+		return pageData{}, err
+	}
+
 	return pageData{
+		fullPageData:   base,
 		ItemList:       nil,
 		MobileStream:   nil,
 		MobileReader:   nil,
-		CSRFToken:      a.csrfTokenForRequest(r),
-		Feeds:          feeds,
+		Feeds:          nil,
 		SelectedFeedID: 0,
-		FeedEditMode:   feedEditModeEnabled(r),
+		FeedEditMode:   false,
 	}, nil
+}
+
+func (a *App) newFullPageData(r *http.Request) (fullPageData, error) {
+	theme, err := a.requestAppearanceTheme(r)
+	if err != nil {
+		return fullPageData{}, err
+	}
+
+	return fullPageData{
+		CSRFToken:       a.csrfTokenForRequest(r),
+		AppearanceTheme: theme,
+	}, nil
+}
+
+func (a *App) requestAppearanceTheme(r *http.Request) (string, error) {
+	principal, ok := currentPrincipal(r)
+	if !ok {
+		return "", nil
+	}
+
+	user, err := store.GetAuthUserByID(r.Context(), a.db, principal.UserID)
+	if err != nil {
+		return "", fmt.Errorf("load auth user appearance theme: %w", err)
+	}
+
+	return user.AppearanceTheme, nil
 }
 
 func (a *App) startPulse(ctx context.Context, feedIDs []int64) bool {

@@ -2,11 +2,17 @@ package server
 
 import "rss/internal/view"
 
+type fullPageData struct {
+	CSRFToken       string
+	AppearanceTheme string
+}
+
 type pageData struct {
+	fullPageData
+
 	ItemList       *view.ItemListData
 	MobileStream   *mobileStreamResponseData
 	MobileReader   *mobileReaderResponseData
-	CSRFToken      string
 	Feeds          []view.FeedView
 	SelectedFeedID int64
 	FeedEditMode   bool
@@ -83,7 +89,8 @@ type authSetupPageData struct {
 }
 
 type authSecurityPageData struct {
-	CSRFToken          string
+	fullPageData
+
 	RecoveryCode       string
 	RegistrationURL    string
 	RecoveryEnabledURL string

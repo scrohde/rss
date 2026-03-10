@@ -15,12 +15,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"rss/internal/auth"
+	"rss/internal/store"
 )
 
 const (
@@ -902,6 +904,39 @@ func (a *App) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
 }
 
+func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
+	_, ok := currentPrincipal(r)
+	if !ok {
+		http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
+
+		return
+	}
+
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+
+		return
+	}
+
+	theme := strings.TrimSpace(r.FormValue("theme"))
+
+	err = store.UpdateAuthOwnerAppearanceTheme(r.Context(), a.db, theme)
+	if errors.Is(err, store.ErrInvalidAppearanceTheme) {
+		http.Error(w, "invalid appearance theme", http.StatusBadRequest)
+
+		return
+	}
+
+	if err != nil {
+		http.Error(w, "failed to update appearance theme", http.StatusInternalServerError)
+
+		return
+	}
+
+	http.Redirect(w, r, "/auth/security?message="+url.QueryEscape("Appearance updated."), http.StatusSeeOther)
+}
+
 func (a *App) handleAuthSecurity(w http.ResponseWriter, r *http.Request) {
 	principal, ok := currentPrincipal(r)
 	if !ok {
@@ -917,7 +952,7 @@ func (a *App) handleAuthSecurity(w http.ResponseWriter, r *http.Request) {
 func (a *App) renderSecurityPage(
 	w http.ResponseWriter,
 	r *http.Request,
-	principal auth.SessionPrincipal,
+	_ auth.SessionPrincipal,
 	message string,
 	recoveryCode string,
 ) {
@@ -935,8 +970,15 @@ func (a *App) renderSecurityPage(
 		return
 	}
 
+	page, err := a.newFullPageData(r)
+	if err != nil {
+		http.Error(w, "failed to load security state", http.StatusInternalServerError)
+
+		return
+	}
+
 	data := authSecurityPageData{
-		CSRFToken:          principal.CSRFToken,
+		fullPageData:       page,
 		PasskeyCount:       credentials,
 		HasRecoveryCode:    hasRecoveryCode,
 		RecoveryCode:       recoveryCode,

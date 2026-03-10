@@ -37,7 +37,20 @@ func newAuthEnabledTestApp(t *testing.T) *App {
 	return app
 }
 
+type authSessionFixture struct {
+	cookie    *http.Cookie
+	csrfToken string
+}
+
 func issueAuthCookie(t *testing.T, app *App) *http.Cookie {
+	t.Helper()
+
+	session := issueAuthSession(t, app)
+
+	return session.cookie
+}
+
+func issueAuthSession(t *testing.T, app *App) authSessionFixture {
 	t.Helper()
 
 	owner, err := app.authManager.EnsureOwner(context.Background())
@@ -54,7 +67,10 @@ func issueAuthCookie(t *testing.T, app *App) *http.Cookie {
 	cookie.Name = app.authCookieName
 	cookie.Value = issue.CookieValue
 
-	return cookie
+	return authSessionFixture{
+		cookie:    cookie,
+		csrfToken: issue.CSRFToken,
+	}
 }
 
 func seedAuthCredential(t *testing.T, app *App) {
@@ -235,6 +251,153 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedIndexAppliesStoredThemeToRootMarkup(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	err := store.UpdateAuthOwnerAppearanceTheme(context.Background(), app.db, store.AuthAppearanceThemeDark)
+	if err != nil {
+		t.Fatalf("UpdateAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	cookie := issueAuthCookie(t, app)
+	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req.AddCookie(cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected authenticated index status 200, got %d", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), `<html lang="en" data-theme="dark">`) {
+		t.Fatal("expected dark theme marker on authenticated index page")
+	}
+}
+
+func TestAuthenticatedIndexAppliesLightThemeToRootMarkup(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	err := store.UpdateAuthOwnerAppearanceTheme(context.Background(), app.db, store.AuthAppearanceThemeLight)
+	if err != nil {
+		t.Fatalf("UpdateAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	cookie := issueAuthCookie(t, app)
+	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req.AddCookie(cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected authenticated index status 200, got %d", rr.Code)
+	}
+
+	if !strings.Contains(rr.Body.String(), `<html lang="en" data-theme="light">`) {
+		t.Fatal("expected light theme marker on authenticated index page")
+	}
+}
+
+func TestAuthLoginPageDoesNotEmitStoredThemeMarker(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+
+	_, err := app.authManager.EnsureOwner(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureOwner: %v", err)
+	}
+
+	err = store.UpdateAuthOwnerAppearanceTheme(context.Background(), app.db, store.AuthAppearanceThemeDark)
+	if err != nil {
+		t.Fatalf("UpdateAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/login", http.NoBody)
+	rr := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected login page status 200, got %d", rr.Code)
+	}
+
+	if strings.Contains(rr.Body.String(), `data-theme=`) {
+		t.Fatal("did not expect stored theme marker on login page")
+	}
+}
+
+func TestAuthDisabledIndexDoesNotExposeAppearanceControlsOrThemeMarker(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	rr := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected index status 200, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if strings.Contains(body, `data-theme=`) {
+		t.Fatal("did not expect theme marker when auth is disabled")
+	}
+
+	if strings.Contains(body, `href="/auth/security"`) {
+		t.Fatal("did not expect security settings link when auth is disabled")
+	}
+
+	if strings.Contains(body, `action="/auth/theme"`) {
+		t.Fatal("did not expect appearance form when auth is disabled")
+	}
+}
+
+func TestAuthSecurityPageShowsAppearanceControls(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	err := store.UpdateAuthOwnerAppearanceTheme(context.Background(), app.db, store.AuthAppearanceThemeDark)
+	if err != nil {
+		t.Fatalf("UpdateAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	cookie := issueAuthCookie(t, app)
+	req := httptest.NewRequest(http.MethodGet, "/auth/security", http.NoBody)
+	req.AddCookie(cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected security page status 200, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `<html lang="en" data-theme="dark">`) {
+		t.Fatal("expected dark theme marker on security page")
+	}
+
+	if !strings.Contains(body, `action="/auth/theme"`) {
+		t.Fatal("expected appearance form action")
+	}
+
+	if !strings.Contains(body, `value="dark" checked`) {
+		t.Fatal("expected saved dark appearance option to be selected")
+	}
+}
+
 func TestAuthCSRFRequiredForUnsafeRequests(t *testing.T) {
 	t.Parallel()
 
@@ -251,6 +414,78 @@ func TestAuthCSRFRequiredForUnsafeRequests(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected csrf forbidden status, got %d", rr.Code)
+	}
+}
+
+func TestAuthThemeUpdatePersistsAndRedirects(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+	session := issueAuthSession(t, app)
+
+	form := url.Values{
+		"theme":      {store.AuthAppearanceThemeDark},
+		"csrf_token": {session.csrfToken},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/theme", strings.NewReader(form.Encode()))
+	req.Header.Set(headerContentType, formURLEncoded)
+	req.AddCookie(session.cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect status, got %d", rr.Code)
+	}
+
+	if rr.Header().Get("Location") != "/auth/security?message=Appearance+updated." {
+		t.Fatalf("expected security redirect, got %q", rr.Header().Get("Location"))
+	}
+
+	theme, err := store.GetAuthOwnerAppearanceTheme(context.Background(), app.db)
+	if err != nil {
+		t.Fatalf("GetAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	if theme != store.AuthAppearanceThemeDark {
+		t.Fatalf("unexpected stored theme: got %q want %q", theme, store.AuthAppearanceThemeDark)
+	}
+}
+
+func TestAuthThemeUpdateRejectsInvalidValue(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+	session := issueAuthSession(t, app)
+
+	form := url.Values{
+		"theme":      {"violet"},
+		"csrf_token": {session.csrfToken},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/theme", strings.NewReader(form.Encode()))
+	req.Header.Set(headerContentType, formURLEncoded)
+	req.AddCookie(session.cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad request status, got %d", rr.Code)
+	}
+
+	theme, err := store.GetAuthOwnerAppearanceTheme(context.Background(), app.db)
+	if err != nil {
+		t.Fatalf("GetAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	if theme != store.AuthAppearanceThemeSystem {
+		t.Fatalf(
+			"unexpected stored theme after invalid submission: got %q want %q",
+			theme,
+			store.AuthAppearanceThemeSystem,
+		)
 	}
 }
 

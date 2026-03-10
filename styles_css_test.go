@@ -83,8 +83,26 @@ func TestStylesReadingSurfaceScrollbarsAreVisible(t *testing.T) {
 	}
 
 	if !strings.Contains(source, ".main-panel::-webkit-scrollbar-thumb") ||
-		!strings.Contains(source, "background: rgba(31, 41, 55, 0.38);") {
+		!strings.Contains(source, "background: var(--scrollbar-thumb);") {
 		t.Fatal("expected visible scrollbar thumb styling")
+	}
+}
+
+func TestStylesThemeContractsFollowServerMarkers(t *testing.T) {
+	t.Parallel()
+
+	source := readStylesCSS(t)
+
+	if !cssRuleContains(source, "html[data-theme=\"dark\"]", "color-scheme: dark;") {
+		t.Fatal("expected explicit dark theme selector to opt into dark color-scheme")
+	}
+
+	if !strings.Contains(source, "html[data-theme=\"system\"],") {
+		t.Fatal("expected explicit system theme selector in dark-mode media override")
+	}
+
+	if !strings.Contains(source, "html:not([data-theme])") {
+		t.Fatal("expected anonymous pages without a theme marker to follow system theme")
 	}
 }
 

@@ -1,6 +1,6 @@
 {{define "auth_security"}}
 <!doctype html>
-<html lang="en">
+<html lang="en"{{if .AppearanceTheme}} data-theme="{{.AppearanceTheme}}"{{end}}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -21,6 +21,28 @@
     <p>
       <button type="button" class="chip" data-passkey-register="true">Add another passkey</button>
     </p>
+
+    <section class="auth-section">
+      <h3>Appearance</h3>
+      <form method="post" action="/auth/theme">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label>
+          <input type="radio" name="theme" value="system" {{if eq .AppearanceTheme "system"}}checked{{end}}>
+          System
+        </label>
+        <label>
+          <input type="radio" name="theme" value="light" {{if eq .AppearanceTheme "light"}}checked{{end}}>
+          Light
+        </label>
+        <label>
+          <input type="radio" name="theme" value="dark" {{if eq .AppearanceTheme "dark"}}checked{{end}}>
+          Dark
+        </label>
+        <p>
+          <button type="submit">Save appearance</button>
+        </p>
+      </form>
+    </section>
 
     <section class="auth-section">
       <h3>Emergency Recovery Code</h3>
