@@ -11,11 +11,12 @@ import (
 
 // AuthUserRecord stores the single app user's WebAuthn identity data.
 type AuthUserRecord struct {
-	CreatedAt   time.Time
-	Name        string
-	DisplayName string
-	UserHandle  []byte
-	ID          int64
+	CreatedAt       time.Time
+	Name            string
+	DisplayName     string
+	AppearanceTheme string
+	UserHandle      []byte
+	ID              int64
 }
 
 // AuthCredentialRecord stores a registered WebAuthn credential.
@@ -58,9 +59,20 @@ type AuthChallengeRecord struct {
 
 // ErrAuthChallengeMissing indicates the challenge was missing, expired, or already consumed.
 var (
-	ErrAuthChallengeMissing            = errors.New("auth challenge not found")
+	ErrAuthChallengeMissing = errors.New("auth challenge not found")
+	// ErrInvalidAppearanceTheme indicates an unsupported auth owner theme preference.
+	ErrInvalidAppearanceTheme          = errors.New("invalid appearance theme")
 	errUnsupportedAuthCredentialColumn = errors.New("unsupported auth credential column")
 	errInvalidAuthCredentialSignCount  = errors.New("invalid auth credential sign count")
+)
+
+const (
+	// AuthAppearanceThemeSystem follows the active OS/browser theme preference.
+	AuthAppearanceThemeSystem = "system"
+	// AuthAppearanceThemeLight forces the light theme.
+	AuthAppearanceThemeLight = "light"
+	// AuthAppearanceThemeDark forces the dark theme.
+	AuthAppearanceThemeDark = "dark"
 )
 
 const authSchemaSQL = `
@@ -69,6 +81,7 @@ CREATE TABLE IF NOT EXISTS auth_users (
 	user_handle BLOB NOT NULL UNIQUE,
 	name TEXT NOT NULL,
 	display_name TEXT NOT NULL,
+	appearance_theme TEXT NOT NULL DEFAULT 'system',
 	created_at DATETIME NOT NULL
 );
 
@@ -130,6 +143,11 @@ func ensureAuthSchema(db *sql.DB) error {
 		return fmt.Errorf("initialize auth schema: %w", err)
 	}
 
+	err = ensureAuthUserAppearanceThemeColumn(db)
+	if err != nil {
+		return err
+	}
+
 	err = ensureAuthCredentialFlagColumn(db, "backup_eligible")
 	if err != nil {
 		return err
@@ -143,19 +161,56 @@ func ensureAuthSchema(db *sql.DB) error {
 	return nil
 }
 
-func ensureAuthCredentialFlagColumn(db *sql.DB, column string) error {
+func ensureAuthUserAppearanceThemeColumn(db *sql.DB) error {
+	hasColumn, err := authTableHasColumn(db, "auth_users", "appearance_theme")
+	if err != nil {
+		return fmt.Errorf("check auth user appearance theme column: %w", err)
+	}
+
+	if !hasColumn {
+		_, err = db.ExecContext(
+			context.Background(),
+			`ALTER TABLE auth_users ADD COLUMN appearance_theme TEXT NOT NULL DEFAULT 'system'`,
+		)
+		if err != nil {
+			return fmt.Errorf("add auth user appearance theme column: %w", err)
+		}
+	}
+
+	_, err = db.ExecContext(
+		context.Background(),
+		`UPDATE auth_users SET appearance_theme = ? WHERE appearance_theme IS NULL OR appearance_theme = ''`,
+		AuthAppearanceThemeSystem,
+	)
+	if err != nil {
+		return fmt.Errorf("backfill auth user appearance theme column: %w", err)
+	}
+
+	return nil
+}
+
+func authTableHasColumn(db *sql.DB, tableName, columnName string) (bool, error) {
 	var count int
 
 	err := db.QueryRowContext(
 		context.Background(),
-		`SELECT COUNT(*) FROM pragma_table_info('auth_webauthn_credentials') WHERE name = ?`,
-		column,
+		fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?`, tableName),
+		columnName,
 	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("lookup column %q on %q: %w", columnName, tableName, err)
+	}
+
+	return count > 0, nil
+}
+
+func ensureAuthCredentialFlagColumn(db *sql.DB, column string) error {
+	hasColumn, err := authTableHasColumn(db, "auth_webauthn_credentials", column)
 	if err != nil {
 		return fmt.Errorf("check auth credential column %q: %w", column, err)
 	}
 
-	if count > 0 {
+	if hasColumn {
 		return nil
 	}
 
@@ -201,12 +256,10 @@ func AuthCredentialCount(ctx context.Context, db *sql.DB) (int, error) {
 func GetAuthOwner(ctx context.Context, db *sql.DB) (AuthUserRecord, error) {
 	ctx = contextOrBackground(ctx)
 
-	var user AuthUserRecord
-
-	err := db.QueryRowContext(
+	user, err := scanAuthUserRow(db.QueryRowContext(
 		ctx,
-		`SELECT id, user_handle, name, display_name, created_at FROM auth_users WHERE id = 1`,
-	).Scan(&user.ID, &user.UserHandle, &user.Name, &user.DisplayName, &user.CreatedAt)
+		`SELECT id, user_handle, name, display_name, appearance_theme, created_at FROM auth_users WHERE id = 1`,
+	))
 	if err != nil {
 		return AuthUserRecord{}, fmt.Errorf("load auth owner: %w", err)
 	}
@@ -218,13 +271,11 @@ func GetAuthOwner(ctx context.Context, db *sql.DB) (AuthUserRecord, error) {
 func GetAuthUserByID(ctx context.Context, db *sql.DB, userID int64) (AuthUserRecord, error) {
 	ctx = contextOrBackground(ctx)
 
-	var user AuthUserRecord
-
-	err := db.QueryRowContext(
+	user, err := scanAuthUserRow(db.QueryRowContext(
 		ctx,
-		`SELECT id, user_handle, name, display_name, created_at FROM auth_users WHERE id = ?`,
+		`SELECT id, user_handle, name, display_name, appearance_theme, created_at FROM auth_users WHERE id = ?`,
 		userID,
-	).Scan(&user.ID, &user.UserHandle, &user.Name, &user.DisplayName, &user.CreatedAt)
+	))
 	if err != nil {
 		return AuthUserRecord{}, fmt.Errorf("load auth user %d: %w", userID, err)
 	}
@@ -236,13 +287,12 @@ func GetAuthUserByID(ctx context.Context, db *sql.DB, userID int64) (AuthUserRec
 func GetAuthUserByHandle(ctx context.Context, db *sql.DB, handle []byte) (AuthUserRecord, error) {
 	ctx = contextOrBackground(ctx)
 
-	var user AuthUserRecord
-
-	err := db.QueryRowContext(
+	user, err := scanAuthUserRow(db.QueryRowContext(
 		ctx,
-		`SELECT id, user_handle, name, display_name, created_at FROM auth_users WHERE user_handle = ?`,
+		`SELECT id, user_handle, name, display_name, appearance_theme, created_at
+FROM auth_users WHERE user_handle = ?`,
 		handle,
-	).Scan(&user.ID, &user.UserHandle, &user.Name, &user.DisplayName, &user.CreatedAt)
+	))
 	if err != nil {
 		return AuthUserRecord{}, fmt.Errorf("load auth user by handle: %w", err)
 	}
@@ -270,6 +320,76 @@ VALUES (1, ?, ?, ?, ?)
 	}
 
 	return owner, nil
+}
+
+// GetAuthOwnerAppearanceTheme loads the persisted appearance theme for the singleton owner.
+func GetAuthOwnerAppearanceTheme(ctx context.Context, db *sql.DB) (string, error) {
+	owner, err := GetAuthOwner(ctx, db)
+	if err != nil {
+		return "", err
+	}
+
+	return owner.AppearanceTheme, nil
+}
+
+// UpdateAuthOwnerAppearanceTheme persists the owner appearance theme after validating the value.
+func UpdateAuthOwnerAppearanceTheme(ctx context.Context, db *sql.DB, theme string) error {
+	ctx = contextOrBackground(ctx)
+
+	validatedTheme, err := validateAuthAppearanceTheme(theme)
+	if err != nil {
+		return err
+	}
+
+	result, err := db.ExecContext(
+		ctx,
+		`UPDATE auth_users SET appearance_theme = ? WHERE id = 1`,
+		validatedTheme,
+	)
+	if err != nil {
+		return fmt.Errorf("update auth owner appearance theme: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count updated auth owner appearance theme rows: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("update auth owner appearance theme: %w", sql.ErrNoRows)
+	}
+
+	return nil
+}
+
+func scanAuthUserRow(scanner interface {
+	Scan(dest ...any) error
+},
+) (AuthUserRecord, error) {
+	var user AuthUserRecord
+
+	err := scanner.Scan(
+		&user.ID,
+		&user.UserHandle,
+		&user.Name,
+		&user.DisplayName,
+		&user.AppearanceTheme,
+		&user.CreatedAt,
+	)
+	if err != nil {
+		return AuthUserRecord{}, fmt.Errorf("scan auth user row: %w", err)
+	}
+
+	return user, nil
+}
+
+func validateAuthAppearanceTheme(theme string) (string, error) {
+	switch theme {
+	case AuthAppearanceThemeSystem, AuthAppearanceThemeLight, AuthAppearanceThemeDark:
+		return theme, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrInvalidAppearanceTheme, theme)
+	}
 }
 
 // ListAuthCredentialsByUser lists all credentials for a given auth user.

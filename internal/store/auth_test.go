@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -73,6 +74,43 @@ func TestAuthSessionLifecycle(t *testing.T) {
 	mustRevokeAuthSession(t, db, "session-1")
 	revoked := mustGetAuthSessionByID(t, db, "session-1")
 	assertSessionRevoked(t, &revoked)
+}
+
+func TestInitAddsAppearanceThemeToExistingAuthUsers(t *testing.T) {
+	t.Parallel()
+
+	db := openLegacyAuthSchemaDB(t)
+
+	now := time.Now().UTC()
+
+	_, err := db.ExecContext(
+		context.Background(),
+		`INSERT INTO auth_users (id, user_handle, name, display_name, created_at) VALUES (?, ?, ?, ?, ?)`,
+		1,
+		[]byte("owner-handle"),
+		"owner",
+		"Owner",
+		now,
+	)
+	if err != nil {
+		t.Fatalf("insert legacy auth owner: %v", err)
+	}
+
+	err = Init(db)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	assertHasAppearanceThemeColumn(t, db)
+
+	owner, err := GetAuthOwner(context.Background(), db)
+	if err != nil {
+		t.Fatalf("GetAuthOwner: %v", err)
+	}
+
+	if owner.AppearanceTheme != AuthAppearanceThemeSystem {
+		t.Fatalf("unexpected appearance theme: got %q want %q", owner.AppearanceTheme, AuthAppearanceThemeSystem)
+	}
 }
 
 func mustCreateAuthOwner(t *testing.T, db *sql.DB) AuthUserRecord {
@@ -198,6 +236,89 @@ func TestAuthCredentialSignCountUpdate(t *testing.T) {
 	assertCredentialUpdate(t, &loaded)
 }
 
+func TestCreateAuthOwnerDefaultsAppearanceThemeToSystem(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	owner, err := CreateAuthOwner(context.Background(), db, []byte("owner-handle"), "owner", "Owner")
+	if err != nil {
+		t.Fatalf("CreateAuthOwner: %v", err)
+	}
+
+	if owner.AppearanceTheme != AuthAppearanceThemeSystem {
+		t.Fatalf("unexpected appearance theme: got %q want %q", owner.AppearanceTheme, AuthAppearanceThemeSystem)
+	}
+
+	theme, err := GetAuthOwnerAppearanceTheme(context.Background(), db)
+	if err != nil {
+		t.Fatalf("GetAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	if theme != AuthAppearanceThemeSystem {
+		t.Fatalf("unexpected stored appearance theme: got %q want %q", theme, AuthAppearanceThemeSystem)
+	}
+}
+
+func TestUpdateAuthOwnerAppearanceThemePersistsValidThemes(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	mustCreateAuthOwner(t, db)
+
+	validThemes := []string{
+		AuthAppearanceThemeSystem,
+		AuthAppearanceThemeLight,
+		AuthAppearanceThemeDark,
+	}
+
+	for _, theme := range validThemes {
+		err := UpdateAuthOwnerAppearanceTheme(context.Background(), db, theme)
+		if err != nil {
+			t.Fatalf("UpdateAuthOwnerAppearanceTheme(%q): %v", theme, err)
+		}
+
+		storedTheme, err := GetAuthOwnerAppearanceTheme(context.Background(), db)
+		if err != nil {
+			t.Fatalf("GetAuthOwnerAppearanceTheme: %v", err)
+		}
+
+		if storedTheme != theme {
+			t.Fatalf("unexpected stored appearance theme: got %q want %q", storedTheme, theme)
+		}
+	}
+}
+
+func TestUpdateAuthOwnerAppearanceThemeRejectsInvalidTheme(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	mustCreateAuthOwner(t, db)
+
+	err := UpdateAuthOwnerAppearanceTheme(context.Background(), db, AuthAppearanceThemeDark)
+	if err != nil {
+		t.Fatalf("UpdateAuthOwnerAppearanceTheme(%q): %v", AuthAppearanceThemeDark, err)
+	}
+
+	err = UpdateAuthOwnerAppearanceTheme(context.Background(), db, "sepia")
+	if err == nil {
+		t.Fatal("expected invalid appearance theme error")
+	}
+
+	if !errors.Is(err, ErrInvalidAppearanceTheme) {
+		t.Fatalf("expected ErrInvalidAppearanceTheme, got %v", err)
+	}
+
+	storedTheme, err := GetAuthOwnerAppearanceTheme(context.Background(), db)
+	if err != nil {
+		t.Fatalf("GetAuthOwnerAppearanceTheme after invalid update: %v", err)
+	}
+
+	if storedTheme != AuthAppearanceThemeDark {
+		t.Fatalf("expected invalid update to keep %q, got %q", AuthAppearanceThemeDark, storedTheme)
+	}
+}
+
 func assertCredentialUpdate(t *testing.T, credential *AuthCredentialRecord) {
 	t.Helper()
 
@@ -268,5 +389,56 @@ func TestGetAuthOwnerMissing(t *testing.T) {
 
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected sql.ErrNoRows, got %v", err)
+	}
+}
+
+func openLegacyAuthSchemaDB(t *testing.T) *sql.DB {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "legacy-auth.db")
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	t.Cleanup(func() {
+		closeErr := db.Close()
+		if closeErr != nil {
+			t.Errorf("db.Close: %v", closeErr)
+		}
+	})
+
+	_, err = db.ExecContext(context.Background(), `
+CREATE TABLE auth_users (
+	id INTEGER PRIMARY KEY,
+	user_handle BLOB NOT NULL UNIQUE,
+	name TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	created_at DATETIME NOT NULL
+)
+`)
+	if err != nil {
+		t.Fatalf("create legacy auth_users table: %v", err)
+	}
+
+	return db
+}
+
+func assertHasAppearanceThemeColumn(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	var hasAppearanceTheme int
+
+	err := db.QueryRowContext(
+		context.Background(),
+		`SELECT COUNT(*) FROM pragma_table_info('auth_users') WHERE name = 'appearance_theme'`,
+	).Scan(&hasAppearanceTheme)
+	if err != nil {
+		t.Fatalf("check appearance_theme column: %v", err)
+	}
+
+	if hasAppearanceTheme != 1 {
+		t.Fatal("expected appearance_theme column to be added")
 	}
 }
