@@ -55,7 +55,12 @@
             {{if .CSRFToken}}
               <div class="topbar-shortcuts-divider"></div>
               <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Account</div>
-              <form class="topbar-shortcuts-theme-form" method="post" action="/auth/theme">
+              <form
+                class="topbar-shortcuts-theme-form"
+                method="post"
+                action="/auth/theme"
+                data-theme-form="true"
+              >
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                 <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
                 <fieldset class="topbar-shortcuts-theme-fieldset">
@@ -75,9 +80,7 @@
                     </label>
                   </div>
                 </fieldset>
-                <button class="topbar-shortcuts-control topbar-shortcuts-control-button" type="submit">
-                  Save appearance
-                </button>
+                <p class="topbar-shortcuts-theme-status" data-theme-status="true" aria-live="polite"></p>
               </form>
               <div class="topbar-shortcuts-grid">
                 <div class="topbar-shortcuts-row">

@@ -348,6 +348,26 @@ body {
   margin: 0 0 12px;
 }
 
+.topbar-shortcuts-theme-status {
+  min-height: 1.1em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.topbar-shortcuts-theme-status[data-state="pending"] {
+  color: var(--accent);
+}
+
+.topbar-shortcuts-theme-status[data-state="saved"] {
+  color: var(--accent);
+}
+
+.topbar-shortcuts-theme-status[data-state="error"] {
+  color: #b42318;
+}
+
 .topbar-shortcuts-theme-fieldset {
   margin: 0;
   padding: 0;

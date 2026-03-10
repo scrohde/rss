@@ -177,6 +177,16 @@ func TestAppJSSelectorContractsMatchTemplates(t *testing.T) {
 			templateToken: `data-import-file-input="true"`,
 		},
 		{
+			name:          "appearance theme form",
+			jsSelector:    `form[data-theme-form='true']`,
+			templateToken: `data-theme-form="true"`,
+		},
+		{
+			name:          "appearance theme status",
+			jsSelector:    `[data-theme-status='true']`,
+			templateToken: `data-theme-status="true"`,
+		},
+		{
 			name:          "content panel float toggle",
 			jsSelector:    `button[data-content-panel-full-toggle='true']`,
 			templateToken: `data-content-panel-full-toggle="true"`,

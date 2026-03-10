@@ -11,6 +11,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
     topbar.bindTopbarShortcuts();
     topbar.bindSubscribeForms();
     topbar.bindImportControls();
+    topbar.bindThemeForms();
     content.bindItemRowClickGuards();
     feed.bindFeedPanelResize();
     content.bindContentPanelResize();

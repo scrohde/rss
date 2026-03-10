@@ -238,24 +238,24 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 	}
 
 	body := rr.Body.String()
-	if !strings.Contains(body, `action="/auth/logout"`) {
-		t.Fatal("expected logout form in menu")
+
+	requiredSnippets := []string{
+		`action="/auth/logout"`,
+		`href="/auth/security"`,
+		`action="/auth/theme"`,
+		`data-theme-form="true"`,
+		`data-theme-status="true"`,
+		`name="return_to" value="/"`,
+		`name="csrf_token"`,
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("expected menu to include %q", snippet)
+		}
 	}
 
-	if !strings.Contains(body, `href="/auth/security"`) {
-		t.Fatal("expected security settings link in menu")
-	}
-
-	if !strings.Contains(body, `action="/auth/theme"`) {
-		t.Fatal("expected appearance form in menu")
-	}
-
-	if !strings.Contains(body, `name="return_to" value="/"`) {
-		t.Fatal("expected appearance form return target in menu")
-	}
-
-	if !strings.Contains(body, `name="csrf_token"`) {
-		t.Fatal("expected csrf token in logout form")
+	if strings.Contains(body, "Save appearance") {
+		t.Fatal("did not expect explicit save appearance button in menu")
 	}
 }
 
