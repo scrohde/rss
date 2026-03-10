@@ -55,6 +55,30 @@
             {{if .CSRFToken}}
               <div class="topbar-shortcuts-divider"></div>
               <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Account</div>
+              <form class="topbar-shortcuts-theme-form" method="post" action="/auth/theme">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
+                <fieldset class="topbar-shortcuts-theme-fieldset">
+                  <legend class="topbar-shortcuts-action">Appearance</legend>
+                  <div class="topbar-shortcuts-theme-options">
+                    <label class="topbar-shortcuts-theme-option">
+                      <input type="radio" name="theme" value="system" {{if eq .AppearanceTheme "system"}}checked{{end}}>
+                      <span>System</span>
+                    </label>
+                    <label class="topbar-shortcuts-theme-option">
+                      <input type="radio" name="theme" value="light" {{if eq .AppearanceTheme "light"}}checked{{end}}>
+                      <span>Light</span>
+                    </label>
+                    <label class="topbar-shortcuts-theme-option">
+                      <input type="radio" name="theme" value="dark" {{if eq .AppearanceTheme "dark"}}checked{{end}}>
+                      <span>Dark</span>
+                    </label>
+                  </div>
+                </fieldset>
+                <button class="topbar-shortcuts-control topbar-shortcuts-control-button" type="submit">
+                  Save appearance
+                </button>
+              </form>
               <div class="topbar-shortcuts-grid">
                 <div class="topbar-shortcuts-row">
                   <span class="topbar-shortcuts-action">Security settings</span>

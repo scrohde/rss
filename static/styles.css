@@ -342,6 +342,71 @@ body {
   margin: 0;
 }
 
+.topbar-shortcuts-theme-form {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.topbar-shortcuts-theme-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.topbar-shortcuts-theme-fieldset .topbar-shortcuts-action {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.topbar-shortcuts-theme-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.topbar-shortcuts-theme-option {
+  position: relative;
+  display: inline-flex;
+}
+
+.topbar-shortcuts-theme-option input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.topbar-shortcuts-theme-option span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  font-family: "Space Grotesk", "DM Sans", sans-serif;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.topbar-shortcuts-theme-option input:checked + span {
+  border-color: rgba(15, 118, 110, 0.38);
+  background: rgba(15, 118, 110, 0.16);
+  color: var(--accent);
+}
+
+.topbar-shortcuts-theme-option input:focus-visible + span {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
+
 .topbar-shortcuts-row-subscribe {
   grid-template-columns: 1fr;
   gap: 8px;
@@ -1912,5 +1977,9 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   .topbar-shortcuts-subscribe-input {
     flex: 1;
     width: auto;
+  }
+
+  .topbar-shortcuts-theme-form {
+    justify-items: stretch;
   }
 }

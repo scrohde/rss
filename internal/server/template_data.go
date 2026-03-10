@@ -5,6 +5,7 @@ import "rss/internal/view"
 type fullPageData struct {
 	CSRFToken       string
 	AppearanceTheme string
+	ThemeReturnPath string
 }
 
 type pageData struct {

@@ -1360,6 +1360,7 @@ func (a *App) newFullPageData(r *http.Request) (fullPageData, error) {
 	return fullPageData{
 		CSRFToken:       a.csrfTokenForRequest(r),
 		AppearanceTheme: theme,
+		ThemeReturnPath: r.URL.RequestURI(),
 	}, nil
 }
 

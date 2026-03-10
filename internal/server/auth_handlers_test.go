@@ -246,6 +246,14 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 		t.Fatal("expected security settings link in menu")
 	}
 
+	if !strings.Contains(body, `action="/auth/theme"`) {
+		t.Fatal("expected appearance form in menu")
+	}
+
+	if !strings.Contains(body, `name="return_to" value="/"`) {
+		t.Fatal("expected appearance form return target in menu")
+	}
+
 	if !strings.Contains(body, `name="csrf_token"`) {
 		t.Fatal("expected csrf token in logout form")
 	}
@@ -275,6 +283,10 @@ func TestAuthenticatedIndexAppliesStoredThemeToRootMarkup(t *testing.T) {
 
 	if !strings.Contains(rr.Body.String(), `<html lang="en" data-theme="dark">`) {
 		t.Fatal("expected dark theme marker on authenticated index page")
+	}
+
+	if !strings.Contains(rr.Body.String(), `value="dark" checked`) {
+		t.Fatal("expected saved dark appearance option to be selected in menu")
 	}
 }
 
@@ -362,7 +374,7 @@ func TestAuthDisabledIndexDoesNotExposeAppearanceControlsOrThemeMarker(t *testin
 	}
 }
 
-func TestAuthSecurityPageShowsAppearanceControls(t *testing.T) {
+func TestAuthSecurityPageNoLongerShowsAppearanceControls(t *testing.T) {
 	t.Parallel()
 
 	app := newAuthEnabledTestApp(t)
@@ -389,12 +401,8 @@ func TestAuthSecurityPageShowsAppearanceControls(t *testing.T) {
 		t.Fatal("expected dark theme marker on security page")
 	}
 
-	if !strings.Contains(body, `action="/auth/theme"`) {
-		t.Fatal("expected appearance form action")
-	}
-
-	if !strings.Contains(body, `value="dark" checked`) {
-		t.Fatal("expected saved dark appearance option to be selected")
+	if strings.Contains(body, `action="/auth/theme"`) {
+		t.Fatal("did not expect appearance form action on security page")
 	}
 }
 
@@ -425,6 +433,44 @@ func TestAuthThemeUpdatePersistsAndRedirects(t *testing.T) {
 	session := issueAuthSession(t, app)
 
 	form := url.Values{
+		"return_to":  {"/"},
+		"theme":      {store.AuthAppearanceThemeDark},
+		"csrf_token": {session.csrfToken},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/auth/theme", strings.NewReader(form.Encode()))
+	req.Header.Set(headerContentType, formURLEncoded)
+	req.AddCookie(session.cookie)
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect status, got %d", rr.Code)
+	}
+
+	if rr.Header().Get("Location") != "/" {
+		t.Fatalf("expected return redirect, got %q", rr.Header().Get("Location"))
+	}
+
+	theme, err := store.GetAuthOwnerAppearanceTheme(context.Background(), app.db)
+	if err != nil {
+		t.Fatalf("GetAuthOwnerAppearanceTheme: %v", err)
+	}
+
+	if theme != store.AuthAppearanceThemeDark {
+		t.Fatalf("unexpected stored theme: got %q want %q", theme, store.AuthAppearanceThemeDark)
+	}
+}
+
+func TestAuthThemeUpdateRejectsExternalReturnTarget(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+	session := issueAuthSession(t, app)
+
+	form := url.Values{
+		"return_to":  {"https://example.com/phish"},
 		"theme":      {store.AuthAppearanceThemeDark},
 		"csrf_token": {session.csrfToken},
 	}
@@ -440,16 +486,7 @@ func TestAuthThemeUpdatePersistsAndRedirects(t *testing.T) {
 	}
 
 	if rr.Header().Get("Location") != "/auth/security?message=Appearance+updated." {
-		t.Fatalf("expected security redirect, got %q", rr.Header().Get("Location"))
-	}
-
-	theme, err := store.GetAuthOwnerAppearanceTheme(context.Background(), app.db)
-	if err != nil {
-		t.Fatalf("GetAuthOwnerAppearanceTheme: %v", err)
-	}
-
-	if theme != store.AuthAppearanceThemeDark {
-		t.Fatalf("unexpected stored theme: got %q want %q", theme, store.AuthAppearanceThemeDark)
+		t.Fatalf("expected security fallback redirect, got %q", rr.Header().Get("Location"))
 	}
 }
 

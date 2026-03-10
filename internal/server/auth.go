@@ -934,7 +934,26 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/auth/security?message="+url.QueryEscape("Appearance updated."), http.StatusSeeOther)
+	redirectTarget := authThemeRedirectTarget(r.FormValue("return_to"))
+	if redirectTarget == "" {
+		redirectTarget = "/auth/security?message=" + url.QueryEscape("Appearance updated.")
+	}
+
+	http.Redirect(w, r, redirectTarget, http.StatusSeeOther)
+}
+
+func authThemeRedirectTarget(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return ""
+	}
+
+	target, err := url.Parse(raw)
+	if err != nil || target.IsAbs() || target.Host != "" || !strings.HasPrefix(target.Path, "/") {
+		return ""
+	}
+
+	return target.RequestURI()
 }
 
 func (a *App) handleAuthSecurity(w http.ResponseWriter, r *http.Request) {
