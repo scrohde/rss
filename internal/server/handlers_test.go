@@ -262,14 +262,14 @@ func assertMobileStreamSelectorInHeader(t *testing.T, body string) {
 	t.Helper()
 
 	headerStart := strings.Index(body, `<header class="mobile-stream-header">`)
-	formStart := strings.Index(body, `<form class="mobile-stream-filter"`)
+	formStart := strings.Index(body, `class="mobile-stream-filter"`)
 
-	listStart := strings.Index(body, `<div class="mobile-stream-list">`)
-	if headerStart == -1 || formStart == -1 || listStart == -1 {
-		t.Fatal("expected mobile stream header, inline filter form, and stream list in response")
+	contentStart := strings.Index(body, `id="mobile-stream-content"`)
+	if headerStart == -1 || formStart == -1 || contentStart == -1 {
+		t.Fatal("expected mobile stream header, inline filter form, and stream content in response")
 	}
 
-	if formStart < headerStart || formStart > listStart {
+	if formStart < headerStart || formStart > contentStart {
 		t.Fatal("expected feed selector form to render inline within the mobile stream header")
 	}
 }
@@ -3786,6 +3786,12 @@ func TestMobileStreamSelectorRendersInlineInHeaderAndShowsUnreadFeedsOnly(t *tes
 		body,
 		`>Bright Feed</option>`,
 		"expected unread feed option",
+	)
+	assertNotContains(
+		t,
+		body,
+		`>Show</button>`,
+		"expected mobile selector to submit on selection without a show button",
 	)
 	assertNotContains(
 		t,

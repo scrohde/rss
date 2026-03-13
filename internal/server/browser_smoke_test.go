@@ -873,21 +873,12 @@ func selectMobileFeedFilter(t *testing.T, ctx context.Context, feedID int64) {
 
 	expression := fmt.Sprintf(
 		`(() => {
-			const form = document.querySelector(".mobile-stream-filter");
 			const select = document.querySelector("#mobile-stream-feed-filter");
-			if (!form || !select) {
+			if (!select) {
 				return false;
 			}
 			select.value = %q;
-			if (typeof form.requestSubmit === "function") {
-				form.requestSubmit();
-			} else {
-				const submit = form.querySelector('button[type="submit"]');
-				if (!submit || typeof submit.click !== "function") {
-					return false;
-				}
-				submit.click();
-			}
+			select.dispatchEvent(new Event("change", { bubbles: true }));
 			return select.value === %q;
 		})()`,
 		fmt.Sprintf("%d", feedID),
