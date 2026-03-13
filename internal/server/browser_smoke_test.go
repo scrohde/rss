@@ -24,10 +24,12 @@ const (
 )
 
 type smokeFixture struct {
+	primaryFeedID         int64
 	archiveFeedID         int64
 	secondaryFeedID       int64
 	tertiaryFeedID        int64
 	quaternaryFeedID      int64
+	primaryFirstItemID    int64
 	secondaryFirstItemID  int64
 	secondarySecondItemID int64
 }
@@ -158,6 +160,28 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "stream URL after history back")
 }
 
+func TestBrowserSmokeMobileFilteredFeedFlows(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := httptest.NewServer(app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
+
+	runMobileFilteredHistoryFlow(t, ctx, fixture)
+	runMobileFilteredEmptyStateFlow(t, ctx, fixture)
+}
+
 func newSmokeApp(t *testing.T) *App {
 	t.Helper()
 
@@ -192,14 +216,19 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 		newSmokeItem("Quaternary One", "https://example.com/q1", "quaternary-1", base.Add(-4*time.Hour)),
 	})
 
+	primaryItems := mustListItems(t, app, primaryFeedID)
+	assertItemCount(t, primaryItems, 1)
+
 	secondaryItems := mustListItems(t, app, secondaryFeedID)
 	assertItemCount(t, secondaryItems, 2)
 
 	return smokeFixture{
+		primaryFeedID:         primaryFeedID,
 		archiveFeedID:         archiveFeedID,
 		secondaryFeedID:       secondaryFeedID,
 		tertiaryFeedID:        tertiaryFeedID,
 		quaternaryFeedID:      quaternaryFeedID,
+		primaryFirstItemID:    primaryItems[0].ID,
 		secondaryFirstItemID:  secondaryItems[0].ID,
 		secondarySecondItemID: secondaryItems[1].ID,
 	}
@@ -546,6 +575,76 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	waitForJS(t, ctx, elementPresentExpression(quaternaryListSelector), "quaternary items auto-load after mark-all fallback")
 }
 
+func runMobileFilteredHistoryFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	selectedFeedID := fixture.secondaryFeedID
+	filteredStreamURI := fmt.Sprintf("/mobile/stream?selected_feed_id=%d", selectedFeedID)
+	readerURI := fmt.Sprintf("/mobile/items/%d/reader?selected_feed_id=%d", fixture.secondaryFirstItemID, selectedFeedID)
+	readerSelector := fmt.Sprintf(
+		`.mobile-card-open[hx-get="/mobile/items/%d/reader?selected_feed_id=%d"]`,
+		fixture.secondaryFirstItemID,
+		selectedFeedID,
+	)
+
+	selectMobileFeedFilter(t, ctx, selectedFeedID)
+	waitForJS(t, ctx, requestURIExpression(filteredStreamURI), "filtered mobile stream URL")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "secondary feed selected in filter")
+	waitForJS(t, ctx, textPresentExpression("Secondary One"), "secondary item present in filtered stream")
+	waitForJS(t, ctx, textAbsentExpression("Primary One"), "other feed item hidden from filtered stream")
+
+	runActions(
+		t,
+		ctx,
+		chromedp.WaitVisible(readerSelector, chromedp.ByQuery),
+		chromedp.Click(readerSelector, chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "filtered reader loaded")
+	waitForJS(t, ctx, requestURIExpression(readerURI), "filtered reader URL")
+	waitForJS(t, ctx, textPresentExpression("Secondary One"), "filtered reader title present")
+
+	runActions(t, ctx, chromedp.Evaluate(`history.back()`, nil))
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "history back returns to filtered stream")
+	waitForJS(t, ctx, requestURIExpression(filteredStreamURI), "filtered stream URL after history back")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "filter stays selected after history back")
+	waitForJS(t, ctx, textPresentExpression("Secondary One"), "filtered stream item still present after history back")
+	waitForJS(t, ctx, textAbsentExpression("Primary One"), "other feed item remains hidden after history back")
+}
+
+func runMobileFilteredEmptyStateFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	selectedFeedID := fixture.primaryFeedID
+	filteredStreamURI := fmt.Sprintf("/mobile/stream?selected_feed_id=%d", selectedFeedID)
+	markReadSelector := fmt.Sprintf(
+		`.mobile-card-mark-read[hx-post="/mobile/items/%d/read?selected_feed_id=%d"]`,
+		fixture.primaryFirstItemID,
+		selectedFeedID,
+	)
+
+	selectMobileFeedFilter(t, ctx, selectedFeedID)
+	waitForJS(t, ctx, requestURIExpression(filteredStreamURI), "single-item filtered stream URL")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "single-item feed selected in filter")
+	waitForJS(t, ctx, textPresentExpression("Primary One"), "single-item filtered story present before clear")
+
+	runActions(
+		t,
+		ctx,
+		chromedp.WaitVisible(markReadSelector, chromedp.ByQuery),
+		chromedp.Click(markReadSelector, chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-empty="true"]`), "filtered empty state after clearing last unread")
+	waitForJS(t, ctx, requestURIExpression(filteredStreamURI), "filtered stream URL retained after clearing last unread")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "filter stays selected after clearing last unread")
+	waitForJS(t, ctx, textPresentExpression("Primary Feed is caught up."), "feed-specific empty-state heading shown")
+	waitForJS(
+		t,
+		ctx,
+		textPresentExpression("There is nothing unread in Primary Feed right now."),
+		"feed-specific empty-state copy shown",
+	)
+}
+
 func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	t.Helper()
 
@@ -769,6 +868,41 @@ func clickElement(t *testing.T, ctx context.Context, selector, label string) {
 	}
 }
 
+func selectMobileFeedFilter(t *testing.T, ctx context.Context, feedID int64) {
+	t.Helper()
+
+	expression := fmt.Sprintf(
+		`(() => {
+			const form = document.querySelector(".mobile-stream-filter");
+			const select = document.querySelector("#mobile-stream-feed-filter");
+			if (!form || !select) {
+				return false;
+			}
+			select.value = %q;
+			if (typeof form.requestSubmit === "function") {
+				form.requestSubmit();
+			} else {
+				const submit = form.querySelector('button[type="submit"]');
+				if (!submit || typeof submit.click !== "function") {
+					return false;
+				}
+				submit.click();
+			}
+			return select.value === %q;
+		})()`,
+		fmt.Sprintf("%d", feedID),
+		fmt.Sprintf("%d", feedID),
+	)
+
+	var ok bool
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &ok)); err != nil {
+		t.Fatalf("select mobile feed %d: %v", feedID, err)
+	}
+	if !ok {
+		t.Fatalf("select mobile feed %d: mobile filter not available", feedID)
+	}
+}
+
 func requestHTMX(t *testing.T, ctx context.Context, method, path, target, selectedItemID string) {
 	t.Helper()
 
@@ -846,6 +980,20 @@ func hasClassExpression(selector, className string) string {
 
 func pathnameExpression(path string) string {
 	return fmt.Sprintf(`(() => window.location.pathname === %q)()`, path)
+}
+
+func requestURIExpression(path string) string {
+	return fmt.Sprintf(`(() => (window.location.pathname + window.location.search) === %q)()`, path)
+}
+
+func mobileFilterValueExpression(feedID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			const select = document.querySelector("#mobile-stream-feed-filter");
+			return !!select && select.value === %q;
+		})()`,
+		fmt.Sprintf("%d", feedID),
+	)
 }
 
 func elementPresentExpression(selector string) string {

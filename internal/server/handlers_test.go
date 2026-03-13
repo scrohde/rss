@@ -3606,6 +3606,37 @@ func TestMobileStreamUnreadOnly(t *testing.T) {
 	assertNotContains(t, body, "Alpha Read", "expected read item to be excluded from stream")
 }
 
+func TestDesktopIndexIgnoresMobileSelectedFeedQuery(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, "http://example.com/desktop", "Desktop Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Desktop Story",
+		"http://example.com/desktop-story",
+		"desktop-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	rec := getRequest(app, fmt.Sprintf("%s?selected_feed_id=%d", pathIndex, feedID))
+	assertResponseCode(t, rec, "desktop index selected-feed query status")
+
+	body := rec.Body.String()
+	assertContains(t, body, "Desktop Feed", "expected desktop feed list to render")
+	assertContains(t, body, emptyStateNoFeed, "expected desktop index empty state to remain")
+	assertNotContains(t, body, `data-mobile-stream="true"`, "expected mobile stream to stay off desktop route")
+	assertNotContains(
+		t,
+		body,
+		`class="mobile-stream-filter"`,
+		"expected mobile filter controls to stay off desktop route",
+	)
+}
+
 func TestParseSelectedFeedID(t *testing.T) {
 	t.Parallel()
 
