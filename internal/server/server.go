@@ -1270,14 +1270,14 @@ func (a *App) renderPulseMessage(w http.ResponseWriter, message, className strin
 }
 
 func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusMessage string) {
-	selectedFeedID, feedOptions, err := a.mobileStreamFeedOptions(r)
+	selection, err := a.mobileStreamFeedOptions(r)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
 
 		return
 	}
 
-	items, err := a.mobileStreamItems(r, selectedFeedID)
+	items, err := a.mobileStreamItems(r, selection.FeedID)
 	if err != nil {
 		http.Error(w, "failed to load unread items", http.StatusInternalServerError)
 
@@ -1285,14 +1285,15 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	}
 
 	data := mobileStreamResponseData{
-		Items:          items,
-		StatusMessage:  statusMessage,
-		FeedOptions:    feedOptions,
-		SelectedFeedID: selectedFeedID,
+		Items:             items,
+		StatusMessage:     statusMessage,
+		FeedOptions:       selection.Options,
+		SelectedFeedTitle: selection.FeedTitle,
+		SelectedFeedID:    selection.FeedID,
 	}
 
 	if isHTMXRequest(r) {
-		w.Header().Set("Hx-Replace-Url", mobileStreamPath(selectedFeedID))
+		w.Header().Set("Hx-Replace-Url", mobileStreamPath(selection.FeedID))
 		a.renderTemplate(w, "mobile_stream", data)
 
 		return
@@ -1328,16 +1329,27 @@ func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *m
 	a.renderTemplate(w, "index", page)
 }
 
-func (a *App) mobileStreamFeedOptions(r *http.Request) (int64, []view.FeedView, error) {
+type mobileStreamSelection struct {
+	FeedTitle string
+	Options   []view.FeedView
+	FeedID    int64
+}
+
+func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, error) {
 	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
-		return 0, nil, fmt.Errorf("list feeds: %w", err)
+		return mobileStreamSelection{}, fmt.Errorf("list feeds: %w", err)
 	}
 
 	feedOptions := unreadFeedOptions(feeds)
-	selectedFeedID := normalizeSelectedFeedID(parseSelectedFeedID(r), feedOptions)
+	selectedFeedID := normalizeSelectedFeedID(parseSelectedFeedID(r), feeds)
+	selectedFeedTitle := feedTitleByID(selectedFeedID, feeds)
 
-	return selectedFeedID, feedOptions, nil
+	return mobileStreamSelection{
+		FeedID:    selectedFeedID,
+		FeedTitle: selectedFeedTitle,
+		Options:   feedOptions,
+	}, nil
 }
 
 func (a *App) mobileStreamItems(r *http.Request, selectedFeedID int64) ([]view.ItemView, error) {
@@ -1677,14 +1689,9 @@ func readImageProxyPayload(resp *http.Response) (imageProxyPayload, bool) {
 		return emptyImageProxyPayload(), false
 	}
 
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" || !strings.HasPrefix(strings.ToLower(contentType), "image/") {
-		detected := http.DetectContentType(sniff)
-		if !strings.HasPrefix(detected, "image/") {
-			return emptyImageProxyPayload(), false
-		}
-
-		contentType = detected
+	contentType, ok := imageProxyContentType(resp.Header.Get("Content-Type"), sniff)
+	if !ok {
+		return emptyImageProxyPayload(), false
 	}
 
 	body, err := io.ReadAll(io.LimitReader(reader, content.ImageProxyMaxBodyBytes+1))
@@ -1700,6 +1707,20 @@ func readImageProxyPayload(resp *http.Response) (imageProxyPayload, bool) {
 		ContentType: contentType,
 		Body:        body,
 	}, true
+}
+
+func imageProxyContentType(headerValue string, sniff []byte) (string, bool) {
+	contentType := headerValue
+	if contentType != "" && strings.HasPrefix(strings.ToLower(contentType), "image/") {
+		return contentType, true
+	}
+
+	detected := http.DetectContentType(sniff)
+	if !strings.HasPrefix(detected, "image/") {
+		return "", false
+	}
+
+	return detected, true
 }
 
 func emptyImageProxyPayload() imageProxyPayload {
@@ -1824,12 +1845,26 @@ func unreadFeedOptions(feeds []view.FeedView) []view.FeedView {
 	return options
 }
 
-func normalizeSelectedFeedID(selectedFeedID int64, feedOptions []view.FeedView) int64 {
+func feedTitleByID(feedID int64, feeds []view.FeedView) string {
+	if feedID <= 0 {
+		return ""
+	}
+
+	for _, feedView := range feeds {
+		if feedView.ID == feedID {
+			return feedView.Title
+		}
+	}
+
+	return ""
+}
+
+func normalizeSelectedFeedID(selectedFeedID int64, feeds []view.FeedView) int64 {
 	if selectedFeedID <= 0 {
 		return 0
 	}
 
-	for _, feedView := range feedOptions {
+	for _, feedView := range feeds {
 		if feedView.ID == selectedFeedID {
 			return selectedFeedID
 		}

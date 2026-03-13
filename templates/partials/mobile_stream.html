@@ -1,47 +1,40 @@
 {{define "mobile_stream"}}
   <section class="mobile-stream" data-mobile-stream="true">
     <header class="mobile-stream-header">
-      <div>
+      <div class="mobile-stream-header-copy">
         <h2 class="mobile-stream-title">Read what is here now.</h2>
         <p class="mobile-stream-subtitle">
           No unread counters. No pressure. Just a calm moment with the web.
         </p>
       </div>
-      <button
-        class="mobile-stream-pulse"
-        type="button"
-        hx-post="/mobile/pulse{{if gt .SelectedFeedID 0}}?selected_feed_id={{.SelectedFeedID}}{{end}}"
-        hx-target="#main-content"
-        hx-swap="innerHTML"
-      >
-        Refresh
-      </button>
-    </header>
-
-    <form
-      class="mobile-stream-filter"
-      method="get"
-      action="/mobile/stream"
-      hx-get="/mobile/stream"
-      hx-target="#main-content"
-      hx-swap="innerHTML"
-      hx-trigger="change from:select"
-    >
-      <label class="mobile-stream-filter-label" for="mobile-stream-feed-filter">Focus</label>
-      <div class="mobile-stream-filter-controls">
-        <select
-          class="mobile-stream-filter-select"
-          id="mobile-stream-feed-filter"
-          name="selected_feed_id"
+      <div class="mobile-stream-header-controls">
+        <form class="mobile-stream-filter" method="get" action="/mobile/stream" hx-get="/mobile/stream" hx-target="#main-content" hx-swap="innerHTML" hx-trigger="change from:select">
+          <label class="mobile-stream-filter-label" for="mobile-stream-feed-filter">Focus</label>
+          <div class="mobile-stream-filter-controls">
+            <select
+              class="mobile-stream-filter-select"
+              id="mobile-stream-feed-filter"
+              name="selected_feed_id"
+            >
+              <option value="0" {{if eq .SelectedFeedID 0}}selected{{end}}>All feeds</option>
+              {{range .FeedOptions}}
+                <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>{{.Title}}</option>
+              {{end}}
+            </select>
+            <button class="mobile-stream-filter-submit" type="submit">Show</button>
+          </div>
+        </form>
+        <button
+          class="mobile-stream-pulse"
+          type="button"
+          hx-post="/mobile/pulse{{if gt .SelectedFeedID 0}}?selected_feed_id={{.SelectedFeedID}}{{end}}"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
         >
-          <option value="0" {{if eq .SelectedFeedID 0}}selected{{end}}>All feeds</option>
-          {{range .FeedOptions}}
-            <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>{{.Title}}</option>
-          {{end}}
-        </select>
-        <button class="mobile-stream-filter-submit" type="submit">Show</button>
+          Refresh
+        </button>
       </div>
-    </form>
+    </header>
 
     {{if .StatusMessage}}
       <p class="mobile-stream-status" role="status">{{.StatusMessage}}</p>
@@ -89,7 +82,12 @@
 
 {{define "mobile_empty"}}
   <section class="mobile-empty" data-mobile-empty="true">
-    <h3>Nothing is owed.</h3>
-    <p>Your stream is clear for now. Come back whenever you want to read again.</p>
+    {{if and (gt .SelectedFeedID 0) .SelectedFeedTitle}}
+      <h3>{{.SelectedFeedTitle}} is caught up.</h3>
+      <p>There is nothing unread in {{.SelectedFeedTitle}} right now.</p>
+    {{else}}
+      <h3>Nothing is owed.</h3>
+      <p>Your stream is clear for now. Come back whenever you want to read again.</p>
+    {{end}}
   </section>
 {{end}}

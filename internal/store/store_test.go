@@ -331,12 +331,15 @@ func TestListUnreadItemsAllFeeds(t *testing.T) {
 		t.Fatalf("expected 2 unread items, got %d", len(items))
 	}
 
-	if items[0].Title != "Bravo Newest" || items[0].FeedTitle != "Bravo" {
-		t.Fatalf("unexpected first unread item: %#v", items[0])
-	}
+	assertUnreadItem(t, &items[0], "Bravo Newest", "Bravo", "first")
+	assertUnreadItem(t, &items[1], "Alpha New", "Alpha", "second")
+}
 
-	if items[1].Title != "Alpha New" || items[1].FeedTitle != "Alpha" {
-		t.Fatalf("unexpected second unread item: %#v", items[1])
+func assertUnreadItem(t *testing.T, item *view.ItemView, wantTitle, wantFeed, position string) {
+	t.Helper()
+
+	if item.Title != wantTitle || item.FeedTitle != wantFeed {
+		t.Fatalf("unexpected %s unread item: %#v", position, item)
 	}
 }
 

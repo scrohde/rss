@@ -66,10 +66,11 @@ type itemExpandedResponseData struct {
 }
 
 type mobileStreamResponseData struct {
-	StatusMessage  string
-	Items          []view.ItemView
-	FeedOptions    []view.FeedView
-	SelectedFeedID int64
+	StatusMessage     string
+	SelectedFeedTitle string
+	Items             []view.ItemView
+	FeedOptions       []view.FeedView
+	SelectedFeedID    int64
 }
 
 type mobileReaderResponseData struct {

@@ -258,6 +258,103 @@ func assertFeedListOOBUpdate(t *testing.T, body string) {
 	)
 }
 
+func assertMobileStreamSelectorInHeader(t *testing.T, body string) {
+	t.Helper()
+
+	headerStart := strings.Index(body, `<header class="mobile-stream-header">`)
+	formStart := strings.Index(body, `<form class="mobile-stream-filter"`)
+
+	listStart := strings.Index(body, `<div class="mobile-stream-list">`)
+	if headerStart == -1 || formStart == -1 || listStart == -1 {
+		t.Fatal("expected mobile stream header, inline filter form, and stream list in response")
+	}
+
+	if formStart < headerStart || formStart > listStart {
+		t.Fatal("expected feed selector form to render inline within the mobile stream header")
+	}
+}
+
+type clearedMobileFeedFixture struct {
+	app    *App
+	feedID int64
+}
+
+func newAppWithClearedSingleFeed(
+	t *testing.T,
+	feedURL, feedTitle, storyTitle, storyURL, guid string,
+) clearedMobileFeedFixture {
+	t.Helper()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, feedURL, feedTitle)
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		storyTitle,
+		storyURL,
+		guid,
+		time.Now().UTC().Add(-time.Hour),
+	)
+	mustMarkFeedItemRead(t, app, feedID, guid)
+
+	return clearedMobileFeedFixture{
+		app:    app,
+		feedID: feedID,
+	}
+}
+
+func assertGenericMobileEmptyState(t *testing.T, body string) {
+	t.Helper()
+
+	assertContains(t, body, "Nothing is owed.", "expected generic empty-state heading to remain")
+	assertContains(
+		t,
+		body,
+		"Your stream is clear for now. Come back whenever you want to read again.",
+		"expected generic all-feeds empty-state copy",
+	)
+}
+
+func assertFilteredMobileEmptyState(
+	t *testing.T,
+	body, feedTitle string,
+	selectedFeedID, availableFeedID int64,
+) {
+	t.Helper()
+
+	assertContains(
+		t,
+		body,
+		feedTitle+" is caught up.",
+		"expected feed-specific empty-state heading",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf("There is nothing unread in %s right now.", feedTitle),
+		"expected feed-specific empty-state copy",
+	)
+	assertNotContains(
+		t,
+		body,
+		"Your stream is clear for now. Come back whenever you want to read again.",
+		"expected filtered empty state to differ from all-feeds copy",
+	)
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`<option value="%d"`, selectedFeedID),
+		"expected caught-up feed to stay out of the selector options",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`<option value="%d"`, availableFeedID),
+		"expected selector to keep unread feeds available while filtered feed is empty",
+	)
+}
+
 func assertContentPanelOOBUpdate(t *testing.T, body string) {
 	t.Helper()
 
@@ -952,6 +1049,33 @@ func mustUpsertItems(
 	if err != nil {
 		t.Fatalf(errStoreUpsertItems, err)
 	}
+}
+
+func mustUpsertSingleStory(
+	t *testing.T,
+	app *App,
+	feedID int64,
+	title, link, guid string,
+	published time.Time,
+) {
+	t.Helper()
+
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{
+		newGofeedItem(title, link, guid, "<p>Summary</p>", &published),
+	})
+}
+
+func mustMarkFeedItemRead(t *testing.T, app *App, feedID int64, guid string) {
+	t.Helper()
+
+	_, err := app.db.ExecContext(
+		context.Background(),
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
+		time.Now().UTC(),
+		feedID,
+		guid,
+	)
+	requireNoErr(t, err, "set read_at: %v")
 }
 
 func mustListItems(t *testing.T, app *App, feedID int64) []view.ItemView {
@@ -3579,39 +3703,39 @@ func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
 	)
 }
 
-func TestMobileStreamSelectorShowsUnreadFeedsOnly(t *testing.T) {
+func TestMobileStreamSelectorRendersInlineInHeaderAndShowsUnreadFeedsOnly(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
 
-	quietID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/quiet", "Quiet Feed")
-	requireNoErr(t, err, errStoreUpsertFeed)
-	brightID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/bright", "Bright Feed")
-	requireNoErr(t, err, errStoreUpsertFeed)
-
+	quietID := mustUpsertFeed(t, app, "http://example.com/quiet", "Quiet Feed")
+	brightID := mustUpsertFeed(t, app, "http://example.com/bright", "Bright Feed")
 	published := time.Now().UTC().Add(-time.Hour)
-	_, err = store.UpsertItems(context.Background(), app.db, quietID, []*gofeed.Item{
-		newGofeedItem("Quiet Story", "http://example.com/quiet-story", "quiet-story", "<p>Summary</p>", &published),
-	})
-	requireNoErr(t, err, errStoreUpsertItems)
-	_, err = store.UpsertItems(context.Background(), app.db, brightID, []*gofeed.Item{
-		newGofeedItem("Bright Story", "http://example.com/bright-story", "bright-story", "<p>Summary</p>", &published),
-	})
-	requireNoErr(t, err, errStoreUpsertItems)
-
-	_, err = app.db.ExecContext(
-		context.Background(),
-		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
-		time.Now().UTC(),
+	mustUpsertSingleStory(
+		t,
+		app,
 		quietID,
+		"Quiet Story",
+		"http://example.com/quiet-story",
 		"quiet-story",
+		published,
 	)
-	requireNoErr(t, err, "set read_at: %v")
+	mustUpsertSingleStory(
+		t,
+		app,
+		brightID,
+		"Bright Story",
+		"http://example.com/bright-story",
+		"bright-story",
+		published,
+	)
+	mustMarkFeedItemRead(t, app, quietID, "quiet-story")
 
 	rec := getRequest(app, pathMobileStream)
 	assertResponseCode(t, rec, "mobile stream selector status")
 
 	body := rec.Body.String()
+	assertMobileStreamSelectorInHeader(t, body)
 	assertContains(t, body, `<option value="0"`, "expected all-feeds option")
 	assertContains(t, body, `>All feeds</option>`, "expected all-feeds option label")
 	assertContains(
@@ -3631,6 +3755,82 @@ func TestMobileStreamSelectorShowsUnreadFeedsOnly(t *testing.T) {
 		body,
 		fmt.Sprintf(`<option value="%d">Quiet Feed</option>`, quietID),
 		"expected read-only feed to be omitted from selector",
+	)
+}
+
+func TestMobileStreamSelectorMarksSelectedFeed(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, "http://example.com/bright", "Bright Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Bright Story",
+		"http://example.com/bright-story",
+		"bright-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	rec := getRequest(app, fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, feedID))
+	assertResponseCode(t, rec, "mobile stream selected option status")
+
+	assertContains(
+		t,
+		rec.Body.String(),
+		fmt.Sprintf(`<option value="%d" selected>Bright Feed</option>`, feedID),
+		"expected selected feed option to reflect selected_feed_id",
+	)
+}
+
+func TestMobileStreamFilteredEmptyStateNamesSelectedFeed(t *testing.T) {
+	t.Parallel()
+
+	genericFixture := newAppWithClearedSingleFeed(
+		t,
+		"http://example.com/generic",
+		"Generic Feed",
+		"Generic Story",
+		"http://example.com/generic-story",
+		"generic-story",
+	)
+
+	filteredFixture := newAppWithClearedSingleFeed(
+		t,
+		"http://example.com/cleared",
+		"Cleared Feed",
+		"Cleared Story",
+		"http://example.com/cleared-story",
+		"cleared-story",
+	)
+	app := filteredFixture.app
+	clearedFeedID := filteredFixture.feedID
+	activeFeedID := mustUpsertFeed(t, app, "http://example.com/active", "Active Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		activeFeedID,
+		"Active Story",
+		"http://example.com/active-story",
+		"active-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	allFeedsRec := getRequest(genericFixture.app, pathMobileStream)
+	assertResponseCode(t, allFeedsRec, "all-feeds mobile stream status")
+	assertGenericMobileEmptyState(t, allFeedsRec.Body.String())
+
+	filteredRec := getRequest(app, fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, clearedFeedID))
+	assertResponseCode(t, filteredRec, "filtered empty-state mobile stream status")
+
+	assertFilteredMobileEmptyState(
+		t,
+		filteredRec.Body.String(),
+		"Cleared Feed",
+		clearedFeedID,
+		activeFeedID,
 	)
 }
 
