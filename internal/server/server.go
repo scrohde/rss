@@ -1285,11 +1285,12 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	}
 
 	data := mobileStreamResponseData{
-		Items:             items,
-		StatusMessage:     statusMessage,
-		FeedOptions:       selection.Options,
-		SelectedFeedTitle: selection.FeedTitle,
-		SelectedFeedID:    selection.FeedID,
+		Items:                    items,
+		StatusMessage:            statusMessage,
+		FeedOptions:              selection.Options,
+		SelectedFeedTitle:        selection.FeedTitle,
+		SelectedFeedID:           selection.FeedID,
+		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
 	}
 
 	if isHTMXRequest(r) {
@@ -1350,6 +1351,14 @@ func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, e
 		FeedTitle: selectedFeedTitle,
 		Options:   feedOptions,
 	}, nil
+}
+
+func shouldShowCaughtUpSelectedFeed(selection mobileStreamSelection) bool {
+	if selection.FeedID <= 0 || selection.FeedTitle == "" {
+		return false
+	}
+
+	return !feedOptionsContainID(selection.Options, selection.FeedID)
 }
 
 func (a *App) mobileStreamItems(r *http.Request, selectedFeedID int64) ([]view.ItemView, error) {
@@ -1843,6 +1852,16 @@ func unreadFeedOptions(feeds []view.FeedView) []view.FeedView {
 	}
 
 	return options
+}
+
+func feedOptionsContainID(options []view.FeedView, feedID int64) bool {
+	for _, feedView := range options {
+		if feedView.ID == feedID {
+			return true
+		}
+	}
+
+	return false
 }
 
 func feedTitleByID(feedID int64, feeds []view.FeedView) string {

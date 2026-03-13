@@ -341,17 +341,23 @@ func assertFilteredMobileEmptyState(
 		"Your stream is clear for now. Come back whenever you want to read again.",
 		"expected filtered empty state to differ from all-feeds copy",
 	)
-	assertNotContains(
+	assertContains(
 		t,
 		body,
-		fmt.Sprintf(`<option value="%d"`, selectedFeedID),
-		"expected caught-up feed to stay out of the selector options",
+		">All feeds</option>",
+		"expected all-feeds option to remain available",
 	)
 	assertContains(
 		t,
 		body,
 		fmt.Sprintf(`<option value="%d"`, availableFeedID),
 		"expected selector to keep unread feeds available while filtered feed is empty",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`<option value="%d" selected>%s (caught up)</option>`, selectedFeedID, feedTitle),
+		"expected caught-up feed to stay selected in the filter",
 	)
 }
 
@@ -3832,6 +3838,85 @@ func TestMobileStreamFilteredEmptyStateNamesSelectedFeed(t *testing.T) {
 		clearedFeedID,
 		activeFeedID,
 	)
+}
+
+func TestMobileMarkReadPreservesFilteredSelectionAndURL(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, "http://example.com/solo", "Solo Feed")
+	otherFeedID := mustUpsertFeed(t, app, "http://example.com/other", "Other Feed")
+	published := time.Now().UTC().Add(-30 * time.Minute)
+	mustUpsertSingleStory(t, app, feedID, "Solo Story", "http://example.com/solo-story", "solo-story", published)
+	mustUpsertSingleStory(
+		t,
+		app,
+		otherFeedID,
+		"Other Story",
+		"http://example.com/other-story",
+		"other-story",
+		published,
+	)
+
+	items := mustListItems(t, app, feedID)
+	target := fmt.Sprintf("/mobile/items/%d/read?selected_feed_id=%d", items[0].ID, feedID)
+	expectedURL := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, feedID)
+
+	rec := postHTMXRequest(app, target)
+	assertResponseCode(t, rec, "mobile filtered mark-read status")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != expectedURL {
+		t.Fatalf("expected filtered HX-Replace-Url, got %q", got)
+	}
+
+	assertFilteredMobileEmptyState(t, rec.Body.String(), "Solo Feed", feedID, otherFeedID)
+}
+
+func TestMobilePulsePreservesFilteredSelectionAndURL(t *testing.T) {
+	t.Parallel()
+
+	caughtUpFixture := newAppWithClearedSingleFeed(
+		t,
+		"http://example.com/caught-up",
+		"Caught Up Feed",
+		"Caught Up Story",
+		"http://example.com/caught-up-story",
+		"caught-up-story",
+	)
+	app := caughtUpFixture.app
+	feedID := caughtUpFixture.feedID
+	otherFeedID := mustUpsertFeed(t, app, "http://example.com/other", "Other Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		otherFeedID,
+		"Other Story",
+		"http://example.com/other-story",
+		"other-story",
+		time.Now().UTC().Add(-15*time.Minute),
+	)
+
+	_, err := app.db.ExecContext(
+		context.Background(),
+		"UPDATE feeds SET last_refreshed_at = ? WHERE id IN (?, ?)",
+		time.Now().UTC(),
+		feedID,
+		otherFeedID,
+	)
+	requireNoErr(t, err, "set last_refreshed_at: %v")
+
+	expectedURL := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, feedID)
+	rec := postHTMXRequest(app, fmt.Sprintf("%s?selected_feed_id=%d", pathMobilePulse, feedID))
+	assertResponseCode(t, rec, "mobile filtered pulse status")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != expectedURL {
+		t.Fatalf("expected filtered HX-Replace-Url, got %q", got)
+	}
+
+	body := rec.Body.String()
+	assertContains(t, body, "Already fresh enough.", "expected calm pulse status")
+	assertFilteredMobileEmptyState(t, body, "Caught Up Feed", feedID, otherFeedID)
 }
 
 func TestMobileReaderView(t *testing.T) {

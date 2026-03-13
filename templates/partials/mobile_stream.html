@@ -17,6 +17,9 @@
               name="selected_feed_id"
             >
               <option value="0" {{if eq .SelectedFeedID 0}}selected{{end}}>All feeds</option>
+              {{if .ShowCaughtUpSelectedFeed}}
+                <option value="{{.SelectedFeedID}}" selected>{{.SelectedFeedTitle}} (caught up)</option>
+              {{end}}
               {{range .FeedOptions}}
                 <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>{{.Title}}</option>
               {{end}}
