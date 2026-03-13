@@ -283,7 +283,6 @@ func TestCleanupReadItems(t *testing.T) {
 	}
 }
 
-//nolint:revive // Explicit integration flow keeps ordering expectations readable.
 func TestListUnreadItemsAllFeeds(t *testing.T) {
 	t.Parallel()
 
@@ -338,6 +337,59 @@ func TestListUnreadItemsAllFeeds(t *testing.T) {
 
 	if items[1].Title != "Alpha New" || items[1].FeedTitle != "Alpha" {
 		t.Fatalf("unexpected second unread item: %#v", items[1])
+	}
+}
+
+func TestListUnreadItemsByFeed(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	alphaID := mustUpsertFeed(t, db, "http://example.com/alpha", "Alpha")
+	bravoID := mustUpsertFeed(t, db, "http://example.com/bravo", "Bravo")
+
+	now := time.Now().UTC()
+	alphaOld := now.Add(-2 * time.Hour)
+	alphaNew := now.Add(-time.Hour)
+	bravoNewest := now.Add(-10 * time.Minute)
+
+	_, err := UpsertItems(context.Background(), db, alphaID, []*gofeed.Item{
+		newGofeedItem("Alpha Old", "http://example.com/a-old", "a-old", "<p>Summary</p>", &alphaOld),
+		newGofeedItem("Alpha New", "http://example.com/a-new", "a-new", "<p>Summary</p>", &alphaNew),
+	})
+	if err != nil {
+		t.Fatalf("UpsertItems alpha: %v", err)
+	}
+
+	_, err = UpsertItems(context.Background(), db, bravoID, []*gofeed.Item{
+		newGofeedItem("Bravo Newest", "http://example.com/b-new", "b-new", "<p>Summary</p>", &bravoNewest),
+	})
+	if err != nil {
+		t.Fatalf("UpsertItems bravo: %v", err)
+	}
+
+	_, err = db.ExecContext(
+		context.Background(),
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
+		now,
+		alphaID,
+		"a-old",
+	)
+	if err != nil {
+		t.Fatalf("set read_at: %v", err)
+	}
+
+	items, err := ListUnreadItemsByFeed(context.Background(), db, alphaID, 10)
+	if err != nil {
+		t.Fatalf("ListUnreadItemsByFeed: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 unread item, got %d", len(items))
+	}
+
+	if items[0].Title != "Alpha New" || items[0].FeedTitle != "Alpha" {
+		t.Fatalf("unexpected unread item: %#v", items[0])
 	}
 }
 

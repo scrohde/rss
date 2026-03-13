@@ -1123,7 +1123,10 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := mobileReaderResponseData{Item: item}
+	data := mobileReaderResponseData{
+		Item:           item,
+		SelectedFeedID: parseSelectedFeedID(r),
+	}
 	a.renderMobileReader(w, r, &data)
 }
 
@@ -1267,7 +1270,14 @@ func (a *App) renderPulseMessage(w http.ResponseWriter, message, className strin
 }
 
 func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusMessage string) {
-	items, err := store.ListUnreadItemsAllFeeds(r.Context(), a.db, mobileStreamLimit)
+	selectedFeedID, feedOptions, err := a.mobileStreamFeedOptions(r)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
+		return
+	}
+
+	items, err := a.mobileStreamItems(r, selectedFeedID)
 	if err != nil {
 		http.Error(w, "failed to load unread items", http.StatusInternalServerError)
 
@@ -1275,12 +1285,14 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	}
 
 	data := mobileStreamResponseData{
-		Items:         items,
-		StatusMessage: statusMessage,
+		Items:          items,
+		StatusMessage:  statusMessage,
+		FeedOptions:    feedOptions,
+		SelectedFeedID: selectedFeedID,
 	}
 
 	if isHTMXRequest(r) {
-		w.Header().Set("Hx-Replace-Url", "/mobile/stream")
+		w.Header().Set("Hx-Replace-Url", mobileStreamPath(selectedFeedID))
 		a.renderTemplate(w, "mobile_stream", data)
 
 		return
@@ -1299,7 +1311,7 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 
 func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *mobileReaderResponseData) {
 	if isHTMXRequest(r) {
-		w.Header().Set("Hx-Push-Url", r.URL.Path)
+		w.Header().Set("Hx-Push-Url", r.URL.RequestURI())
 		a.renderTemplate(w, "mobile_reader", data)
 
 		return
@@ -1314,6 +1326,36 @@ func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *m
 
 	page.MobileReader = data
 	a.renderTemplate(w, "index", page)
+}
+
+func (a *App) mobileStreamFeedOptions(r *http.Request) (int64, []view.FeedView, error) {
+	feeds, err := store.ListFeeds(r.Context(), a.db)
+	if err != nil {
+		return 0, nil, fmt.Errorf("list feeds: %w", err)
+	}
+
+	feedOptions := unreadFeedOptions(feeds)
+	selectedFeedID := normalizeSelectedFeedID(parseSelectedFeedID(r), feedOptions)
+
+	return selectedFeedID, feedOptions, nil
+}
+
+func (a *App) mobileStreamItems(r *http.Request, selectedFeedID int64) ([]view.ItemView, error) {
+	if selectedFeedID > 0 {
+		items, err := store.ListUnreadItemsByFeed(r.Context(), a.db, selectedFeedID, mobileStreamLimit)
+		if err != nil {
+			return nil, fmt.Errorf("list unread items for feed %d: %w", selectedFeedID, err)
+		}
+
+		return items, nil
+	}
+
+	items, err := store.ListUnreadItemsAllFeeds(r.Context(), a.db, mobileStreamLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list unread items across feeds: %w", err)
+	}
+
+	return items, nil
 }
 
 func (a *App) mobilePageData(r *http.Request) (pageData, error) {
@@ -1627,7 +1669,6 @@ func isSuccessfulImageProxyResponse(resp *http.Response, target *url.URL) bool {
 	return false
 }
 
-//nolint:revive // Guard-heavy validation keeps proxy byte checks explicit and testable.
 func readImageProxyPayload(resp *http.Response) (imageProxyPayload, bool) {
 	reader := bufio.NewReader(resp.Body)
 
@@ -1765,11 +1806,44 @@ func parseSelectedFeedID(r *http.Request) int64 {
 	}
 
 	parsed, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
+	if err != nil || parsed <= 0 {
 		return 0
 	}
 
 	return parsed
+}
+
+func unreadFeedOptions(feeds []view.FeedView) []view.FeedView {
+	options := make([]view.FeedView, 0, len(feeds))
+	for _, feedView := range feeds {
+		if feedView.UnreadCount > 0 {
+			options = append(options, feedView)
+		}
+	}
+
+	return options
+}
+
+func normalizeSelectedFeedID(selectedFeedID int64, feedOptions []view.FeedView) int64 {
+	if selectedFeedID <= 0 {
+		return 0
+	}
+
+	for _, feedView := range feedOptions {
+		if feedView.ID == selectedFeedID {
+			return selectedFeedID
+		}
+	}
+
+	return 0
+}
+
+func mobileStreamPath(selectedFeedID int64) string {
+	if selectedFeedID <= 0 {
+		return "/mobile/stream"
+	}
+
+	return fmt.Sprintf("/mobile/stream?selected_feed_id=%d", selectedFeedID)
 }
 
 func parseSelectedItemID(r *http.Request) int64 {

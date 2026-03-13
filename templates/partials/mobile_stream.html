@@ -10,13 +10,38 @@
       <button
         class="mobile-stream-pulse"
         type="button"
-        hx-post="/mobile/pulse"
+        hx-post="/mobile/pulse{{if gt .SelectedFeedID 0}}?selected_feed_id={{.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >
         Refresh
       </button>
     </header>
+
+    <form
+      class="mobile-stream-filter"
+      method="get"
+      action="/mobile/stream"
+      hx-get="/mobile/stream"
+      hx-target="#main-content"
+      hx-swap="innerHTML"
+      hx-trigger="change from:select"
+    >
+      <label class="mobile-stream-filter-label" for="mobile-stream-feed-filter">Focus</label>
+      <div class="mobile-stream-filter-controls">
+        <select
+          class="mobile-stream-filter-select"
+          id="mobile-stream-feed-filter"
+          name="selected_feed_id"
+        >
+          <option value="0" {{if eq .SelectedFeedID 0}}selected{{end}}>All feeds</option>
+          {{range .FeedOptions}}
+            <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>{{.Title}}</option>
+          {{end}}
+        </select>
+        <button class="mobile-stream-filter-submit" type="submit">Show</button>
+      </div>
+    </form>
 
     {{if .StatusMessage}}
       <p class="mobile-stream-status" role="status">{{.StatusMessage}}</p>
@@ -29,7 +54,7 @@
             <button
               class="mobile-card-open"
               type="button"
-              hx-get="/mobile/items/{{.ID}}/reader"
+              hx-get="/mobile/items/{{.ID}}/reader{{if gt $.SelectedFeedID 0}}?selected_feed_id={{$.SelectedFeedID}}{{end}}"
               hx-target="#main-content"
               hx-swap="innerHTML"
             >
@@ -46,7 +71,7 @@
               <button
                 class="mobile-card-mark-read"
                 type="button"
-                hx-post="/mobile/items/{{.ID}}/read"
+                hx-post="/mobile/items/{{.ID}}/read{{if gt $.SelectedFeedID 0}}?selected_feed_id={{$.SelectedFeedID}}{{end}}"
                 hx-target="#main-content"
                 hx-swap="innerHTML"
               >

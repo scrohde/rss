@@ -863,6 +863,29 @@ func ListUnreadItemsAllFeeds(
 	return items, nil
 }
 
+// ListUnreadItemsByFeed is part of the store package API.
+func ListUnreadItemsByFeed(
+	ctx context.Context,
+	db *sql.DB,
+	feedID int64,
+	limit int,
+) ([]view.ItemView, error) {
+	ctx = contextOrBackground(ctx)
+	resolvedLimit := resolveUnreadItemsLimit(limit)
+
+	rows, err := unreadItemsByFeedRows(ctx, db, feedID, resolvedLimit)
+	if err != nil {
+		return nil, err
+	}
+
+	items, err := collectUnreadItemsAcrossFeeds(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
 func resolveUnreadItemsLimit(limit int) int {
 	if limit <= 0 {
 		return unreadItemsDefaultCap
@@ -889,6 +912,34 @@ LIMIT ?
 	`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query unread items across feeds: %w", err)
+	}
+
+	return rows, nil
+}
+
+func unreadItemsByFeedRows(
+	ctx context.Context,
+	db *sql.DB,
+	feedID int64,
+	limit int,
+) (*sql.Rows, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT i.id,
+       i.feed_id,
+       COALESCE(f.custom_title, f.title) AS feed_title,
+       i.title,
+       i.link,
+       i.summary,
+       i.content,
+       i.published_at
+FROM items i
+JOIN feeds f ON f.id = i.feed_id
+WHERE i.read_at IS NULL AND i.feed_id = ?
+ORDER BY COALESCE(i.published_at, i.created_at) DESC, i.id DESC
+LIMIT ?
+	`, feedID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query unread items for feed %d: %w", feedID, err)
 	}
 
 	return rows, nil

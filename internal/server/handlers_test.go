@@ -3476,6 +3476,46 @@ func TestMobileStreamUnreadOnly(t *testing.T) {
 	assertNotContains(t, body, "Alpha Read", "expected read item to be excluded from stream")
 }
 
+func TestParseSelectedFeedID(t *testing.T) {
+	t.Parallel()
+
+	formBody := strings.NewReader(url.Values{formSelectedFeedID: {"42"}}.Encode())
+	formRequest := httptest.NewRequest(http.MethodPost, pathMobileStream, formBody)
+	formRequest.Header.Set(headerContentType, formURLEncoded)
+
+	testCases := []struct {
+		req  *http.Request
+		name string
+		want int64
+	}{
+		{
+			name: "query parameter",
+			req:  httptest.NewRequest(http.MethodGet, pathMobileStream+"?selected_feed_id=21", http.NoBody),
+			want: 21,
+		},
+		{
+			name: "form body",
+			req:  formRequest,
+			want: 42,
+		},
+		{
+			name: "zero value",
+			req:  httptest.NewRequest(http.MethodGet, pathMobileStream+"?selected_feed_id=0", http.NoBody),
+			want: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := parseSelectedFeedID(tc.req); got != tc.want {
+				t.Fatalf("expected selected feed ID %d, got %d", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestMobileStreamHTMXReplacesURL(t *testing.T) {
 	t.Parallel()
 
@@ -3492,6 +3532,106 @@ func TestMobileStreamHTMXReplacesURL(t *testing.T) {
 	assertNotContains(t, body, "<!doctype html>", "expected partial htmx mobile stream response")
 	assertNotContains(t, body, `feed-count">`, "expected unread counters to be absent")
 	assertNotContains(t, body, "New items (", "expected desktop new-items UI to be absent")
+}
+
+func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	alphaID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/alpha", "Alpha")
+	requireNoErr(t, err, errStoreUpsertFeed)
+	bravoID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/bravo", "Bravo")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	now := time.Now().UTC()
+	alphaPublished := now.Add(-time.Hour)
+	bravoPublished := now.Add(-30 * time.Minute)
+
+	_, err = store.UpsertItems(context.Background(), app.db, alphaID, []*gofeed.Item{
+		newGofeedItem("Alpha Unread", "http://example.com/a-unread", "alpha-unread", "<p>Summary</p>", &alphaPublished),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+	_, err = store.UpsertItems(context.Background(), app.db, bravoID, []*gofeed.Item{
+		newGofeedItem("Bravo Unread", "http://example.com/b-unread", "bravo-unread", "<p>Summary</p>", &bravoPublished),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	alphaItems, err := store.ListItems(context.Background(), app.db, alphaID)
+	requireNoErr(t, err, errStoreListItems)
+
+	target := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, alphaID)
+	rec := getHTMXRequest(app, target)
+	assertResponseCode(t, rec, "mobile filtered stream status")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != target {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", target, got)
+	}
+
+	body := rec.Body.String()
+	assertContains(t, body, "Alpha Unread", "expected selected feed unread item in stream")
+	assertNotContains(t, body, "Bravo Unread", "expected other feed item excluded from filtered stream")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`/mobile/items/%d/reader?selected_feed_id=%d`, alphaItems[0].ID, alphaID),
+		"expected reader action to preserve selected feed",
+	)
+}
+
+func TestMobileStreamSelectorShowsUnreadFeedsOnly(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	quietID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/quiet", "Quiet Feed")
+	requireNoErr(t, err, errStoreUpsertFeed)
+	brightID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/bright", "Bright Feed")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC().Add(-time.Hour)
+	_, err = store.UpsertItems(context.Background(), app.db, quietID, []*gofeed.Item{
+		newGofeedItem("Quiet Story", "http://example.com/quiet-story", "quiet-story", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+	_, err = store.UpsertItems(context.Background(), app.db, brightID, []*gofeed.Item{
+		newGofeedItem("Bright Story", "http://example.com/bright-story", "bright-story", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	_, err = app.db.ExecContext(
+		context.Background(),
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
+		time.Now().UTC(),
+		quietID,
+		"quiet-story",
+	)
+	requireNoErr(t, err, "set read_at: %v")
+
+	rec := getRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile stream selector status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `<option value="0"`, "expected all-feeds option")
+	assertContains(t, body, `>All feeds</option>`, "expected all-feeds option label")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`<option value="%d"`, brightID),
+		"expected unread feed option",
+	)
+	assertContains(
+		t,
+		body,
+		`>Bright Feed</option>`,
+		"expected unread feed option",
+	)
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`<option value="%d">Quiet Feed</option>`, quietID),
+		"expected read-only feed to be omitted from selector",
+	)
 }
 
 func TestMobileReaderView(t *testing.T) {
@@ -3522,6 +3662,48 @@ func TestMobileReaderView(t *testing.T) {
 	assertContains(t, body, "Unread Story", "expected reader item title")
 	assertContains(t, body, "Feed Title", "expected reader source title")
 	assertContains(t, body, "/mobile/stream", "expected back-to-stream action")
+}
+
+func TestMobileReaderPreservesSelectedFeedID(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/rss", "Feed Title")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC().Add(-time.Hour)
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{
+		newGofeedItem("Unread Story", "http://example.com/story", "story-1", "<p>Summary</p>", &published),
+	})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	items, err := store.ListItems(context.Background(), app.db, feedID)
+	requireNoErr(t, err, errStoreListItems)
+
+	itemID := items[0].ID
+	target := fmt.Sprintf("/mobile/items/%d/reader?selected_feed_id=%d", itemID, feedID)
+
+	rec := getHTMXRequest(app, target)
+	assertResponseCode(t, rec, "mobile reader selected-feed status")
+
+	if got := rec.Header().Get("Hx-Push-Url"); got != target {
+		t.Fatalf("expected HX-Push-Url %q, got %q", target, got)
+	}
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-get="/mobile/stream?selected_feed_id=%d"`, feedID),
+		"expected reader back action to preserve selected feed",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-post="/mobile/items/%d/read?selected_feed_id=%d"`, itemID, feedID),
+		"expected reader mark-read action to preserve selected feed",
+	)
 }
 
 func TestMobileReaderHTMXPushesURL(t *testing.T) {
