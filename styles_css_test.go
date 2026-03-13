@@ -160,19 +160,43 @@ func TestStylesMobileReaderContracts(t *testing.T) {
 
 	source := readStylesCSS(t)
 
-	if !strings.Contains(source, "@media (max-width: 960px)") {
-		t.Fatal("expected mobile media query block")
+	checks := []struct {
+		msg string
+		ok  bool
+	}{
+		{
+			ok:  strings.Contains(source, "@media (max-width: 960px)"),
+			msg: "expected mobile media query block",
+		},
+		{
+			ok:  strings.Contains(source, ".mobile-stream,") && strings.Contains(source, "display: flex;"),
+			msg: "expected mobile stream styles to be defined",
+		},
+		{
+			ok:  cssRuleContains(source, ".mobile-reader", "display: flex;"),
+			msg: "expected mobile reader styles to be defined",
+		},
+		{
+			ok:  cssRuleContains(source, ".feed-panel", "display: none;"),
+			msg: "expected mobile layout to hide feed panel",
+		},
+		{
+			ok:  cssRuleContains(source, ".main-panel", "overflow-x: clip;"),
+			msg: "expected mobile main panel to clip horizontal overflow",
+		},
+		{
+			ok:  cssRuleContains(source, ".mobile-card-source", "overflow-wrap: anywhere;"),
+			msg: "expected mobile card feed titles to wrap instead of widening the viewport",
+		},
+		{
+			ok:  cssRuleContains(source, ".mobile-card-title", "overflow-wrap: anywhere;"),
+			msg: "expected mobile card titles to wrap instead of widening the viewport",
+		},
 	}
 
-	if !strings.Contains(source, ".mobile-stream,") || !strings.Contains(source, "display: flex;") {
-		t.Fatal("expected mobile stream styles to be defined")
-	}
-
-	if !cssRuleContains(source, ".mobile-reader", "display: flex;") {
-		t.Fatal("expected mobile reader styles to be defined")
-	}
-
-	if !cssRuleContains(source, ".feed-panel", "display: none;") {
-		t.Fatal("expected mobile layout to hide feed panel")
+	for _, check := range checks {
+		if !check.ok {
+			t.Fatal(check.msg)
+		}
 	}
 }
