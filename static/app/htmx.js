@@ -7,7 +7,24 @@ import {
 } from "./panel-focus.js";
 
 export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
+  const processSharedTopbarHTMX = () => {
+    if (typeof htmx === "undefined" || typeof htmx.process !== "function") {
+      return;
+    }
+
+    for (const id of ["topbar-brand-slot", "topbar-mobile-slot"]) {
+      const node = document.getElementById(id);
+      if (!node || node.dataset.htmxProcessed === "true") {
+        continue;
+      }
+
+      htmx.process(node);
+      node.dataset.htmxProcessed = "true";
+    }
+  };
+
   const bindCommonInteractions = () => {
+    processSharedTopbarHTMX();
     topbar.bindTopbarShortcuts();
     topbar.bindSubscribeForms();
     topbar.bindImportControls();

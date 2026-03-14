@@ -17,21 +17,8 @@
 <body>
   <div class="page">
     <header class="topbar">
-      <button
-        class="brand brand-pulse"
-        type="button"
-        title="Refresh all feeds"
-        aria-label="Refresh all feeds"
-        hx-post="/feeds/pulse"
-        hx-target="#subscribe-message"
-        hx-swap="outerHTML"
-      >
-        <div class="brand-mark">o</div>
-        <div>
-          <div class="brand-title">Pulse RSS</div>
-          <div class="brand-subtitle">Send a PULSE</div>
-        </div>
-      </button>
+      {{template "topbar_brand_slot" .MobileTopBar}}
+      {{template "mobile_topbar_slot" .MobileTopBar}}
       <div class="topbar-side">
         <div class="topbar-shortcuts" id="topbar-shortcuts">
           <button

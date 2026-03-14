@@ -4,7 +4,7 @@
       <button
         class="mobile-reader-back"
         type="button"
-        hx-get="/mobile/stream{{if gt .SelectedFeedID 0}}?selected_feed_id={{.SelectedFeedID}}{{end}}"
+        hx-get="/mobile/stream{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >
@@ -13,7 +13,7 @@
       <button
         class="mobile-reader-mark-read"
         type="button"
-        hx-post="/mobile/items/{{.Item.ID}}/read{{if gt .SelectedFeedID 0}}?selected_feed_id={{.SelectedFeedID}}{{end}}"
+        hx-post="/mobile/items/{{.Item.ID}}/read{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >
@@ -37,4 +37,10 @@
       </div>
     </article>
   </section>
+{{end}}
+
+{{define "mobile_reader_response"}}
+  {{template "mobile_reader" .}}
+  {{template "topbar_brand_slot_oob" .TopBar}}
+  {{template "mobile_topbar_slot_oob" .TopBar}}
 {{end}}

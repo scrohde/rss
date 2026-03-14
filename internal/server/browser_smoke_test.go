@@ -160,6 +160,27 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "stream URL after history back")
 }
 
+func TestBrowserSmokeMobileTopBarFlows(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := httptest.NewServer(app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
+
+	runMobileReaderTopBarFlow(t, ctx, fixture)
+}
+
 func TestBrowserSmokeMobileFilteredFeedFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
@@ -643,6 +664,54 @@ func runMobileFilteredEmptyStateFlow(t *testing.T, ctx context.Context, fixture 
 		textPresentExpression("There is nothing unread in Primary Feed right now."),
 		"feed-specific empty-state copy shown",
 	)
+}
+
+func runMobileReaderTopBarFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	selectedFeedID := fixture.secondaryFeedID
+	filteredStreamURI := fmt.Sprintf("/mobile/stream?selected_feed_id=%d", selectedFeedID)
+	readerURI := fmt.Sprintf("/mobile/items/%d/reader?selected_feed_id=%d", fixture.secondaryFirstItemID, selectedFeedID)
+	readerSelector := fmt.Sprintf(
+		`.mobile-card-open[hx-get="/mobile/items/%d/reader?selected_feed_id=%d"]`,
+		fixture.secondaryFirstItemID,
+		selectedFeedID,
+	)
+	primaryStreamURI := fmt.Sprintf("/mobile/stream?selected_feed_id=%d", fixture.primaryFeedID)
+
+	selectMobileFeedFilter(t, ctx, selectedFeedID)
+	waitForJS(t, ctx, requestURIExpression(filteredStreamURI), "reader topbar filtered stream URL")
+
+	runActions(
+		t,
+		ctx,
+		chromedp.WaitVisible(readerSelector, chromedp.ByQuery),
+		chromedp.Click(readerSelector, chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "reader topbar reader loaded")
+	waitForJS(t, ctx, requestURIExpression(readerURI), "reader topbar reader URL")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "reader topbar filter visible in reader")
+
+	clickElement(t, ctx, "#topbar-brand-button", "mobile topbar brand pulse")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "brand pulse returns to stream")
+	waitForJS(t, ctx, requestURIExpression(filteredStreamURI), "brand pulse preserves filtered stream URL")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "brand pulse preserves filtered selection")
+
+	runActions(
+		t,
+		ctx,
+		chromedp.WaitVisible(readerSelector, chromedp.ByQuery),
+		chromedp.Click(readerSelector, chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "reader reopened before selector change")
+	waitForJS(t, ctx, mobileFilterValueExpression(selectedFeedID), "reader reopened with selected feed")
+
+	selectMobileFeedFilter(t, ctx, fixture.primaryFeedID)
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "reader selector change returns to stream")
+	waitForJS(t, ctx, requestURIExpression(primaryStreamURI), "reader selector change updates stream URL")
+	waitForJS(t, ctx, mobileFilterValueExpression(fixture.primaryFeedID), "reader selector change updates selection")
+	waitForJS(t, ctx, textPresentExpression("Primary One"), "reader selector change shows primary item")
+	waitForJS(t, ctx, textAbsentExpression("Secondary One"), "reader selector change hides previous feed items")
 }
 
 func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {

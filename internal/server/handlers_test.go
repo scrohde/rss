@@ -261,17 +261,61 @@ func assertFeedListOOBUpdate(t *testing.T, body string) {
 func assertMobileStreamSelectorInHeader(t *testing.T, body string) {
 	t.Helper()
 
-	headerStart := strings.Index(body, `<header class="mobile-stream-header">`)
-	formStart := strings.Index(body, `class="mobile-stream-filter"`)
+	headerStart := requireBodyIndex(t, body, `<header class="topbar">`, "expected topbar header in response")
+	slotStart := requireBodyIndex(t, body, `id="topbar-mobile-slot"`, "expected mobile topbar slot in response")
+	formStart := requireBodyIndex(
+		t,
+		body,
+		`id="mobile-stream-feed-filter"`,
+		"expected mobile feed selector in response",
+	)
+	sideStart := requireBodyIndex(t, body, `class="topbar-side"`, "expected topbar menu area in response")
+	contentStart := requireBodyIndex(
+		t,
+		body,
+		`id="mobile-stream-content"`,
+		"expected mobile stream content in response",
+	)
 
-	contentStart := strings.Index(body, `id="mobile-stream-content"`)
-	if headerStart == -1 || formStart == -1 || contentStart == -1 {
-		t.Fatal("expected mobile stream header, inline filter form, and stream content in response")
+	if slotStart < headerStart || slotStart > sideStart {
+		t.Fatal("expected mobile topbar slot to render between the brand and menu")
 	}
 
-	if formStart < headerStart || formStart > contentStart {
-		t.Fatal("expected feed selector form to render inline within the mobile stream header")
+	if formStart < slotStart || formStart > sideStart {
+		t.Fatal("expected feed selector to render inside the shared mobile topbar slot")
 	}
+
+	if formStart > contentStart {
+		t.Fatal("expected feed selector to render outside the mobile stream body")
+	}
+}
+
+func requireBodyIndex(t *testing.T, body, token, message string) int {
+	t.Helper()
+
+	index := strings.Index(body, token)
+	if index == -1 {
+		t.Fatal(message)
+	}
+
+	return index
+}
+
+func assertMobileTopBarOOBUpdate(t *testing.T, body string) {
+	t.Helper()
+
+	assertContains(
+		t,
+		body,
+		`id="topbar-mobile-slot" class="topbar-mobile-slot is-active" hx-swap-oob="outerHTML"`,
+		"expected mobile selector slot OOB update",
+	)
+	assertContains(
+		t,
+		body,
+		`id="topbar-brand-slot" class="topbar-brand-slot" hx-swap-oob="outerHTML"`,
+		"expected mobile brand slot OOB update",
+	)
 }
 
 type clearedMobileFeedFixture struct {
@@ -301,6 +345,47 @@ func newAppWithClearedSingleFeed(
 	return clearedMobileFeedFixture{
 		app:    app,
 		feedID: feedID,
+	}
+}
+
+type mobileStreamSelectorFixture struct {
+	app      *App
+	quietID  int64
+	brightID int64
+}
+
+func newMobileStreamSelectorFixture(t *testing.T) mobileStreamSelectorFixture {
+	t.Helper()
+
+	app := newTestApp(t)
+	quietID := mustUpsertFeed(t, app, "http://example.com/quiet", "Quiet Feed")
+	brightID := mustUpsertFeed(t, app, "http://example.com/bright", "Bright Feed")
+	published := time.Now().UTC().Add(-time.Hour)
+
+	mustUpsertSingleStory(
+		t,
+		app,
+		quietID,
+		"Quiet Story",
+		"http://example.com/quiet-story",
+		"quiet-story",
+		published,
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		brightID,
+		"Bright Story",
+		"http://example.com/bright-story",
+		"bright-story",
+		published,
+	)
+	mustMarkFeedItemRead(t, app, quietID, "quiet-story")
+
+	return mobileStreamSelectorFixture{
+		app:      app,
+		quietID:  quietID,
+		brightID: brightID,
 	}
 }
 
@@ -3693,6 +3778,21 @@ func TestMobileStreamHTMXReplacesURL(t *testing.T) {
 	assertNotContains(t, body, "<!doctype html>", "expected partial htmx mobile stream response")
 	assertNotContains(t, body, `feed-count">`, "expected unread counters to be absent")
 	assertNotContains(t, body, "New items (", "expected desktop new-items UI to be absent")
+	assertNotContains(t, body, "Read what is here now.", "expected mobile hero copy to be removed")
+	assertNotContains(t, body, ">Refresh</button>", "expected in-stream refresh button to be removed")
+	assertMobileTopBarOOBUpdate(t, body)
+	assertContains(
+		t,
+		body,
+		`id="topbar-brand-button"`,
+		"expected mobile stream response to refresh the shared brand button",
+	)
+	assertContains(
+		t,
+		body,
+		`hx-post="/mobile/pulse"`,
+		"expected mobile stream response to wire the brand button to mobile pulse",
+	)
 }
 
 func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
@@ -3743,42 +3843,31 @@ func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
 func TestMobileStreamSelectorRendersInlineInHeaderAndShowsUnreadFeedsOnly(t *testing.T) {
 	t.Parallel()
 
-	app := newTestApp(t)
+	fixture := newMobileStreamSelectorFixture(t)
 
-	quietID := mustUpsertFeed(t, app, "http://example.com/quiet", "Quiet Feed")
-	brightID := mustUpsertFeed(t, app, "http://example.com/bright", "Bright Feed")
-	published := time.Now().UTC().Add(-time.Hour)
-	mustUpsertSingleStory(
-		t,
-		app,
-		quietID,
-		"Quiet Story",
-		"http://example.com/quiet-story",
-		"quiet-story",
-		published,
-	)
-	mustUpsertSingleStory(
-		t,
-		app,
-		brightID,
-		"Bright Story",
-		"http://example.com/bright-story",
-		"bright-story",
-		published,
-	)
-	mustMarkFeedItemRead(t, app, quietID, "quiet-story")
-
-	rec := getRequest(app, pathMobileStream)
+	rec := getRequest(fixture.app, pathMobileStream)
 	assertResponseCode(t, rec, "mobile stream selector status")
 
 	body := rec.Body.String()
 	assertMobileStreamSelectorInHeader(t, body)
+	assertContains(
+		t,
+		body,
+		`id="topbar-brand-button"`,
+		"expected mobile route to render the shared brand button",
+	)
+	assertContains(
+		t,
+		body,
+		`hx-post="/mobile/pulse"`,
+		"expected mobile route brand button to use mobile pulse",
+	)
 	assertContains(t, body, `<option value="0"`, "expected all-feeds option")
 	assertContains(t, body, `>All feeds</option>`, "expected all-feeds option label")
 	assertContains(
 		t,
 		body,
-		fmt.Sprintf(`<option value="%d"`, brightID),
+		fmt.Sprintf(`<option value="%d"`, fixture.brightID),
 		"expected unread feed option",
 	)
 	assertContains(
@@ -3796,9 +3885,11 @@ func TestMobileStreamSelectorRendersInlineInHeaderAndShowsUnreadFeedsOnly(t *tes
 	assertNotContains(
 		t,
 		body,
-		fmt.Sprintf(`<option value="%d">Quiet Feed</option>`, quietID),
+		fmt.Sprintf(`<option value="%d">Quiet Feed</option>`, fixture.quietID),
 		"expected read-only feed to be omitted from selector",
 	)
+	assertNotContains(t, body, "Read what is here now.", "expected stream hero copy to be removed")
+	assertNotContains(t, body, ">Refresh</button>", "expected in-stream refresh button to be removed")
 }
 
 func TestMobileStreamSelectorMarksSelectedFeed(t *testing.T) {
@@ -3825,6 +3916,12 @@ func TestMobileStreamSelectorMarksSelectedFeed(t *testing.T) {
 		rec.Body.String(),
 		fmt.Sprintf(`<option value="%d" selected>Bright Feed</option>`, feedID),
 		"expected selected feed option to reflect selected_feed_id",
+	)
+	assertContains(
+		t,
+		rec.Body.String(),
+		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
+		"expected brand button to preserve selected feed in mobile pulse URL",
 	)
 }
 
@@ -3907,7 +4004,15 @@ func TestMobileMarkReadPreservesFilteredSelectionAndURL(t *testing.T) {
 		t.Fatalf("expected filtered HX-Replace-Url, got %q", got)
 	}
 
-	assertFilteredMobileEmptyState(t, rec.Body.String(), "Solo Feed", feedID, otherFeedID)
+	body := rec.Body.String()
+	assertMobileTopBarOOBUpdate(t, body)
+	assertFilteredMobileEmptyState(t, body, "Solo Feed", feedID, otherFeedID)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
+		"expected mark-read response to keep mobile pulse tied to the selected feed",
+	)
 }
 
 func TestMobilePulsePreservesFilteredSelectionAndURL(t *testing.T) {
@@ -3952,8 +4057,15 @@ func TestMobilePulsePreservesFilteredSelectionAndURL(t *testing.T) {
 	}
 
 	body := rec.Body.String()
+	assertMobileTopBarOOBUpdate(t, body)
 	assertContains(t, body, "Already fresh enough.", "expected calm pulse status")
 	assertFilteredMobileEmptyState(t, body, "Caught Up Feed", feedID, otherFeedID)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
+		"expected pulse response to preserve selected feed in mobile brand button",
+	)
 }
 
 func TestMobileReaderView(t *testing.T) {
@@ -3984,6 +4096,18 @@ func TestMobileReaderView(t *testing.T) {
 	assertContains(t, body, "Unread Story", "expected reader item title")
 	assertContains(t, body, "Feed Title", "expected reader source title")
 	assertContains(t, body, "/mobile/stream", "expected back-to-stream action")
+	assertContains(
+		t,
+		body,
+		`id="mobile-stream-feed-filter"`,
+		"expected mobile reader page to keep the shared topbar selector visible",
+	)
+	assertContains(
+		t,
+		body,
+		`hx-post="/mobile/pulse"`,
+		"expected full-page mobile reader brand button to use mobile pulse",
+	)
 }
 
 func TestMobileReaderPreservesSelectedFeedID(t *testing.T) {
@@ -4025,6 +4149,19 @@ func TestMobileReaderPreservesSelectedFeedID(t *testing.T) {
 		body,
 		fmt.Sprintf(`hx-post="/mobile/items/%d/read?selected_feed_id=%d"`, itemID, feedID),
 		"expected reader mark-read action to preserve selected feed",
+	)
+	assertMobileTopBarOOBUpdate(t, body)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
+		"expected reader response to preserve selected feed in mobile brand button",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`<option value="%d" selected>Feed Title</option>`, feedID),
+		"expected reader response to keep the selected feed visible in the topbar selector",
 	)
 }
 

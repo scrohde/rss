@@ -1,0 +1,82 @@
+{{define "topbar_brand_button"}}
+  <button
+    id="topbar-brand-button"
+    class="brand brand-pulse"
+    type="button"
+    {{if .}}
+      title="Refresh current mobile stream"
+      aria-label="Refresh current mobile stream"
+      hx-post="{{.PulsePath}}"
+      hx-target="#main-content"
+      hx-swap="innerHTML"
+    {{else}}
+      title="Refresh all feeds"
+      aria-label="Refresh all feeds"
+      hx-post="/feeds/pulse"
+      hx-target="#subscribe-message"
+      hx-swap="outerHTML"
+    {{end}}
+  >
+    <div class="brand-mark">o</div>
+    <div>
+      <div class="brand-title">Pulse RSS</div>
+      <div class="brand-subtitle">Send a PULSE</div>
+    </div>
+  </button>
+{{end}}
+
+{{define "topbar_brand_slot"}}
+  <div id="topbar-brand-slot" class="topbar-brand-slot">
+    {{template "topbar_brand_button" .}}
+  </div>
+{{end}}
+
+{{define "topbar_brand_slot_oob"}}
+  <div id="topbar-brand-slot" class="topbar-brand-slot" hx-swap-oob="outerHTML">
+    {{template "topbar_brand_button" .}}
+  </div>
+{{end}}
+
+{{define "mobile_topbar_selector"}}
+  <form
+    class="mobile-stream-filter"
+    method="get"
+    action="/mobile/stream"
+  >
+    <label class="sr-only" for="mobile-stream-feed-filter">Filter unread stream by feed</label>
+    <select
+      class="mobile-stream-filter-select"
+      id="mobile-stream-feed-filter"
+      name="selected_feed_id"
+      aria-label="Filter unread stream by feed"
+      hx-get="/mobile/stream"
+      hx-include="closest form"
+      hx-target="#main-content"
+      hx-replace-url="true"
+      hx-swap="innerHTML"
+      hx-trigger="change"
+    >
+      <option value="0" {{if eq .SelectedFeedID 0}}selected{{end}}>All feeds</option>
+      {{if .ShowCaughtUpSelectedFeed}}
+        <option value="{{.SelectedFeedID}}" selected>{{.SelectedFeedTitle}} (caught up)</option>
+      {{end}}
+      {{range .FeedOptions}}
+        <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>{{.Title}}</option>
+      {{end}}
+    </select>
+  </form>
+{{end}}
+
+{{define "mobile_topbar_slot"}}
+  <div id="topbar-mobile-slot" class="topbar-mobile-slot{{if .}} is-active{{end}}">
+    {{if .}}
+      {{template "mobile_topbar_selector" .}}
+    {{end}}
+  </div>
+{{end}}
+
+{{define "mobile_topbar_slot_oob"}}
+  <div id="topbar-mobile-slot" class="topbar-mobile-slot is-active" hx-swap-oob="outerHTML">
+    {{template "mobile_topbar_selector" .}}
+  </div>
+{{end}}

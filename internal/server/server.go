@@ -1123,9 +1123,16 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	topBar, err := a.mobileTopBarData(r)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
+		return
+	}
+
 	data := mobileReaderResponseData{
-		Item:           item,
-		SelectedFeedID: parseSelectedFeedID(r),
+		Item:   item,
+		TopBar: topBar,
 	}
 	a.renderMobileReader(w, r, &data)
 }
@@ -1270,14 +1277,14 @@ func (a *App) renderPulseMessage(w http.ResponseWriter, message, className strin
 }
 
 func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusMessage string) {
-	selection, err := a.mobileStreamFeedOptions(r)
+	topBar, err := a.mobileTopBarData(r)
 	if err != nil {
 		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
 
 		return
 	}
 
-	items, err := a.mobileStreamItems(r, selection.FeedID)
+	items, err := a.mobileStreamItems(r, topBar.SelectedFeedID)
 	if err != nil {
 		http.Error(w, "failed to load unread items", http.StatusInternalServerError)
 
@@ -1285,17 +1292,14 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	}
 
 	data := mobileStreamResponseData{
-		Items:                    items,
-		StatusMessage:            statusMessage,
-		FeedOptions:              selection.Options,
-		SelectedFeedTitle:        selection.FeedTitle,
-		SelectedFeedID:           selection.FeedID,
-		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
+		Items:         items,
+		StatusMessage: statusMessage,
+		TopBar:        topBar,
 	}
 
 	if isHTMXRequest(r) {
-		w.Header().Set("Hx-Replace-Url", mobileStreamPath(selection.FeedID))
-		a.renderTemplate(w, "mobile_stream", data)
+		w.Header().Set("Hx-Replace-Url", mobileStreamPath(topBar.SelectedFeedID))
+		a.renderTemplate(w, "mobile_stream_response", data)
 
 		return
 	}
@@ -1307,6 +1311,7 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 		return
 	}
 
+	page.MobileTopBar = &data.TopBar
 	page.MobileStream = &data
 	a.renderTemplate(w, "index", page)
 }
@@ -1314,7 +1319,7 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *mobileReaderResponseData) {
 	if isHTMXRequest(r) {
 		w.Header().Set("Hx-Push-Url", r.URL.RequestURI())
-		a.renderTemplate(w, "mobile_reader", data)
+		a.renderTemplate(w, "mobile_reader_response", data)
 
 		return
 	}
@@ -1326,6 +1331,7 @@ func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *m
 		return
 	}
 
+	page.MobileTopBar = &data.TopBar
 	page.MobileReader = data
 	a.renderTemplate(w, "index", page)
 }
@@ -1350,6 +1356,21 @@ func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, e
 		FeedID:    selectedFeedID,
 		FeedTitle: selectedFeedTitle,
 		Options:   feedOptions,
+	}, nil
+}
+
+func (a *App) mobileTopBarData(r *http.Request) (mobileTopBarData, error) {
+	selection, err := a.mobileStreamFeedOptions(r)
+	if err != nil {
+		return mobileTopBarData{}, err
+	}
+
+	return mobileTopBarData{
+		FeedOptions:              selection.Options,
+		SelectedFeedTitle:        selection.FeedTitle,
+		SelectedFeedID:           selection.FeedID,
+		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
+		PulsePath:                mobilePulsePath(selection.FeedID),
 	}, nil
 }
 
@@ -1408,6 +1429,7 @@ func (a *App) newPageData(r *http.Request) (pageData, error) {
 		ItemList:       nil,
 		MobileStream:   nil,
 		MobileReader:   nil,
+		MobileTopBar:   nil,
 		Feeds:          nil,
 		SelectedFeedID: 0,
 		FeedEditMode:   false,
@@ -1898,6 +1920,14 @@ func mobileStreamPath(selectedFeedID int64) string {
 	}
 
 	return fmt.Sprintf("/mobile/stream?selected_feed_id=%d", selectedFeedID)
+}
+
+func mobilePulsePath(selectedFeedID int64) string {
+	if selectedFeedID <= 0 {
+		return "/mobile/pulse"
+	}
+
+	return fmt.Sprintf("/mobile/pulse?selected_feed_id=%d", selectedFeedID)
 }
 
 func parseSelectedItemID(r *http.Request) int64 {

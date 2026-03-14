@@ -182,6 +182,15 @@ body {
   z-index: 10;
 }
 
+.topbar-brand-slot,
+.topbar-mobile-slot {
+  min-width: 0;
+}
+
+.topbar-mobile-slot {
+  display: none;
+}
+
 .brand {
   display: flex;
   gap: 10px;
@@ -1676,8 +1685,9 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   }
 
   .topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     text-align: left;
+    align-items: center;
   }
 
   .brand {
@@ -1695,9 +1705,16 @@ body.is-resizing-content-panel .content-panel-resizer::before {
     text-overflow: ellipsis;
   }
 
+  .topbar-mobile-slot {
+    display: none;
+  }
+
+  .topbar-mobile-slot.is-active {
+    display: block;
+  }
+
   .topbar-side {
     justify-content: flex-end;
-    flex-wrap: wrap;
   }
 
   .topbar-shortcuts {
@@ -1774,54 +1791,12 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   .mobile-reader {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
     max-width: 46rem;
     margin: 0 auto;
     min-width: 0;
     padding-bottom: max(8px, env(safe-area-inset-bottom));
     animation: mobile-fade-in 0.22s ease;
-  }
-
-  .mobile-stream-header {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 16px;
-    min-width: 0;
-    border-radius: 16px;
-    border: 1px solid var(--mobile-button-border);
-    background: linear-gradient(160deg, var(--mobile-hero-start), var(--mobile-hero-end));
-    box-shadow: var(--mobile-shadow);
-  }
-
-  .mobile-stream-header-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .mobile-stream-header-controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: end;
-    min-width: 0;
-  }
-
-  .mobile-stream-title {
-    margin: 0;
-    font-family: "Space Grotesk", "DM Sans", sans-serif;
-    font-size: 18px;
-    line-height: 1.2;
-    color: var(--accent-2);
-  }
-
-  .mobile-stream-subtitle {
-    margin: 6px 0 0;
-    color: var(--muted);
-    font-size: 13px;
-    line-height: 1.45;
   }
 
   .mobile-stream-status {
@@ -1837,33 +1812,8 @@ body.is-resizing-content-panel .content-panel-resizer::before {
     line-height: 1.4;
   }
 
-  .mobile-stream-pulse {
-    align-self: flex-start;
-    border: 1px solid var(--mobile-button-border);
-    background: var(--mobile-button-bg);
-    color: var(--accent);
-    padding: 8px 12px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
   .mobile-stream-filter {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex: 1 1 18rem;
-    min-width: min(100%, 18rem);
-  }
-
-  .mobile-stream-filter-label {
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    min-width: 0;
   }
 
   .mobile-stream-filter-select {
@@ -1874,7 +1824,13 @@ body.is-resizing-content-panel .content-panel-resizer::before {
     background: var(--field-bg);
     color: var(--accent-2);
     font: inherit;
-    padding: 9px 14px;
+    padding: 8px 36px 8px 12px;
+    font-size: 13px;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  }
+
+  .topbar-mobile-slot .mobile-stream-filter-select {
+    height: 38px;
   }
 
   .mobile-stream-list {
@@ -2075,7 +2031,6 @@ body.is-resizing-content-panel .content-panel-resizer::before {
     color: var(--accent);
   }
 
-  .mobile-stream-pulse:hover,
   .mobile-card-mark-read:hover,
   .mobile-reader-back:hover,
   .mobile-reader-mark-read:hover {
@@ -2115,6 +2070,36 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 }
 
 @media (max-width: 640px) {
+  .topbar {
+    gap: 8px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .brand {
+    gap: 8px;
+  }
+
+  .brand-mark {
+    width: 12px;
+    height: 12px;
+    box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.18);
+  }
+
+  .brand-title {
+    font-size: 16px;
+  }
+
+  .brand-subtitle {
+    font-size: 10px;
+  }
+
+  .topbar-mobile-slot .mobile-stream-filter-select {
+    padding-right: 30px;
+    padding-left: 10px;
+    font-size: 12px;
+  }
+
   .item-row {
     flex-direction: column;
   }

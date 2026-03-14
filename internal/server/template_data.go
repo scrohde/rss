@@ -14,6 +14,7 @@ type pageData struct {
 	ItemList       *view.ItemListData
 	MobileStream   *mobileStreamResponseData
 	MobileReader   *mobileReaderResponseData
+	MobileTopBar   *mobileTopBarData
 	Feeds          []view.FeedView
 	SelectedFeedID int64
 	FeedEditMode   bool
@@ -65,18 +66,23 @@ type itemExpandedResponseData struct {
 	Item         view.ItemView
 }
 
-type mobileStreamResponseData struct {
-	StatusMessage            string
+type mobileTopBarData struct {
 	SelectedFeedTitle        string
-	Items                    []view.ItemView
+	PulsePath                string
 	FeedOptions              []view.FeedView
 	SelectedFeedID           int64
 	ShowCaughtUpSelectedFeed bool
 }
 
+type mobileStreamResponseData struct {
+	StatusMessage string
+	Items         []view.ItemView
+	TopBar        mobileTopBarData
+}
+
 type mobileReaderResponseData struct {
-	Item           view.ItemView
-	SelectedFeedID int64
+	TopBar mobileTopBarData
+	Item   view.ItemView
 }
 
 type authLoginPageData struct {
