@@ -1299,7 +1299,12 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 
 	if isHTMXRequest(r) {
 		w.Header().Set("Hx-Replace-Url", mobileStreamPath(topBar.SelectedFeedID))
-		a.renderTemplate(w, "mobile_stream_response", data)
+
+		if isMobileStreamSelectorTrigger(r) {
+			a.renderTemplate(w, "mobile_stream_selector_response", data)
+		} else {
+			a.renderTemplate(w, "mobile_stream_response", data)
+		}
 
 		return
 	}
@@ -1825,6 +1830,10 @@ func parsePathInt64(r *http.Request, key string) (int64, bool) {
 
 func isHTMXRequest(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Hx-Request")), "true")
+}
+
+func isMobileStreamSelectorTrigger(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Hx-Trigger")), "mobile-stream-feed-filter")
 }
 
 func parseAfterID(r *http.Request) int64 {

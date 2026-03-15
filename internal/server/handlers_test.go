@@ -3795,6 +3795,39 @@ func TestMobileStreamHTMXReplacesURL(t *testing.T) {
 	)
 }
 
+func TestMobileStreamSelectorHTMXKeepsActiveSelectorMounted(t *testing.T) {
+	t.Parallel()
+
+	fixture := newMobileStreamSelectorFixture(t)
+	target := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, fixture.brightID)
+	req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
+	req.Header.Set("Hx-Request", "true")
+	req.Header.Set("Hx-Trigger", "mobile-stream-feed-filter")
+
+	rec := httptest.NewRecorder()
+	fixture.app.Routes().ServeHTTP(rec, req)
+	assertResponseCode(t, rec, "mobile stream selector htmx status")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != target {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", target, got)
+	}
+
+	body := rec.Body.String()
+	assertContains(t, body, "Bright Story", "expected filtered stream item in selector response")
+	assertContains(
+		t,
+		body,
+		`id="topbar-brand-slot" class="topbar-brand-slot" hx-swap-oob="outerHTML"`,
+		"expected selector response to refresh the brand slot",
+	)
+	assertNotContains(
+		t,
+		body,
+		`id="topbar-mobile-slot" class="topbar-mobile-slot is-active" hx-swap-oob="outerHTML"`,
+		"expected selector-triggered response to leave the active mobile selector mounted",
+	)
+}
+
 func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
 	t.Parallel()
 
