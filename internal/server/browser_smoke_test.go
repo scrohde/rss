@@ -101,6 +101,7 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
+	runMobileSummaryOnlyPreviewFlow(t, ctx, fixture)
 	waitForJS(
 		t,
 		ctx,
@@ -651,6 +652,20 @@ func runMobileFilteredHistoryFlow(t *testing.T, ctx context.Context, fixture smo
 	waitForJS(t, ctx, textAbsentExpression("Primary One"), "other feed item remains hidden after history back")
 }
 
+func runMobileSummaryOnlyPreviewFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	waitForJS(
+		t,
+		ctx,
+		mobileCardCompactPreviewExpression(
+			fixture.secondarySummaryItemID,
+			"Summary-only heading Summary-only fallback preview.",
+		),
+		"summary-only mobile card compact preview",
+	)
+}
+
 func runMobileFilteredEmptyStateFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	t.Helper()
 
@@ -771,13 +786,22 @@ func runSummaryOnlyDesktopReaderFlow(t *testing.T, ctx context.Context, fixture 
 
 	rowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySummaryItemID)
 	itemID := fixture.secondarySummaryItemID
+	itemTarget := fmt.Sprintf("#item-%d", itemID)
+	selectedItemID := fmt.Sprintf("item-%d", itemID)
 
 	waitForJS(t, ctx, elementPresentExpression(rowSelector), "summary-only row present in desktop list")
 	waitForJS(t, ctx, textPresentExpression("Summary-only heading Summary-only fallback preview."), "summary-only compact preview text")
 	waitForJS(t, ctx, elementAbsentExpression(rowSelector+" .item-summary h2"), "summary-only compact row heading markup removed")
 	waitForJS(t, ctx, elementAbsentExpression(rowSelector+" .item-summary img"), "summary-only compact row image removed")
 
-	clickElement(t, ctx, rowSelector, "open summary-only compact row")
+	requestHTMX(
+		t,
+		ctx,
+		"GET",
+		fmt.Sprintf("/items/%d", itemID),
+		itemTarget,
+		selectedItemID,
+	)
 	waitForJS(t, ctx, hasClassExpression(rowSelector, "is-expanded"), "summary-only row expanded")
 	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "summary-only content panel opened")
 	waitForJS(t, ctx, contentPanelItemExpression(itemID), "summary-only content panel item")
@@ -1221,5 +1245,28 @@ func contentPanelItemExpression(itemID int64) string {
 			return !!article && article.getAttribute("data-item-id") === %q;
 		})()`,
 		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func mobileCardCompactPreviewExpression(itemID int64, previewText string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const button = document.querySelector(%q);
+			if (!button) {
+				return false;
+			}
+			const card = button.closest(".mobile-card");
+			if (!card) {
+				return false;
+			}
+			const summary = card.querySelector(".mobile-card-summary");
+			if (!summary) {
+				return false;
+			}
+			const text = (summary.textContent || "").replace(/\s+/g, " ").trim();
+			return text === %q && !summary.querySelector("h1, h2, h3, img");
+		})()`,
+		fmt.Sprintf(`.mobile-card-open[hx-get^="/mobile/items/%d/reader"]`, itemID),
+		previewText,
 	)
 }
