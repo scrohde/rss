@@ -20,9 +20,9 @@
                 <span class="mobile-card-title">{{.Title}}</span>
                 <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>
               </button>
-              {{if .HasSummary}}
+              {{if .CompactPreview}}
                 <div class="mobile-card-summary">
-                  {{.SummaryHTML}}
+                  <p>{{.CompactPreview}}</p>
                 </div>
               {{end}}
               <div class="mobile-card-actions">

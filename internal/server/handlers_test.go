@@ -3858,6 +3858,105 @@ func TestMobileStreamUnreadOnly(t *testing.T) {
 	assertNotContains(t, body, "Alpha Read", "expected read item to be excluded from stream")
 }
 
+func TestMobileStreamRendersCompactPreviewForSummaryOnlyItems(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, "http://example.com/mobile-preview", "Mobile Preview")
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	now := time.Now().UTC()
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{{
+		Title: "Summary Only",
+		Link:  "http://example.com/mobile-summary-only",
+		GUID:  "mobile-summary-only",
+		Description: mobileSummaryHTML(
+			"Mobile summary heading",
+			"Mobile summary preview.",
+			"/hero.jpg",
+			"hero image",
+		),
+		PublishedParsed: new(now),
+	}})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	rec := getRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile summary-only preview status")
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		"<p>Mobile summary heading Mobile summary preview.</p>",
+		"expected summary-only mobile card to render compact preview text",
+	)
+	assertNotContains(
+		t,
+		body,
+		"<h2>Mobile summary heading</h2>",
+		"expected summary-only mobile card to avoid full summary heading markup",
+	)
+	assertNotContains(
+		t,
+		body,
+		`<img src="/hero.jpg" alt="hero image">`,
+		"expected summary-only mobile card to avoid summary media markup",
+	)
+}
+
+func TestMobileStreamRendersCompactPreviewForItemsWithSummaryAndContent(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(
+		context.Background(),
+		app.db,
+		"http://example.com/mobile-combined",
+		"Mobile Combined",
+	)
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	published := time.Now().UTC()
+	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{{
+		Title: "Summary And Content",
+		Link:  "http://example.com/mobile-summary-content",
+		GUID:  "mobile-summary-content",
+		Description: mobileSummaryHTML(
+			"Combined summary heading",
+			"Combined summary preview.",
+			"/combined.jpg",
+			"combined image",
+		),
+		Content:         "<p>Combined content body that should stay out of the stream preview.</p>",
+		PublishedParsed: new(published),
+	}})
+	requireNoErr(t, err, errStoreUpsertItems)
+
+	rec := getRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile summary-and-content preview status")
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		"<p>Combined summary heading Combined summary preview.</p>",
+		"expected summary-plus-content mobile card to render summary preview text",
+	)
+	assertNotContains(
+		t,
+		body,
+		"Combined content body that should stay out of the stream preview.",
+		"expected mobile stream preview to use summary text instead of content HTML",
+	)
+}
+
+func mobileSummaryHTML(heading, preview, imagePath, altText string) string {
+	return `<div><h2>` + heading + `</h2><p>` + preview + `</p>` +
+		`<img src="` + imagePath + `" alt="` + altText + `"></div>`
+}
+
 func TestDesktopIndexIgnoresMobileSelectedFeedQuery(t *testing.T) {
 	t.Parallel()
 
@@ -4277,8 +4376,17 @@ func TestMobileReaderView(t *testing.T) {
 	requireNoErr(t, err, errStoreUpsertFeed)
 
 	published := time.Now().UTC().Add(-time.Hour)
+
+	const summaryOnlyReaderText = "Reader fallback summary."
+
 	_, err = store.UpsertItems(context.Background(), app.db, feedID, []*gofeed.Item{
-		newGofeedItem("Unread Story", "http://example.com/story", "story-1", "<p>Summary</p>", &published),
+		newGofeedItem(
+			"Unread Story",
+			"http://example.com/story",
+			"story-1",
+			"<p>"+summaryOnlyReaderText+"</p>",
+			&published,
+		),
 	})
 	requireNoErr(t, err, errStoreUpsertItems)
 
@@ -4295,6 +4403,7 @@ func TestMobileReaderView(t *testing.T) {
 	assertContains(t, body, `data-mobile-reader="true"`, "expected mobile reader container")
 	assertContains(t, body, "Unread Story", "expected reader item title")
 	assertContains(t, body, "Feed Title", "expected reader source title")
+	assertContains(t, body, summaryOnlyReaderText, "expected summary-only reader body content")
 	assertContains(t, body, "/mobile/stream", "expected back-to-stream action")
 	assertContains(
 		t,
