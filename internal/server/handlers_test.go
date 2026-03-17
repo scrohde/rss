@@ -161,7 +161,6 @@ func newTestHTTPResponse(
 	return resp
 }
 
-//nolint:unparam // Test helper keeps explicit feed-like argument shape.
 func newGofeedItem(
 	title,
 	link,
