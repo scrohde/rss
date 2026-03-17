@@ -33,8 +33,16 @@ func TestBuildItemViewSummaryOnly(t *testing.T) {
 		t.Fatal("expected HasSummary true")
 	}
 
+	if !item.HasReaderContent {
+		t.Fatal("expected HasReaderContent true")
+	}
+
 	if item.HasContent {
 		t.Fatal("expected HasContent false")
+	}
+
+	if item.CompactPreview != "Summary" {
+		t.Fatalf("expected CompactPreview to use summary text, got %q", item.CompactPreview)
 	}
 
 	if !strings.Contains(string(item.SummaryHTML), "Summary") {
@@ -58,8 +66,16 @@ func TestBuildItemViewContentOnly(t *testing.T) {
 		t.Fatal("expected HasSummary false")
 	}
 
+	if !item.HasReaderContent {
+		t.Fatal("expected HasReaderContent true")
+	}
+
 	if !item.HasContent {
 		t.Fatal("expected HasContent true")
+	}
+
+	if item.CompactPreview != "" {
+		t.Fatalf("expected empty CompactPreview, got %q", item.CompactPreview)
 	}
 
 	if string(item.SummaryHTML) != "" {
@@ -83,8 +99,16 @@ func TestBuildItemViewSummaryAndContent(t *testing.T) {
 		t.Fatal("expected HasSummary true")
 	}
 
+	if !item.HasReaderContent {
+		t.Fatal("expected HasReaderContent true")
+	}
+
 	if !item.HasContent {
 		t.Fatal("expected HasContent true")
+	}
+
+	if item.CompactPreview != "Summary" {
+		t.Fatalf("expected CompactPreview to prefer summary text, got %q", item.CompactPreview)
 	}
 
 	if !strings.Contains(string(item.SummaryHTML), "Summary") {
@@ -108,8 +132,16 @@ func TestBuildItemViewNoSummaryOrContent(t *testing.T) {
 		t.Fatal("expected HasSummary false")
 	}
 
+	if item.HasReaderContent {
+		t.Fatal("expected HasReaderContent false")
+	}
+
 	if item.HasContent {
 		t.Fatal("expected HasContent false")
+	}
+
+	if item.CompactPreview != "" {
+		t.Fatalf("expected empty CompactPreview, got %q", item.CompactPreview)
 	}
 
 	if string(item.SummaryHTML) != "" {
@@ -118,5 +150,42 @@ func TestBuildItemViewNoSummaryOrContent(t *testing.T) {
 
 	if string(item.ContentHTML) != "" {
 		t.Fatalf("expected empty ContentHTML, got %q", item.ContentHTML)
+	}
+}
+
+func TestBuildItemViewCompactPreviewSanitizesAndTruncatesSummaryHTML(t *testing.T) {
+	t.Parallel()
+
+	item := buildItem(
+		sql.NullString{
+			String: `<div>
+				<h2>Big heading</h2>
+				<p>Alpha <strong>beta</strong> <a href="/story">gamma</a>.</p>
+				<img src="/hero.jpg" alt="hero image">
+				<p>` + strings.Repeat("word ", 80) + `tail</p>
+			</div>`,
+			Valid: true,
+		},
+		sql.NullString{String: "", Valid: false},
+	)
+
+	if strings.Contains(item.CompactPreview, "<") || strings.Contains(item.CompactPreview, ">") {
+		t.Fatalf("expected CompactPreview without raw HTML tags, got %q", item.CompactPreview)
+	}
+
+	if strings.Contains(item.CompactPreview, "hero image") {
+		t.Fatalf("expected CompactPreview to omit media markup text, got %q", item.CompactPreview)
+	}
+
+	if !strings.Contains(item.CompactPreview, "Big heading Alpha beta gamma.") {
+		t.Fatalf("expected CompactPreview to keep normalized text content, got %q", item.CompactPreview)
+	}
+
+	if len(item.CompactPreview) > 240 {
+		t.Fatalf("expected CompactPreview to stay bounded, got length %d", len(item.CompactPreview))
+	}
+
+	if !strings.HasSuffix(item.CompactPreview, "...") {
+		t.Fatalf("expected truncated CompactPreview to end with ellipsis, got %q", item.CompactPreview)
 	}
 }

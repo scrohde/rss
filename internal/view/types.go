@@ -29,6 +29,7 @@ type ItemView struct {
 	Title            string
 	FeedTitle        string
 	Link             string
+	CompactPreview   string
 	SummaryHTML      template.HTML
 	ContentHTML      template.HTML
 	PublishedDisplay string
@@ -37,6 +38,7 @@ type ItemView struct {
 	FeedID           int64
 	IsRead           bool
 	IsActive         bool
+	HasReaderContent bool
 	HasSummary       bool
 	HasContent       bool
 	IsExpanded       bool

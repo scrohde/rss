@@ -7,13 +7,21 @@ import (
 	"html/template"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+
+	stdhtml "html"
 
 	"rss/internal/content"
 )
 
 const (
-	hoursPerDay = 24
-	daysPerYear = 365
+	hoursPerDay          = 24
+	daysPerYear          = 365
+	compactPreviewMaxLen = 240
+	compactPreviewSuffix = "..."
 )
 
 // BuildFeedView builds a FeedView from feed row values.
@@ -62,6 +70,7 @@ func BuildItemView(
 ) ItemView {
 	summaryHTML, hasSummary := renderOptionalHTML(summary, link)
 	contentHTML, hasContent := renderOptionalHTML(contentText, link)
+	compactPreview := buildCompactPreview(summary)
 	publishedDisplay := "Unpublished"
 	publishedCompact := "na"
 
@@ -76,12 +85,14 @@ func BuildItemView(
 		Title:            title,
 		FeedTitle:        "",
 		Link:             link,
+		CompactPreview:   compactPreview,
 		SummaryHTML:      summaryHTML,
 		ContentHTML:      contentHTML,
 		PublishedDisplay: publishedDisplay,
 		PublishedCompact: publishedCompact,
 		IsRead:           readAt.Valid,
 		IsActive:         false,
+		HasReaderContent: hasSummary || hasContent,
 		HasSummary:       hasSummary,
 		HasContent:       hasContent,
 		IsExpanded:       false,
@@ -129,4 +140,167 @@ func renderOptionalHTML(raw sql.NullString, baseURL string) (template.HTML, bool
 	text = content.RewriteSummaryHTML(text, baseURL)
 
 	return template.HTML(text), true
+}
+
+func buildCompactPreview(summary sql.NullString) string {
+	if !summary.Valid {
+		return ""
+	}
+
+	text := strings.TrimSpace(summary.String)
+	if text == "" {
+		return ""
+	}
+
+	nodes, ok := parseCompactPreviewFragment(text)
+	if !ok {
+		return ""
+	}
+
+	var b strings.Builder
+	appendCompactPreviewText(&b, nodes)
+
+	preview := normalizeCompactPreviewWhitespace(b.String())
+	if preview == "" {
+		return ""
+	}
+
+	return truncateCompactPreview(preview, compactPreviewMaxLen)
+}
+
+func parseCompactPreviewFragment(text string) ([]*html.Node, bool) {
+	root := new(html.Node)
+	root.Type = html.ElementNode
+	root.DataAtom = atom.Div
+	root.Data = "div"
+
+	nodes, err := html.ParseFragment(strings.NewReader(text), root)
+	if err != nil {
+		return nil, false
+	}
+
+	return nodes, true
+}
+
+func appendCompactPreviewText(b *strings.Builder, nodes []*html.Node) {
+	for _, node := range nodes {
+		appendCompactPreviewNodeText(b, node)
+	}
+}
+
+func appendCompactPreviewNodeText(b *strings.Builder, node *html.Node) {
+	if node == nil {
+		return
+	}
+
+	if shouldSkipCompactPreviewNode(node) {
+		return
+	}
+
+	if node.Type == html.TextNode {
+		mustWriteString(b, stdhtml.UnescapeString(node.Data))
+		mustWriteByte(b, ' ')
+
+		return
+	}
+
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		appendCompactPreviewNodeText(b, child)
+	}
+}
+
+func shouldSkipCompactPreviewNode(node *html.Node) bool {
+	if node.Type != html.ElementNode {
+		return false
+	}
+
+	switch node.Data {
+	case "script", "style", "object", "embed", "svg":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeCompactPreviewWhitespace(text string) string {
+	normalized := strings.Join(strings.Fields(text), " ")
+	if normalized == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, r := range normalized {
+		if isCompactPreviewPunctuation(r) && b.Len() > 0 {
+			trimTrailingSpace(&b)
+		}
+
+		mustWriteRune(&b, r)
+	}
+
+	return b.String()
+}
+
+func truncateCompactPreview(text string, limit int) string {
+	if limit <= len(compactPreviewSuffix) || utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+
+	runes := []rune(text)
+
+	cutoff := limit - len(compactPreviewSuffix)
+	if cutoff <= 0 || cutoff >= len(runes) {
+		return text
+	}
+
+	truncated := strings.TrimSpace(string(runes[:cutoff]))
+	if lastSpace := strings.LastIndex(truncated, " "); lastSpace >= cutoff/2 {
+		truncated = truncated[:lastSpace]
+	}
+
+	truncated = strings.TrimSpace(truncated)
+	if truncated == "" {
+		return strings.TrimSpace(string(runes[:cutoff])) + compactPreviewSuffix
+	}
+
+	return truncated + compactPreviewSuffix
+}
+
+func isCompactPreviewPunctuation(r rune) bool {
+	switch r {
+	case '.', ',', ';', ':', '!', '?':
+		return true
+	default:
+		return false
+	}
+}
+
+func trimTrailingSpace(b *strings.Builder) {
+	text := b.String()
+	if text == "" || text[len(text)-1] != ' ' {
+		return
+	}
+
+	b.Reset()
+	mustWriteString(b, text[:len(text)-1])
+}
+
+func mustWriteString(b *strings.Builder, text string) {
+	_, err := b.WriteString(text)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func mustWriteByte(b *strings.Builder, value byte) {
+	err := b.WriteByte(value)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func mustWriteRune(b *strings.Builder, value rune) {
+	_, err := b.WriteRune(value)
+	if err != nil {
+		panic(err)
+	}
 }
