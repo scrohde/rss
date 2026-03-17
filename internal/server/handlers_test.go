@@ -1292,6 +1292,15 @@ func assertExpandedPanelActions(t *testing.T, body string, itemID int64) {
 func assertItemArticleNotActive(t *testing.T, body string, itemID int64) {
 	t.Helper()
 
+	articleHTML := itemArticleHTML(t, body, itemID)
+	if strings.Contains(articleHTML, classIsActive) {
+		t.Fatalf("expected item-%d article to not include %q", itemID, classIsActive)
+	}
+}
+
+func itemArticleHTML(t *testing.T, body string, itemID int64) string {
+	t.Helper()
+
 	marker := fmt.Sprintf(`id="item-%d"`, itemID)
 
 	itemIndex := strings.Index(body, marker)
@@ -1311,10 +1320,7 @@ func assertItemArticleNotActive(t *testing.T, body string, itemID int64) {
 
 	articleEnd := itemIndex + articleEndOffset + len("</article>")
 
-	articleHTML := body[articleStart:articleEnd]
-	if strings.Contains(articleHTML, classIsActive) {
-		t.Fatalf("expected item-%d article to not include %q", itemID, classIsActive)
-	}
+	return body[articleStart:articleEnd]
 }
 
 func subscribeFeedItems(now time.Time) []testutil.RSSItem {
@@ -1876,6 +1882,19 @@ func TestItemExpandedSummaryOnlyRendersSummaryFallbackInContentPanel(t *testing.
 	body := rec.Body.String()
 	assertExpandedItemBody(t, body, items[firstItemIndex].ID)
 	assertContentPanelOOBUpdate(t, body)
+	articleHTML := itemArticleHTML(t, body, items[firstItemIndex].ID)
+	assertContains(
+		t,
+		articleHTML,
+		"<p>Expanded summary-only article</p>",
+		"expected expanded row to keep the compact preview text",
+	)
+	assertNotContains(
+		t,
+		articleHTML,
+		"<strong>article</strong>",
+		"expected expanded row to avoid rendering the full summary markup",
+	)
 	assertContains(
 		t,
 		body,

@@ -29,9 +29,9 @@
     <div class="item-meta">
       <span>{{.PublishedDisplay}}</span>
     </div>
-    {{if .HasSummary}}
+    {{if .CompactPreview}}
       <div class="item-summary">
-        {{.SummaryHTML}}
+        <p>{{.CompactPreview}}</p>
       </div>
     {{end}}
   </article>
