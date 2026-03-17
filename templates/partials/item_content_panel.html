@@ -1,8 +1,8 @@
 {{define "item_content_empty"}}
   <aside class="content-panel" id="content-panel" aria-live="polite" tabindex="-1">
     <section class="content-panel-empty">
-      <h3>Open an item to read full content.</h3>
-      <p>Expand any row with full content to view the article here.</p>
+      <h3>Open an item to read in app.</h3>
+      <p>Expand any row with in-app content to view the article here.</p>
     </section>
   </aside>
 {{end}}
@@ -10,8 +10,8 @@
 {{define "item_content_empty_oob"}}
   <aside class="content-panel" id="content-panel" aria-live="polite" tabindex="-1" hx-swap-oob="outerHTML">
     <section class="content-panel-empty">
-      <h3>Open an item to read full content.</h3>
-      <p>Expand any row with full content to view the article here.</p>
+      <h3>Open an item to read in app.</h3>
+      <p>Expand any row with in-app content to view the article here.</p>
     </section>
   </aside>
 {{end}}
@@ -66,7 +66,11 @@
         <p class="content-panel-meta">{{.PublishedDisplay}}</p>
       </header>
       <div class="content-panel-body">
-        {{.ContentHTML}}
+        {{if .HasContent}}
+          {{.ContentHTML}}
+        {{else}}
+          {{.SummaryHTML}}
+        {{end}}
       </div>
     </article>
   </aside>
@@ -81,7 +85,11 @@
         <p class="content-panel-meta">{{.PublishedDisplay}}</p>
       </header>
       <div class="content-panel-body">
-        {{.ContentHTML}}
+        {{if .HasContent}}
+          {{.ContentHTML}}
+        {{else}}
+          {{.SummaryHTML}}
+        {{end}}
       </div>
     </article>
   </aside>

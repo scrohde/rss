@@ -24,14 +24,15 @@ const (
 )
 
 type smokeFixture struct {
-	primaryFeedID         int64
-	archiveFeedID         int64
-	secondaryFeedID       int64
-	tertiaryFeedID        int64
-	quaternaryFeedID      int64
-	primaryFirstItemID    int64
-	secondaryFirstItemID  int64
-	secondarySecondItemID int64
+	primaryFeedID          int64
+	archiveFeedID          int64
+	secondaryFeedID        int64
+	tertiaryFeedID         int64
+	quaternaryFeedID       int64
+	primaryFirstItemID     int64
+	secondaryFirstItemID   int64
+	secondarySecondItemID  int64
+	secondarySummaryItemID int64
 }
 
 func TestBrowserSmokeReaderFlows(t *testing.T) {
@@ -52,6 +53,7 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
 
 	runFeedSelectionFlow(t, ctx, fixture)
+	runSummaryOnlyDesktopReaderFlow(t, ctx, fixture)
 	runMoreTogglePersistenceFlow(t, ctx, fixture)
 	runFeedToItemsOutlineEntryFlow(t, ctx, fixture)
 	runContentToItemsOutlineEntryFlow(t, ctx, fixture)
@@ -229,6 +231,12 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	mustUpsertItems(t, app, secondaryFeedID, []*gofeed.Item{
 		newSmokeItem("Secondary One", "https://example.com/s1", "secondary-1", base),
 		newSmokeItem("Secondary Two", "https://example.com/s2", "secondary-2", base.Add(-time.Hour)),
+		newSmokeSummaryOnlyItem(
+			"Secondary Summary Only",
+			"https://example.com/s3",
+			"secondary-3",
+			base.Add(-2*time.Hour),
+		),
 	})
 	mustUpsertItems(t, app, tertiaryFeedID, []*gofeed.Item{
 		newSmokeItem("Tertiary One", "https://example.com/t1", "tertiary-1", base.Add(-2*time.Hour)),
@@ -241,17 +249,18 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	assertItemCount(t, primaryItems, 1)
 
 	secondaryItems := mustListItems(t, app, secondaryFeedID)
-	assertItemCount(t, secondaryItems, 2)
+	assertItemCount(t, secondaryItems, 3)
 
 	return smokeFixture{
-		primaryFeedID:         primaryFeedID,
-		archiveFeedID:         archiveFeedID,
-		secondaryFeedID:       secondaryFeedID,
-		tertiaryFeedID:        tertiaryFeedID,
-		quaternaryFeedID:      quaternaryFeedID,
-		primaryFirstItemID:    primaryItems[0].ID,
-		secondaryFirstItemID:  secondaryItems[0].ID,
-		secondarySecondItemID: secondaryItems[1].ID,
+		primaryFeedID:          primaryFeedID,
+		archiveFeedID:          archiveFeedID,
+		secondaryFeedID:        secondaryFeedID,
+		tertiaryFeedID:         tertiaryFeedID,
+		quaternaryFeedID:       quaternaryFeedID,
+		primaryFirstItemID:     primaryItems[0].ID,
+		secondaryFirstItemID:   secondaryItems[0].ID,
+		secondarySecondItemID:  secondaryItems[1].ID,
+		secondarySummaryItemID: secondaryItems[2].ID,
 	}
 }
 
@@ -262,6 +271,16 @@ func newSmokeItem(title, link, guid string, publishedAt time.Time) *gofeed.Item 
 		GUID:            guid,
 		Description:     fmt.Sprintf("<p>%s summary</p>", title),
 		Content:         fmt.Sprintf("<p>%s content</p>", title),
+		PublishedParsed: timePtr(publishedAt),
+	}
+}
+
+func newSmokeSummaryOnlyItem(title, link, guid string, publishedAt time.Time) *gofeed.Item {
+	return &gofeed.Item{
+		Title:           title,
+		Link:            link,
+		GUID:            guid,
+		Description:     `<div><h2>Summary-only heading</h2><p>Summary-only fallback preview.</p><img src="https://example.com/summary.jpg" alt="summary image"></div>`,
 		PublishedParsed: timePtr(publishedAt),
 	}
 }
@@ -747,6 +766,23 @@ func runExpandCollapseFlow(t *testing.T, ctx context.Context, fixture smokeFixtu
 	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "closed content panel")
 }
 
+func runSummaryOnlyDesktopReaderFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	rowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySummaryItemID)
+	itemID := fixture.secondarySummaryItemID
+
+	waitForJS(t, ctx, elementPresentExpression(rowSelector), "summary-only row present in desktop list")
+	waitForJS(t, ctx, textPresentExpression("Summary-only heading Summary-only fallback preview."), "summary-only compact preview text")
+	waitForJS(t, ctx, elementAbsentExpression(rowSelector+" .item-summary h2"), "summary-only compact row heading markup removed")
+	waitForJS(t, ctx, elementAbsentExpression(rowSelector+" .item-summary img"), "summary-only compact row image removed")
+
+	clickElement(t, ctx, rowSelector, "open summary-only compact row")
+	waitForJS(t, ctx, hasClassExpression(rowSelector, "is-expanded"), "summary-only row expanded")
+	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "summary-only content panel opened")
+	waitForJS(t, ctx, contentPanelItemExpression(itemID), "summary-only content panel item")
+}
+
 func runFeedToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	t.Helper()
 
@@ -1059,6 +1095,13 @@ func mobileFilterValueExpression(feedID int64) string {
 func elementPresentExpression(selector string) string {
 	return fmt.Sprintf(
 		`(() => !!document.querySelector(%q))()`,
+		selector,
+	)
+}
+
+func elementAbsentExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => !document.querySelector(%q))()`,
 		selector,
 	)
 }

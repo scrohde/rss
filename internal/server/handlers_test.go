@@ -1744,6 +1744,69 @@ func TestToggleReadExpandedView(t *testing.T) {
 	assertContentPanelOOBUpdate(t, body)
 }
 
+func TestToggleReadExpandedSummaryOnlyKeepsContentPanelOpen(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Toggle Expanded Summary Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Expanded Summary",
+		Link:            "http://example.com/expanded-summary",
+		GUID:            "expanded-summary",
+		Description:     "<p>Expanded summary-only <strong>article</strong></p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+
+	assertItemCount(t, items, expectedSingleItem)
+
+	form := url.Values{}
+	form.Set("view", "expanded")
+	form.Set(
+		selectedItemIDParam,
+		strconv.FormatInt(items[firstItemIndex].ID, decimalBase),
+	)
+	req := newURLEncodedRequest(
+		fmt.Sprintf("/items/%d/toggle", items[firstItemIndex].ID),
+		form,
+	)
+
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle read status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		"content-panel is-open",
+		"expected expanded summary-only toggle response to keep content panel open",
+	)
+	assertContains(
+		t,
+		body,
+		"Expanded summary-only <strong>article</strong>",
+		"expected expanded summary-only toggle response to render summary HTML in the panel",
+	)
+	assertNotContains(
+		t,
+		body,
+		"content-panel-empty",
+		"expected expanded summary-only toggle response to avoid empty panel fallback",
+	)
+	assertContains(
+		t,
+		body,
+		classIsActive,
+		"expected expanded summary-only toggle response to keep the item active",
+	)
+}
+
 func TestItemExpandedKeepsActiveClass(t *testing.T) {
 	t.Parallel()
 
@@ -1778,6 +1841,53 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 	body := rec.Body.String()
 	assertExpandedItemBody(t, body, items[firstItemIndex].ID)
 	assertContentPanelOOBUpdate(t, body)
+}
+
+func TestItemExpandedSummaryOnlyRendersSummaryFallbackInContentPanel(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Expanded Summary Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Expanded Summary Item",
+		Link:            "http://example.com/expanded-summary-item",
+		GUID:            "expanded-summary-item",
+		Description:     "<p>Expanded summary-only <strong>article</strong></p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+
+	assertItemCount(t, items, expectedSingleItem)
+
+	itemPath := fmt.Sprintf(
+		"/items/%d?selected_item_id=item-%d",
+		items[firstItemIndex].ID,
+		items[firstItemIndex].ID,
+	)
+	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expanded status: %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	assertExpandedItemBody(t, body, items[firstItemIndex].ID)
+	assertContentPanelOOBUpdate(t, body)
+	assertContains(
+		t,
+		body,
+		"Expanded summary-only <strong>article</strong>",
+		"expected expanded summary-only response to render summary HTML in content panel",
+	)
+	assertNotContains(
+		t,
+		body,
+		"content-panel-empty",
+		"expected expanded summary-only response to avoid empty panel fallback",
+	)
 }
 
 func TestItemExpandedRendersPanelActionButtons(t *testing.T) {
@@ -1956,6 +2066,63 @@ func TestItemCompactExpandRequestIncludesSelectedItemID(t *testing.T) {
 		body,
 		`hx-vals='{"selected_item_id":"item-`,
 		"expected compact item expand request to include selected_item_id",
+	)
+}
+
+func TestFeedItemsRenderCompactPreviewForSummaryOnlyItems(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Compact Preview Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title: "Preview Item",
+		Link:  "http://example.com/preview-item",
+		GUID:  "preview-item",
+		Description: `<div><h2>Big heading</h2><p>Alpha <strong>beta</strong> ` +
+			`<a href="/story">gamma</a>.</p><img src="/hero.jpg" alt="hero image"></div>`,
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+
+	assertItemCount(t, items, expectedSingleItem)
+
+	req := httptest.NewRequest(http.MethodGet, feedItemsPath(feedID), http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	assertResponseCode(t, rec, msgFeedItemsStatus)
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		"<p>Big heading Alpha beta gamma.</p>",
+		"expected compact row to render a plain-text preview paragraph",
+	)
+	assertNotContains(
+		t,
+		body,
+		"<h2>Big heading</h2>",
+		"expected compact row to avoid rendering full summary heading markup",
+	)
+	assertNotContains(
+		t,
+		body,
+		`<img src="/hero.jpg" alt="hero image">`,
+		"expected compact row to avoid rendering summary media markup",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-get="/items/%d"`, items[firstItemIndex].ID),
+		"expected summary-only compact row to stay expandable",
+	)
+	assertContains(
+		t,
+		body,
+		`data-has-content="true"`,
+		"expected summary-only compact row to remain readable in app",
 	)
 }
 

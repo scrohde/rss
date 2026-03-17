@@ -1,9 +1,9 @@
 {{define "item_expanded"}}
   <article
-    class="item-entry is-expanded {{if .HasContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
+    class="item-entry is-expanded {{if .HasReaderContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
     id="item-{{.ID}}"
     data-item-id="{{.ID}}"
-    data-has-content="{{if .HasContent}}true{{else}}false{{end}}"
+    data-has-content="{{if .HasReaderContent}}true{{else}}false{{end}}"
   >
     <div
       class="item-row clickable"

@@ -1,6 +1,6 @@
 {{define "item_expanded_response"}}
   {{template "item_expanded" .Item}}
-  {{if .Item.HasContent}}
+  {{if .Item.HasReaderContent}}
     {{template "item_content_panel_oob" .Item}}
   {{end}}
   {{if .CollapseItem}}
