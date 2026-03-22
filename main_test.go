@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -48,6 +49,52 @@ func TestResolveAuthConfigAllowsExplicitInsecureCookieOverride(t *testing.T) {
 
 	if cfg.CookieSecure {
 		t.Fatal("expected explicit AUTH_COOKIE_SECURE=false override")
+	}
+}
+
+func TestResolveAuthConfigRequiresFieldsWhenEnabled(t *testing.T) {
+	testCases := []struct {
+		wantErr    error
+		name       string
+		rpID       string
+		rpOrigin   string
+		setupToken string
+	}{
+		{
+			name:       "rp id",
+			rpID:       "",
+			rpOrigin:   "https://example.com",
+			setupToken: "setup-token",
+			wantErr:    errAuthRPIDRequired,
+		},
+		{
+			name:       "rp origin",
+			rpID:       "example.com",
+			rpOrigin:   "",
+			setupToken: "setup-token",
+			wantErr:    errAuthRPOriginRequired,
+		},
+		{
+			name:       "setup token",
+			rpID:       "example.com",
+			rpOrigin:   "https://example.com",
+			setupToken: "",
+			wantErr:    errAuthSetupTokenMissing,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AUTH_ENABLED", "true")
+			t.Setenv("AUTH_RP_ID", tc.rpID)
+			t.Setenv("AUTH_RP_ORIGIN", tc.rpOrigin)
+			t.Setenv("AUTH_SETUP_TOKEN", tc.setupToken)
+
+			_, err := resolveAuthConfig()
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("expected error %v, got %v", tc.wantErr, err)
+			}
+		})
 	}
 }
 
