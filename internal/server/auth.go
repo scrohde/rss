@@ -912,16 +912,13 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseForm()
-	if err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-
+	if !parseFormOrBadRequest(w, r, "invalid form") {
 		return
 	}
 
 	theme := strings.TrimSpace(r.FormValue("theme"))
 
-	err = store.UpdateAuthOwnerAppearanceTheme(r.Context(), a.db, theme)
+	err := store.UpdateAuthOwnerAppearanceTheme(r.Context(), a.db, theme)
 	if errors.Is(err, store.ErrInvalidAppearanceTheme) {
 		http.Error(w, "invalid appearance theme", http.StatusBadRequest)
 
@@ -1039,10 +1036,7 @@ func (a *App) handleAuthRecovery(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAuthRecoveryUse(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
-	if err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-
+	if !parseFormOrBadRequest(w, r, "invalid request") {
 		return
 	}
 

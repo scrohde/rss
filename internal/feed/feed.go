@@ -239,211 +239,333 @@ func nextRefreshAtForFetchError(
 	return nextRefreshAt
 }
 
-//nolint:cyclop,funlen,gocognit,revive // Branching flow keeps refresh side effects explicit.
+// Refresh fetches a feed, updates stored items, and persists refresh metadata.
 func Refresh(ctx context.Context, db *sql.DB, feedID int64) (int64, error) {
+	state, err := loadRefreshContext(ctx, db, feedID)
+	if err != nil {
+		return zeroFeedID, err
+	}
+
+	robotsErr := enforceRefreshRobotsPolicy(ctx, db, state, time.Now().UTC())
+	if robotsErr != nil {
+		return zeroFeedID, robotsErr
+	}
+
+	phase, err := fetchRefreshPhase(ctx, db, state)
+	if err != nil {
+		return zeroFeedID, err
+	}
+
+	return persistRefreshOutcome(ctx, db, state, &phase)
+}
+
+type refreshContext struct {
+	feedURL string
+	cache   CacheMeta
+	feedID  int64
+}
+
+type refreshFetchPhase struct {
+	result     *FetchResult
+	meta       RefreshMeta
+	durationMS int64
+}
+
+type refreshUpsertResult struct {
+	feedTitle string
+	updatedID int64
+}
+
+func loadRefreshContext(ctx context.Context, db *sql.DB, feedID int64) (refreshContext, error) {
 	feedURL, err := store.GetFeedURL(ctx, db, feedID)
 	if err != nil {
 		slog.Error("refresh feed lookup failed", logFieldFeedID, feedID, logFieldErr, err)
 
-		return zeroFeedID, fmt.Errorf("get feed URL: %w", err)
+		return refreshContext{}, fmt.Errorf("get feed URL: %w", err)
 	}
 
 	cache, err := getFeedCacheMeta(ctx, db, feedID)
 	if err != nil {
-		slog.Error("refresh feed cache lookup failed", logFieldFeedID, feedID, logFieldFeedURL, feedURL, logFieldErr, err)
-
-		return zeroFeedID, err
-	}
-
-	checkedAt := time.Now().UTC()
-
-	robotsResult, robotsErr := checkRobotsPolicy(ctx, feedURL)
-	if robotsErr != nil {
-		slog.Warn(
-			"robots policy check failed",
+		slog.Error(
+			"refresh feed cache lookup failed",
 			logFieldFeedID,
 			feedID,
 			logFieldFeedURL,
 			feedURL,
 			logFieldErr,
+			err,
+		)
+
+		return refreshContext{}, err
+	}
+
+	return refreshContext{
+		feedID:  feedID,
+		feedURL: feedURL,
+		cache:   cache,
+	}, nil
+}
+
+func enforceRefreshRobotsPolicy(
+	ctx context.Context,
+	db *sql.DB,
+	state refreshContext,
+	checkedAt time.Time,
+) error {
+	robotsResult, robotsErr := checkRobotsPolicy(ctx, state.feedURL)
+	if robotsErr != nil {
+		slog.Warn(
+			"robots policy check failed",
+			logFieldFeedID,
+			state.feedID,
+			logFieldFeedURL,
+			state.feedURL,
+			logFieldErr,
 			robotsErr,
 		)
 	}
 
-	if robotsResult.BlockedErr != nil {
-		meta := RefreshMeta{
+	if robotsResult.BlockedErr == nil {
+		return nil
+	}
+
+	meta := RefreshMeta{
+		LastCheckedAt:  checkedAt,
+		NextRefreshAt:  time.Time{},
+		ETag:           "",
+		LastModified:   "",
+		LastError:      truncateString(robotsResult.BlockedErr.Error()),
+		UnchangedCount: state.cache.UnchangedCount + countStep,
+	}
+	meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
+	saveRefreshMetaBestEffort(ctx, db, state.feedID, &meta)
+	slog.Warn(
+		"refresh skipped by robots policy",
+		logFieldFeedID,
+		state.feedID,
+		logFieldFeedURL,
+		state.feedURL,
+		logFieldSkipReason,
+		skipReasonRobotsPolicy,
+		"robots_url",
+		robotsResult.BlockedErr.RobotsURL,
+		"disallow_rule",
+		robotsResult.BlockedErr.DisallowRule,
+	)
+
+	return robotsResult.BlockedErr
+}
+
+func fetchRefreshPhase(
+	ctx context.Context,
+	db *sql.DB,
+	state refreshContext,
+) (refreshFetchPhase, error) {
+	start := time.Now()
+	result, err := Fetch(ctx, state.feedURL, state.cache.ETag, state.cache.LastModified)
+	duration := time.Since(start).Milliseconds()
+	checkedAt := time.Now().UTC()
+	phase := refreshFetchPhase{
+		result:     result,
+		durationMS: duration,
+		meta: RefreshMeta{
 			LastCheckedAt:  checkedAt,
 			NextRefreshAt:  time.Time{},
 			ETag:           "",
 			LastModified:   "",
-			LastError:      truncateString(robotsResult.BlockedErr.Error()),
-			UnchangedCount: cache.UnchangedCount + countStep,
-		}
-		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
-		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
-		slog.Warn(
-			"refresh skipped by robots policy",
-			logFieldFeedID,
-			feedID,
-			logFieldFeedURL,
-			feedURL,
-			logFieldSkipReason,
-			skipReasonRobotsPolicy,
-			"robots_url",
-			robotsResult.BlockedErr.RobotsURL,
-			"disallow_rule",
-			robotsResult.BlockedErr.DisallowRule,
-		)
-
-		return zeroFeedID, robotsResult.BlockedErr
+			LastError:      "",
+			UnchangedCount: countReset,
+		},
 	}
 
-	start := time.Now()
-	result, err := Fetch(ctx, feedURL, cache.ETag, cache.LastModified)
-	duration := time.Since(start).Milliseconds()
-	checkedAt = time.Now().UTC()
-
-	var meta RefreshMeta
-
-	meta.LastCheckedAt = checkedAt
-
 	if err != nil {
-		meta.LastError = truncateString(err.Error())
-		meta.UnchangedCount = cache.UnchangedCount + countStep
-		meta.NextRefreshAt = nextRefreshAtForFetchError(
+		phase.meta.LastError = truncateString(err.Error())
+		phase.meta.UnchangedCount = state.cache.UnchangedCount + countStep
+		phase.meta.NextRefreshAt = nextRefreshAtForFetchError(
 			checkedAt,
-			meta.UnchangedCount,
+			phase.meta.UnchangedCount,
 			err,
 		)
-		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
+		saveRefreshMetaBestEffort(ctx, db, state.feedID, &phase.meta)
 		slog.Error("refresh feed fetch failed",
-			logFieldFeedID, feedID,
-			logFieldFeedURL, feedURL,
+			logFieldFeedID, state.feedID,
+			logFieldFeedURL, state.feedURL,
 			"duration_ms", duration,
 			logFieldErr, err,
 		)
 
-		return zeroFeedID, err
+		return refreshFetchPhase{}, err
 	}
 
-	meta.LastError = ""
-	meta.ETag = chooseHeader(result.ETag, cache.ETag)
-	meta.LastModified = chooseHeader(result.LastModified, cache.LastModified)
+	phase.meta.ETag = chooseHeader(result.ETag, state.cache.ETag)
+	phase.meta.LastModified = chooseHeader(result.LastModified, state.cache.LastModified)
+
+	return phase, nil
+}
+
+func persistRefreshOutcome(
+	ctx context.Context,
+	db *sql.DB,
+	state refreshContext,
+	phase *refreshFetchPhase,
+) (int64, error) {
+	meta := phase.meta
+	result := phase.result
 
 	if result.NotModified {
-		meta.UnchangedCount = cache.UnchangedCount + countStep
+		meta.UnchangedCount = state.cache.UnchangedCount + countStep
+		meta.NextRefreshAt = NextRefreshAt(meta.LastCheckedAt, meta.UnchangedCount)
 
-		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
-
-		updateErr := updateFeedRefreshMeta(ctx, db, feedID, &meta)
+		updateErr := updateFeedRefreshMeta(ctx, db, state.feedID, &meta)
 		if updateErr != nil {
 			return zeroFeedID, updateErr
 		}
 
 		slog.Info("refresh feed cache hit",
-			logFieldFeedID, feedID,
-			logFieldFeedURL, feedURL,
+			logFieldFeedID, state.feedID,
+			logFieldFeedURL, state.feedURL,
 			"status", result.StatusCode,
-			"duration_ms", duration,
+			"duration_ms", phase.durationMS,
 		)
 
-		return feedID, nil
+		return state.feedID, nil
 	}
 
 	if result.Feed == nil {
 		meta.LastError = "feed returned no content"
 		meta.UnchangedCount = countReset
-		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
-		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
+		meta.NextRefreshAt = NextRefreshAt(meta.LastCheckedAt, meta.UnchangedCount)
+		saveRefreshMetaBestEffort(ctx, db, state.feedID, &meta)
 		slog.Warn("refresh feed returned no content",
-			logFieldFeedID, feedID,
-			logFieldFeedURL, feedURL,
+			logFieldFeedID, state.feedID,
+			logFieldFeedURL, state.feedURL,
 			"status", result.StatusCode,
 		)
 
 		return zeroFeedID, errFeedReturnedNoContent
 	}
 
-	feedTitle := strings.TrimSpace(result.Feed.Title)
-	if feedTitle == "" {
-		feedTitle = feedURL
+	return persistRefreshFeed(ctx, db, state, phase)
+}
+
+func persistRefreshFeed(
+	ctx context.Context,
+	db *sql.DB,
+	state refreshContext,
+	phase *refreshFetchPhase,
+) (int64, error) {
+	meta := phase.meta
+	result := phase.result
+
+	upserted, err := upsertRefreshFeedRecord(ctx, db, state, &meta, result)
+	if err != nil {
+		return zeroFeedID, err
 	}
 
-	updatedID, err := store.UpsertFeed(
-		ctx,
-		db,
-		feedURL,
-		feedTitle,
+	inserted, err := upsertRefreshItems(ctx, db, state, &meta, upserted.updatedID, result.Feed.Items)
+	if err != nil {
+		return zeroFeedID, err
+	}
+
+	if inserted == countReset {
+		meta.UnchangedCount = state.cache.UnchangedCount + countStep
+	} else {
+		meta.UnchangedCount = countReset
+	}
+
+	meta.NextRefreshAt = NextRefreshAt(meta.LastCheckedAt, meta.UnchangedCount)
+
+	updateErr := updateFeedRefreshMeta(ctx, db, upserted.updatedID, &meta)
+	if updateErr != nil {
+		return zeroFeedID, updateErr
+	}
+
+	slog.Info("refresh feed updated",
+		"feed_id", upserted.updatedID,
+		"feed_url", state.feedURL,
+		"title", upserted.feedTitle,
+		"status", result.StatusCode,
+		"items_in_feed", len(result.Feed.Items),
+		"items_new", inserted,
+		"duration_ms", phase.durationMS,
 	)
+
+	return upserted.updatedID, nil
+}
+
+func upsertRefreshFeedRecord(
+	ctx context.Context,
+	db *sql.DB,
+	state refreshContext,
+	meta *RefreshMeta,
+	result *FetchResult,
+) (refreshUpsertResult, error) {
+	feedTitle := strings.TrimSpace(result.Feed.Title)
+	if feedTitle == "" {
+		feedTitle = state.feedURL
+	}
+
+	updatedID, err := store.UpsertFeed(ctx, db, state.feedURL, feedTitle)
 	if err != nil {
 		meta.LastError = truncateString(err.Error())
-		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
+		saveRefreshMetaBestEffort(ctx, db, state.feedID, meta)
 		slog.Error(
 			"refresh upsert feed failed",
-			logFieldFeedID, feedID,
-			logFieldFeedURL, feedURL,
+			logFieldFeedID, state.feedID,
+			logFieldFeedURL, state.feedURL,
 			logFieldErr, err,
 		)
 
-		return zeroFeedID, fmt.Errorf("upsert feed: %w", err)
+		return refreshUpsertResult{}, fmt.Errorf("upsert feed: %w", err)
 	}
 
-	inserted, err := store.UpsertItems(ctx, db, updatedID, result.Feed.Items)
+	return refreshUpsertResult{
+		updatedID: updatedID,
+		feedTitle: feedTitle,
+	}, nil
+}
+
+func upsertRefreshItems(
+	ctx context.Context,
+	db *sql.DB,
+	state refreshContext,
+	meta *RefreshMeta,
+	updatedID int64,
+	items []*gofeed.Item,
+) (int, error) {
+	inserted, err := store.UpsertItems(ctx, db, updatedID, items)
 	if err != nil {
 		meta.LastError = truncateString(err.Error())
 		meta.UnchangedCount = countReset
-		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
-		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
+		meta.NextRefreshAt = NextRefreshAt(meta.LastCheckedAt, meta.UnchangedCount)
+		saveRefreshMetaBestEffort(ctx, db, state.feedID, meta)
 		slog.Error(
 			"refresh upsert items failed",
-			logFieldFeedID, feedID,
-			logFieldFeedURL, feedURL,
+			logFieldFeedID, state.feedID,
+			logFieldFeedURL, state.feedURL,
 			logFieldErr, err,
 		)
 
-		return zeroFeedID, fmt.Errorf("upsert items: %w", err)
+		return countReset, fmt.Errorf("upsert items: %w", err)
 	}
 
 	enforceErr := store.EnforceItemLimit(ctx, db, updatedID)
 	if enforceErr != nil {
 		meta.LastError = truncateString(enforceErr.Error())
 		meta.UnchangedCount = countReset
-		meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
-		saveRefreshMetaBestEffort(ctx, db, feedID, &meta)
+		meta.NextRefreshAt = NextRefreshAt(meta.LastCheckedAt, meta.UnchangedCount)
+		saveRefreshMetaBestEffort(ctx, db, state.feedID, meta)
 		slog.Error(
 			"refresh enforce item limit failed",
-			logFieldFeedID, feedID,
-			logFieldFeedURL, feedURL,
+			logFieldFeedID, state.feedID,
+			logFieldFeedURL, state.feedURL,
 			logFieldErr, enforceErr,
 		)
 
-		return zeroFeedID, fmt.Errorf("enforce item limit: %w", enforceErr)
+		return countReset, fmt.Errorf("enforce item limit: %w", enforceErr)
 	}
 
-	if inserted == countReset {
-		meta.UnchangedCount = cache.UnchangedCount + countStep
-	} else {
-		meta.UnchangedCount = countReset
-	}
-
-	meta.NextRefreshAt = NextRefreshAt(checkedAt, meta.UnchangedCount)
-
-	updateErr := updateFeedRefreshMeta(ctx, db, updatedID, &meta)
-	if updateErr != nil {
-		return zeroFeedID, updateErr
-	}
-
-	slog.Info("refresh feed updated",
-		"feed_id", updatedID,
-		"feed_url", feedURL,
-		"title", feedTitle,
-		"status", result.StatusCode,
-		"items_in_feed", len(result.Feed.Items),
-		"items_new", inserted,
-		"duration_ms", duration,
-	)
-
-	return updatedID, nil
+	return inserted, nil
 }
 
 func setConditionalHeaders(req *http.Request, etag, lastModified string) {
