@@ -135,6 +135,9 @@ const setMarkAllReadGuardArmed = (guard, armed, options = {}) => {
   panel.hidden = !nextArmed;
 
   if (nextArmed) {
+    if (typeof htmx !== "undefined" && typeof htmx.process === "function") {
+      htmx.process(panel);
+    }
     if (confirmButton) {
       confirmButton.focus({ preventScroll: true });
     }
