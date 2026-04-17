@@ -2144,6 +2144,63 @@ func TestFeedItemsRenderCompactPreviewForSummaryOnlyItems(t *testing.T) {
 	)
 }
 
+func TestFeedItemsRenderNoPreviewCompactRowsWithPublishedMeta(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "No Preview Feed")
+	published := time.Date(2026, time.April, 16, 12, 30, 0, 0, time.UTC)
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "A long content-only story title that should keep its scan rhythm without a summary preview",
+		Link:            "http://example.com/no-preview-item",
+		GUID:            "no-preview-item",
+		Content:         "<p>Full content body without a summary.</p>",
+		PublishedParsed: &published,
+	}})
+	items := mustListItems(t, app, feedID)
+
+	assertItemCount(t, items, expectedSingleItem)
+
+	req := httptest.NewRequest(http.MethodGet, feedItemsPath(feedID), http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	assertResponseCode(t, rec, msgFeedItemsStatus)
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		`item-entry-no-preview`,
+		"expected content-only compact row to opt into the no-preview styling variant",
+	)
+	assertContains(
+		t,
+		body,
+		`<div class="item-meta item-meta-compact">`,
+		"expected content-only compact row to render a compact metadata subline",
+	)
+	assertContains(
+		t,
+		body,
+		view.FormatTime(published),
+		"expected content-only compact row to show the published timestamp in the metadata subline",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-get="/items/%d"`, items[firstItemIndex].ID),
+		"expected content-only compact row to remain expandable",
+	)
+	assertNotContains(
+		t,
+		body,
+		`<div class="item-summary">`,
+		"expected content-only compact row to omit the summary block when no compact preview exists",
+	)
+}
+
 func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
 	t.Parallel()
 

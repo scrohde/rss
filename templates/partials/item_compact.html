@@ -1,6 +1,6 @@
 {{define "item_compact"}}
   <article
-    class="item-entry item-entry-compact {{if .HasReaderContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
+    class="item-entry item-entry-compact {{if not .CompactPreview}}item-entry-no-preview{{end}} {{if .HasReaderContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
     id="item-{{.ID}}"
     data-item-id="{{.ID}}"
     data-has-content="{{if .HasReaderContent}}true{{else}}false{{end}}"
@@ -22,6 +22,12 @@
           </a>
           {{if .HasReaderContent}}
             <span class="item-inline-open-hint">Read inline</span>
+          {{end}}
+          {{if not .CompactPreview}}
+            <div class="item-meta item-meta-compact">
+              <span class="item-meta-label">Published</span>
+              <span>{{.PublishedDisplay}}</span>
+            </div>
           {{end}}
         </div>
         <span class="item-time-badge" title="{{.PublishedDisplay}}">
@@ -45,7 +51,7 @@
 
 {{define "item_compact_oob"}}
   <article
-    class="item-entry item-entry-compact {{if .HasReaderContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
+    class="item-entry item-entry-compact {{if not .CompactPreview}}item-entry-no-preview{{end}} {{if .HasReaderContent}}has-content{{end}} {{if .IsRead}}is-read{{end}} {{if .IsActive}}is-active{{end}}"
     id="item-{{.ID}}"
     data-item-id="{{.ID}}"
     data-has-content="{{if .HasReaderContent}}true{{else}}false{{end}}"
@@ -68,6 +74,12 @@
           </a>
           {{if .HasReaderContent}}
             <span class="item-inline-open-hint">Read inline</span>
+          {{end}}
+          {{if not .CompactPreview}}
+            <div class="item-meta item-meta-compact">
+              <span class="item-meta-label">Published</span>
+              <span>{{.PublishedDisplay}}</span>
+            </div>
           {{end}}
         </div>
         <span class="item-time-badge" title="{{.PublishedDisplay}}">
