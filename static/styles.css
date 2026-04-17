@@ -1437,6 +1437,35 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   flex: 0 0 auto;
 }
 
+.mark-all-read-guard {
+  display: flex;
+  align-items: center;
+}
+
+.mark-all-read-guard.is-armed [data-mark-all-read-arm] {
+  display: none;
+}
+
+.mark-all-read-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.mark-all-read-confirm[hidden] {
+  display: none;
+}
+
+.mark-all-read-confirm-text {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .chip {
   border: none;
   background: var(--accent);
@@ -2201,6 +2230,15 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 
   .item-actions {
     justify-content: flex-start;
+  }
+
+  .mark-all-read-confirm {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .mark-all-read-confirm-text {
+    width: 100%;
   }
 
   .topbar-shortcuts-subscribe-form {

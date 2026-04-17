@@ -533,8 +533,9 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	secondaryFirstSelectedID := fmt.Sprintf("item-%d", fixture.secondaryFirstItemID)
 	secondarySecondSelectedID := fmt.Sprintf("item-%d", fixture.secondarySecondItemID)
 	secondarySummarySelectedID := fmt.Sprintf("item-%d", fixture.secondarySummaryItemID)
-	tertiaryMarkAllSelector := fmt.Sprintf(
-		`.item-actions button[hx-post="/feeds/%d/items/read"]`,
+	tertiaryMarkAllArmSelector := `.item-actions button[data-mark-all-read-arm]`
+	tertiaryMarkAllConfirmSelector := fmt.Sprintf(
+		`.item-actions button[data-mark-all-read-confirm][hx-post="/feeds/%d/items/read"]`,
 		fixture.tertiaryFeedID,
 	)
 
@@ -605,7 +606,14 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	waitForJS(t, ctx, elementPresentExpression(tertiaryListSelector), "tertiary items loaded before mark-all")
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focused on tertiary feed")
 
-	runActions(t, ctx, chromedp.Click(tertiaryMarkAllSelector, chromedp.ByQuery))
+	runActions(t, ctx, chromedp.Click(tertiaryMarkAllArmSelector, chromedp.ByQuery))
+	waitForJS(
+		t,
+		ctx,
+		elementVisibleExpression(tertiaryMarkAllConfirmSelector),
+		"mark-all-read confirm shown after arming",
+	)
+	runActions(t, ctx, chromedp.Click(tertiaryMarkAllConfirmSelector, chromedp.ByQuery))
 	waitForJS(
 		t,
 		ctx,
@@ -1149,6 +1157,16 @@ func elementHiddenExpression(selector string) string {
 		`(() => {
 			const el = document.querySelector(%q);
 			return !!el && el.getClientRects().length === 0;
+		})()`,
+		selector,
+	)
+}
+
+func elementVisibleExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const el = document.querySelector(%q);
+			return !!el && el.getClientRects().length > 0;
 		})()`,
 		selector,
 	)

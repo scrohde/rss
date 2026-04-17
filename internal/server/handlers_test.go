@@ -2282,6 +2282,31 @@ func TestMarkAllRead(t *testing.T) {
 	assertAllItemsRead(t, app, feedID)
 }
 
+func TestFeedItemsRenderMarkAllReadGuard(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, itemLimitFeedTitle)
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Guarded bulk action",
+		"http://example.com/guarded",
+		"guarded-bulk-action",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	rec := getRequest(app, fmt.Sprintf("/feeds/%d/items", feedID))
+	assertResponseCode(t, rec, msgFeedItemsStatus)
+
+	body := rec.Body.String()
+	assertContains(t, body, `data-mark-all-read-arm`, "expected mark-all-read arm control")
+	assertContains(t, body, `data-mark-all-read-cancel`, "expected mark-all-read cancel control")
+	assertContains(t, body, `data-mark-all-read-confirm`, "expected mark-all-read confirm control")
+	assertContains(t, body, "Mark all unread items as read?", "expected mark-all-read confirmation copy")
+}
+
 func TestSweepReadItems(t *testing.T) {
 	t.Parallel()
 

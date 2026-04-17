@@ -28,9 +28,35 @@
         </div>
       </div>
       <div class="item-actions">
-        <button class="chip ghost" hx-post="/feeds/{{.Feed.ID}}/items/read" hx-target="closest section" hx-swap="outerHTML">
-          Mark all read
-        </button>
+        <div class="mark-all-read-guard" data-mark-all-read-guard>
+          <button
+            class="chip ghost"
+            type="button"
+            data-mark-all-read-arm
+            aria-expanded="false"
+            aria-controls="mark-all-read-confirm-{{.Feed.ID}}"
+          >
+            Mark all read
+          </button>
+          <div
+            class="mark-all-read-confirm"
+            id="mark-all-read-confirm-{{.Feed.ID}}"
+            data-mark-all-read-panel
+            hidden
+          >
+            <span class="mark-all-read-confirm-text">Mark all unread items as read?</span>
+            <button class="chip ghost" type="button" data-mark-all-read-cancel>Cancel</button>
+            <button
+              class="chip"
+              data-mark-all-read-confirm
+              hx-post="/feeds/{{.Feed.ID}}/items/read"
+              hx-target="closest section"
+              hx-swap="outerHTML"
+            >
+              Confirm
+            </button>
+          </div>
+        </div>
         <button
           class="items-sweep-button"
           type="button"
