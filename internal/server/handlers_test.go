@@ -2144,6 +2144,41 @@ func TestFeedItemsRenderCompactPreviewForSummaryOnlyItems(t *testing.T) {
 	)
 }
 
+func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Affordance Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Affordance Item",
+		Link:            "http://example.com/affordance-item",
+		GUID:            "affordance-item",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+
+	req := httptest.NewRequest(http.MethodGet, feedItemsPath(feedID), http.NoBody)
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	assertResponseCode(t, rec, msgFeedItemsStatus)
+
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		`<span class="item-title-open-indicator" aria-hidden="true">Source</span>`,
+		"expected item rows to label the title as the source-open target",
+	)
+	assertContains(
+		t,
+		body,
+		`<span class="item-inline-open-hint">Read inline</span>`,
+		"expected content rows to render an inline-read hint",
+	)
+}
+
 func TestToggleReadAndCleanup(t *testing.T) {
 	t.Parallel()
 

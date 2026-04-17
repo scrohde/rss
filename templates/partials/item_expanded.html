@@ -14,7 +14,16 @@
       data-item-compact="true"
     >
       <div class="item-title-row">
-        <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
+        <div class="item-title-wrap">
+          <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">
+            <span class="item-title-text">{{.Title}}</span>
+            <span class="item-title-open-indicator" aria-hidden="true">Source</span>
+            <span class="sr-only">Open original article in a new tab.</span>
+          </a>
+          {{if .HasReaderContent}}
+            <span class="item-inline-open-hint">Read inline</span>
+          {{end}}
+        </div>
         <span class="item-time-badge" title="{{.PublishedDisplay}}">
           {{.PublishedCompact}}
           <span class="sr-only">Published {{.PublishedDisplay}}</span>

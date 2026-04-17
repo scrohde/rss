@@ -1337,25 +1337,85 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 
 .item-title-row {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 8px;
   flex: 1;
   min-width: 0;
 }
 
+.item-title-wrap {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
   color: var(--accent-2);
   text-decoration: none;
   line-height: 1.4;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.item-title-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.item-title-open-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid rgba(15, 118, 110, 0.2);
+  border-radius: 999px;
+  color: rgba(15, 118, 110, 0.8);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 0 0 auto;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.item-title-open-indicator::after {
+  content: "↗";
+  font-size: 11px;
+  line-height: 1;
+}
+
 .item-title:hover {
   text-decoration: underline;
+}
+
+.item-title:hover .item-title-open-indicator,
+.item-title:focus-visible .item-title-open-indicator {
+  background: rgba(15, 118, 110, 0.1);
+  border-color: rgba(15, 118, 110, 0.35);
+  color: var(--accent);
+}
+
+.item-inline-open-hint {
+  color: rgba(100, 116, 139, 0.8);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: color 0.18s ease;
+}
+
+.item-entry.has-content:hover .item-inline-open-hint,
+.item-entry.has-content:focus-within .item-inline-open-hint,
+.item-entry.is-active .item-inline-open-hint,
+.item-entry.is-expanded .item-inline-open-hint {
+  color: var(--accent);
 }
 
 .item-time-badge {
@@ -2133,6 +2193,10 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 
   .item-title-row {
     width: 100%;
+  }
+
+  .item-title {
+    flex-wrap: wrap;
   }
 
   .item-actions {
