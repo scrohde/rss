@@ -526,10 +526,13 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	quaternaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.quaternaryFeedID)
 	secondaryFirstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 	secondarySecondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
+	secondarySummaryRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySummaryItemID)
 	secondaryFirstRowTarget := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
 	secondarySecondRowTarget := fmt.Sprintf("#item-%d", fixture.secondarySecondItemID)
+	secondarySummaryRowTarget := fmt.Sprintf("#item-%d", fixture.secondarySummaryItemID)
 	secondaryFirstSelectedID := fmt.Sprintf("item-%d", fixture.secondaryFirstItemID)
 	secondarySecondSelectedID := fmt.Sprintf("item-%d", fixture.secondarySecondItemID)
+	secondarySummarySelectedID := fmt.Sprintf("item-%d", fixture.secondarySummaryItemID)
 	tertiaryMarkAllSelector := fmt.Sprintf(
 		`.item-actions button[hx-post="/feeds/%d/items/read"]`,
 		fixture.tertiaryFeedID,
@@ -569,6 +572,17 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 		secondarySecondSelectedID,
 	)
 	waitForJS(t, ctx, hasClassExpression(secondarySecondRowSelector, "is-read"), "secondary second row marked read")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/items/%d/toggle", fixture.secondarySummaryItemID),
+		secondarySummaryRowTarget,
+		secondarySummarySelectedID,
+	)
+	waitForJS(t, ctx, hasClassExpression(secondarySummaryRowSelector, "is-read"), "secondary summary row marked read")
+
 	waitForJS(
 		t,
 		ctx,
