@@ -153,6 +153,8 @@ func (a *App) buildSubscribeResponseData(
 		return subscribeResponseData{}, fmt.Errorf("load feed items: %w", err)
 	}
 
+	itemList = a.attachMarkAllReadUndo(itemList)
+
 	return subscribeResponseData{
 		Message:        "",
 		MessageClass:   "",
@@ -426,7 +428,7 @@ func (a *App) feedEditSelection(
 		return 0, nil, fmt.Errorf("load item list for feed %d: %w", nextFeedID, err)
 	}
 
-	return nextFeedID, itemList, nil
+	return nextFeedID, a.attachMarkAllReadUndo(itemList), nil
 }
 
 func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
@@ -437,6 +439,7 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.clearMarkAllReadUndoExcept(feedID)
 	a.renderItemListResponse(w, r, feedID)
 }
 
@@ -646,14 +649,56 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := store.MarkAllRead(r.Context(), a.db, feedID)
+	unreadItemIDs, err := store.MarkAllReadWithUndo(r.Context(), a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to update items", http.StatusInternalServerError)
 
 		return
 	}
 
+	_, err = a.storeMarkAllReadUndo(feedID, unreadItemIDs)
+	if err != nil {
+		http.Error(w, "failed to prepare undo", http.StatusInternalServerError)
+
+		return
+	}
+
 	slog.Info("feed items marked read", "feed_id", feedID)
+
+	a.renderItemListResponse(w, r, feedID)
+}
+
+//nolint:gosec // Undo logs include request-derived feed IDs for operational visibility.
+func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	if !parseFormOrBadRequest(w, r, "failed to parse undo request") {
+		return
+	}
+
+	token := strings.TrimSpace(r.FormValue("undo_token"))
+	if token == "" {
+		a.renderItemListResponse(w, r, feedID)
+
+		return
+	}
+
+	unreadItemIDs, ok := a.consumeMarkAllReadUndo(feedID, token)
+	if ok {
+		err := store.MarkItemsUnread(r.Context(), a.db, feedID, unreadItemIDs)
+		if err != nil {
+			http.Error(w, "failed to restore items", http.StatusInternalServerError)
+
+			return
+		}
+
+		slog.Info("feed items mark-all undo applied", "feed_id", feedID, "items", len(unreadItemIDs))
+	}
 
 	a.renderItemListResponse(w, r, feedID)
 }
@@ -674,6 +719,7 @@ func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.clearMarkAllReadUndo(feedID)
 	slog.Info("feed read items swept", "feed_id", feedID, "deleted", deleted)
 
 	a.renderItemListResponse(w, r, feedID)
@@ -825,6 +871,8 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
+
+		itemList = a.attachMarkAllReadUndo(itemList)
 	}
 
 	data := itemListResponseData{

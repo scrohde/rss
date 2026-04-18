@@ -53,8 +53,9 @@ type NewItemsData struct {
 
 // ItemListData is template data for a feed and its item list.
 type ItemListData struct {
-	Items    []ItemView
-	Feed     FeedView
-	NewItems NewItemsData
-	NewestID int64
+	MarkAllReadUndoToken string
+	Items                []ItemView
+	Feed                 FeedView
+	NewItems             NewItemsData
+	NewestID             int64
 }

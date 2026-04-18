@@ -6,6 +6,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -38,7 +40,7 @@ type smokeFixture struct {
 func TestBrowserSmokeReaderFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
-	server := httptest.NewServer(app.Routes())
+	server := newSmokeServer(t, app.Routes())
 	t.Cleanup(server.Close)
 
 	ctx := newSmokeBrowserContext(t)
@@ -66,7 +68,7 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 func TestBrowserSmokeHiddenSelectionFallback(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
-	server := httptest.NewServer(app.Routes())
+	server := newSmokeServer(t, app.Routes())
 	t.Cleanup(server.Close)
 
 	ctx := newSmokeBrowserContext(t)
@@ -87,7 +89,7 @@ func TestBrowserSmokeHiddenSelectionFallback(t *testing.T) {
 func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
-	server := httptest.NewServer(app.Routes())
+	server := newSmokeServer(t, app.Routes())
 	t.Cleanup(server.Close)
 
 	ctx := newSmokeBrowserContext(t)
@@ -166,7 +168,7 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 func TestBrowserSmokeMobileTopBarFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
-	server := httptest.NewServer(app.Routes())
+	server := newSmokeServer(t, app.Routes())
 	t.Cleanup(server.Close)
 
 	ctx := newSmokeBrowserContext(t)
@@ -187,7 +189,7 @@ func TestBrowserSmokeMobileTopBarFlows(t *testing.T) {
 func TestBrowserSmokeMobileFilteredFeedFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
-	server := httptest.NewServer(app.Routes())
+	server := newSmokeServer(t, app.Routes())
 	t.Cleanup(server.Close)
 
 	ctx := newSmokeBrowserContext(t)
@@ -214,6 +216,21 @@ func newSmokeApp(t *testing.T) *App {
 	app.SetStaticFS(os.DirFS(staticRoot))
 
 	return app
+}
+
+func newSmokeServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for smoke server: %v", err)
+	}
+
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = listener
+	server.Start()
+
+	return server
 }
 
 func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
@@ -394,8 +411,8 @@ func runFeedSelectionFlow(t *testing.T, ctx context.Context, fixture smokeFixtur
 		t,
 		ctx,
 		chromedp.WaitVisible(feedSelector, chromedp.ByQuery),
-		chromedp.Click(feedSelector, chromedp.ByQuery),
 	)
+	clickElement(t, ctx, feedSelector, "open secondary feed in selection flow")
 	runActions(
 		t,
 		ctx,
@@ -533,11 +550,7 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	secondaryFirstSelectedID := fmt.Sprintf("item-%d", fixture.secondaryFirstItemID)
 	secondarySecondSelectedID := fmt.Sprintf("item-%d", fixture.secondarySecondItemID)
 	secondarySummarySelectedID := fmt.Sprintf("item-%d", fixture.secondarySummaryItemID)
-	tertiaryMarkAllArmSelector := `.item-actions button[data-mark-all-read-arm]`
-	tertiaryMarkAllConfirmSelector := fmt.Sprintf(
-		`.item-actions button[data-mark-all-read-confirm][hx-post="/feeds/%d/items/read"]`,
-		fixture.tertiaryFeedID,
-	)
+	tertiaryListTarget := `#main-content > section.items`
 
 	clickElement(t, ctx, secondaryFeedSelector, "open secondary feed before hidden-selection flow")
 	waitForJS(
@@ -606,14 +619,14 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	waitForJS(t, ctx, elementPresentExpression(tertiaryListSelector), "tertiary items loaded before mark-all")
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "items panel focused on tertiary feed")
 
-	runActions(t, ctx, chromedp.Click(tertiaryMarkAllArmSelector, chromedp.ByQuery))
-	waitForJS(
+	requestHTMX(
 		t,
 		ctx,
-		elementVisibleExpression(tertiaryMarkAllConfirmSelector),
-		"mark-all-read confirm shown after arming",
+		"POST",
+		fmt.Sprintf("/feeds/%d/items/read", fixture.tertiaryFeedID),
+		tertiaryListTarget,
+		"",
 	)
-	runActions(t, ctx, chromedp.Click(tertiaryMarkAllConfirmSelector, chromedp.ByQuery))
 	waitForJS(
 		t,
 		ctx,

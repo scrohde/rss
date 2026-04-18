@@ -37,7 +37,7 @@ func (a *App) itemListOrError(w http.ResponseWriter, r *http.Request, feedID int
 		return nil, false
 	}
 
-	return itemList, true
+	return a.attachMarkAllReadUndo(itemList), true
 }
 
 func (a *App) pageDataOrError(

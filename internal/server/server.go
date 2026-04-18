@@ -31,22 +31,25 @@ const (
 
 // App wires handlers, dependencies, and background loops for the HTTP server.
 type App struct {
-	staticHandler       http.Handler
-	authManager         *auth.Manager
-	db                  *sql.DB
-	tmpl                *template.Template
-	imageProxyClient    *http.Client
-	imageProxyLookup    content.LookupIPAddrFunc
-	authRateLimiter     *authRateLimiter
-	authCookieName      string
-	authSetupToken      string
-	authSetupCookieName string
-	authSetupSignerKey  []byte
-	refreshMu           sync.Mutex
-	pulseMu             sync.Mutex
-	pulseRunning        bool
-	authEnabled         bool
-	authCookieSecure    bool
+	staticHandler              http.Handler
+	markAllReadUndoByToken     map[string]markAllReadUndoState
+	authManager                *auth.Manager
+	db                         *sql.DB
+	tmpl                       *template.Template
+	imageProxyClient           *http.Client
+	imageProxyLookup           content.LookupIPAddrFunc
+	authRateLimiter            *authRateLimiter
+	markAllReadUndoTokenByFeed map[int64]string
+	authSetupToken             string
+	authSetupCookieName        string
+	authCookieName             string
+	authSetupSignerKey         []byte
+	refreshMu                  sync.Mutex
+	pulseMu                    sync.Mutex
+	markAllReadUndoMu          sync.Mutex
+	pulseRunning               bool
+	authEnabled                bool
+	authCookieSecure           bool
 }
 
 // New constructs an App with default static file and image proxy dependencies.
@@ -67,9 +70,12 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	app.authSetupSignerKey = nil
 	app.refreshMu = sync.Mutex{}
 	app.pulseMu = sync.Mutex{}
+	app.markAllReadUndoMu = sync.Mutex{}
 	app.pulseRunning = false
 	app.authEnabled = false
 	app.authCookieSecure = false
+	app.markAllReadUndoByToken = make(map[string]markAllReadUndoState)
+	app.markAllReadUndoTokenByFeed = make(map[int64]string)
 
 	return app
 }
@@ -121,6 +127,7 @@ func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /feeds/{feedID}/items/new", a.handleFeedItemsNew)
 	mux.HandleFunc("GET /feeds/{feedID}/items/poll", a.handleFeedItemsPoll)
 	mux.HandleFunc("POST /feeds/{feedID}/items/read", a.handleMarkAllRead)
+	mux.HandleFunc("POST /feeds/{feedID}/items/read/undo", a.handleUndoMarkAllRead)
 	mux.HandleFunc("POST /feeds/{feedID}/items/sweep", a.handleSweepRead)
 	mux.HandleFunc("GET /items/{itemID}", a.handleItemExpanded)
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)

@@ -28,34 +28,32 @@
         </div>
       </div>
       <div class="item-actions">
-        <div class="mark-all-read-guard" data-mark-all-read-guard>
+        <div class="mark-all-read-action" data-mark-all-read-action>
           <button
             class="chip ghost"
             type="button"
-            data-mark-all-read-arm
-            aria-expanded="false"
-            aria-controls="mark-all-read-confirm-{{.Feed.ID}}"
+            data-mark-all-read-button
+            {{if .MarkAllReadUndoToken}}hidden{{end}}
+            hx-post="/feeds/{{.Feed.ID}}/items/read"
+            hx-target="closest section"
+            hx-swap="outerHTML"
           >
             Mark all read
           </button>
-          <div
-            class="mark-all-read-confirm"
-            id="mark-all-read-confirm-{{.Feed.ID}}"
-            data-mark-all-read-panel
-            hidden
+          <button
+            class="chip ghost mark-all-read-undo"
+            type="button"
+            data-mark-all-read-undo-button
+            {{if not .MarkAllReadUndoToken}}hidden{{end}}
+            hx-post="/feeds/{{.Feed.ID}}/items/read/undo"
+            hx-target="closest section"
+            hx-swap="outerHTML"
+            {{if .MarkAllReadUndoToken}}
+              hx-vals='{"undo_token":"{{.MarkAllReadUndoToken}}"}'
+            {{end}}
           >
-            <span class="mark-all-read-confirm-text">Mark all unread items as read?</span>
-            <button class="chip ghost" type="button" data-mark-all-read-cancel>Cancel</button>
-            <button
-              class="chip"
-              data-mark-all-read-confirm
-              hx-post="/feeds/{{.Feed.ID}}/items/read"
-              hx-target="closest section"
-              hx-swap="outerHTML"
-            >
-              Confirm
-            </button>
-          </div>
+            Undo
+          </button>
         </div>
         <button
           class="items-sweep-button"

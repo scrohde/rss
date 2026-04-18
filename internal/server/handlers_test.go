@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -504,6 +505,58 @@ func postHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
 	app.Routes().ServeHTTP(rec, req)
 
 	return rec
+}
+
+func extractUndoToken(t *testing.T, body string) string {
+	t.Helper()
+
+	matches := regexp.MustCompile(`"undo_token":"([0-9a-f]+)"`).FindStringSubmatch(body)
+	if len(matches) != expectedTwoItems {
+		t.Fatal("expected undo token in mark-all-read response")
+	}
+
+	return matches[1]
+}
+
+func assertMarkAllReadButtonVisible(t *testing.T, body, message string) {
+	t.Helper()
+
+	assertContains(t, body, `data-mark-all-read-button`, message)
+	assertNotContains(
+		t,
+		body,
+		`data-mark-all-read-button hidden`,
+		"expected mark-all-read button to be visible",
+	)
+}
+
+func assertUndoTokenCleared(t *testing.T, body, message string) {
+	t.Helper()
+
+	assertNotContains(t, body, `undo_token`, message)
+}
+
+func assertUndoRestoresReadStates(
+	t *testing.T,
+	items []view.ItemView,
+	initialReadItemID int64,
+	initialUnreadItemID int64,
+) {
+	t.Helper()
+
+	readStates := make(map[int64]bool, len(items))
+	for idx := range items {
+		item := items[idx]
+		readStates[item.ID] = item.IsRead
+	}
+
+	if !readStates[initialReadItemID] {
+		t.Fatal("expected previously read item to stay read after undo")
+	}
+
+	if readStates[initialUnreadItemID] {
+		t.Fatal("expected previously unread item to be restored to unread after undo")
+	}
 }
 
 func waitForPulseIdle(t *testing.T, app *App) {
@@ -2225,7 +2278,7 @@ func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
 	assertContains(
 		t,
 		body,
-		`<span class="item-title-open-indicator" aria-hidden="true">Source</span>`,
+		`<span class="item-title-open-indicator" aria-hidden="true"></span>`,
 		"expected item rows to label the title as the source-open target",
 	)
 	assertContains(
@@ -2335,11 +2388,137 @@ func TestMarkAllRead(t *testing.T) {
 		fmt.Sprintf("/feeds/%d/items/read", feedID),
 	)
 	assertResponseCode(t, rec, "mark all read status")
+	assertContains(t, rec.Body.String(), `data-mark-all-read-undo-button`, "expected undo control after mark-all-read")
+	assertNotContains(
+		t,
+		rec.Body.String(),
+		`data-mark-all-read-button hidden`,
+		"expected mark-all-read button to be replaced by undo",
+	)
 
 	assertAllItemsRead(t, app, feedID)
 }
 
-func TestFeedItemsRenderMarkAllReadGuard(t *testing.T) {
+func TestMarkAllReadUndo(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, itemLimitFeedTitle)
+
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Item A",
+		Link:            "http://example.com/1",
+		GUID:            "1",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}, {
+		Title:           "Item B",
+		Link:            "http://example.com/2",
+		GUID:            "2",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: new(time.Now().Add(-2 * time.Hour)),
+	}})
+
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, expectedTwoItems)
+	initialReadItemID := items[firstItemIndex].ID
+	initialUnreadItemID := items[expectedOneUnread].ID
+
+	past := time.Now().UTC().Add(-30 * time.Minute)
+	_, err := app.db.ExecContext(
+		context.Background(),
+		sqlUpdateItemReadAt,
+		past,
+		initialReadItemID,
+	)
+	requireNoErr(t, err, "set initial read_at: %v")
+
+	rec := postRequest(app, fmt.Sprintf("/feeds/%d/items/read", feedID))
+	assertResponseCode(t, rec, "mark all read status")
+	assertAllItemsRead(t, app, feedID)
+
+	form := make(url.Values)
+	form.Set("undo_token", extractUndoToken(t, rec.Body.String()))
+
+	undoRec := postFormRequest(app, fmt.Sprintf("/feeds/%d/items/read/undo", feedID), form)
+	assertResponseCode(t, undoRec, "undo mark all read status")
+
+	items = mustListItems(t, app, feedID)
+	assertUndoRestoresReadStates(t, items, initialReadItemID, initialUnreadItemID)
+
+	body := undoRec.Body.String()
+	assertMarkAllReadButtonVisible(t, body, "expected mark-all-read button after undo")
+	assertUndoTokenCleared(t, body, "expected active undo token to clear after undo")
+}
+
+func TestMarkAllReadUndoClearsWhenSwitchingFeeds(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Undo Source")
+	otherFeedID := mustUpsertFeed(t, app, "http://example.com/other", "Other Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Undo me",
+		"http://example.com/undo-me",
+		"undo-me",
+		time.Now().UTC().Add(-time.Hour),
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		otherFeedID,
+		"Other story",
+		"http://example.com/other-story",
+		"other-story",
+		time.Now().UTC().Add(-2*time.Hour),
+	)
+
+	rec := postRequest(app, fmt.Sprintf("/feeds/%d/items/read", feedID))
+	assertResponseCode(t, rec, "mark all read status")
+	assertContains(t, rec.Body.String(), `data-mark-all-read-undo-button`, "expected undo control before feed switch")
+
+	switchedRec := getRequest(app, fmt.Sprintf("/feeds/%d/items", otherFeedID))
+	assertResponseCode(t, switchedRec, msgFeedItemsStatus)
+
+	returnedRec := getRequest(app, fmt.Sprintf("/feeds/%d/items", feedID))
+	assertResponseCode(t, returnedRec, msgFeedItemsStatus)
+
+	body := returnedRec.Body.String()
+	assertMarkAllReadButtonVisible(t, body, "expected mark-all-read button after feed switch")
+	assertUndoTokenCleared(t, body, "expected active undo token to clear after feed switch")
+}
+
+func TestMarkAllReadUndoClearsWhenReadItemsSwept(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, itemLimitFeedTitle)
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Sweep me",
+		"http://example.com/sweep-me",
+		"sweep-me",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	rec := postRequest(app, fmt.Sprintf("/feeds/%d/items/read", feedID))
+	assertResponseCode(t, rec, "mark all read status")
+	assertContains(t, rec.Body.String(), `data-mark-all-read-undo-button`, "expected undo control before sweep")
+
+	sweepRec := postRequest(app, fmt.Sprintf("/feeds/%d/items/sweep", feedID))
+	assertResponseCode(t, sweepRec, "sweep read status")
+
+	body := sweepRec.Body.String()
+	assertMarkAllReadButtonVisible(t, body, "expected mark-all-read button after sweep")
+	assertUndoTokenCleared(t, body, "expected active undo token to clear after sweep")
+}
+
+func TestFeedItemsRenderMarkAllReadAction(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
@@ -2358,10 +2537,10 @@ func TestFeedItemsRenderMarkAllReadGuard(t *testing.T) {
 	assertResponseCode(t, rec, msgFeedItemsStatus)
 
 	body := rec.Body.String()
-	assertContains(t, body, `data-mark-all-read-arm`, "expected mark-all-read arm control")
-	assertContains(t, body, `data-mark-all-read-cancel`, "expected mark-all-read cancel control")
-	assertContains(t, body, `data-mark-all-read-confirm`, "expected mark-all-read confirm control")
-	assertContains(t, body, "Mark all unread items as read?", "expected mark-all-read confirmation copy")
+	assertContains(t, body, `data-mark-all-read-button`, "expected mark-all-read action button")
+	assertContains(t, body, "Mark all read", "expected mark-all-read button label")
+	assertNotContains(t, body, `data-mark-all-read-confirm`, "expected confirmation control to be removed")
+	assertNotContains(t, body, "Mark all unread items as read?", "expected confirmation copy to be removed")
 }
 
 func TestSweepReadItems(t *testing.T) {

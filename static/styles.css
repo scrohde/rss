@@ -1403,22 +1403,18 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 .item-title-open-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 7px;
-  border: 1px solid rgba(15, 118, 110, 0.2);
-  border-radius: 999px;
-  color: rgba(15, 118, 110, 0.8);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  justify-content: center;
+  width: 0.95em;
+  height: 0.95em;
+  margin-top: 0.08em;
+  color: rgba(100, 116, 139, 0.6);
+  font-size: 13px;
   flex: 0 0 auto;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  transition: color 0.2s ease, transform 0.2s ease;
 }
 
 .item-title-open-indicator::after {
   content: "↗";
-  font-size: 11px;
   line-height: 1;
 }
 
@@ -1428,9 +1424,8 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 
 .item-title:hover .item-title-open-indicator,
 .item-title:focus-visible .item-title-open-indicator {
-  background: rgba(15, 118, 110, 0.1);
-  border-color: rgba(15, 118, 110, 0.35);
   color: var(--accent);
+  transform: translate(1px, -1px);
 }
 
 .item-inline-open-hint {
@@ -1467,33 +1462,13 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   flex: 0 0 auto;
 }
 
-.mark-all-read-guard {
+.mark-all-read-action {
   display: flex;
   align-items: center;
 }
 
-.mark-all-read-guard.is-armed [data-mark-all-read-arm] {
-  display: none;
-}
-
-.mark-all-read-confirm {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px 4px 10px;
-  border: 1px solid rgba(15, 118, 110, 0.22);
-  border-radius: 999px;
+.mark-all-read-undo {
   background: rgba(15, 118, 110, 0.08);
-}
-
-.mark-all-read-confirm[hidden] {
-  display: none;
-}
-
-.mark-all-read-confirm-text {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
 }
 
 .chip {
@@ -2287,13 +2262,9 @@ body.is-resizing-content-panel .content-panel-resizer::before {
     justify-content: flex-start;
   }
 
-  .mark-all-read-confirm {
+  .mark-all-read-undo {
     flex-wrap: wrap;
     justify-content: flex-end;
-  }
-
-  .mark-all-read-confirm-text {
-    width: 100%;
   }
 
   .topbar-shortcuts-subscribe-form {

@@ -14,7 +14,6 @@ import {
   getFeedEditForm,
   getSelectedFeedInput,
   isDesktopLayout,
-  isTextEntryTarget,
   isVisible,
 } from "./dom.js";
 import {
@@ -101,61 +100,6 @@ const applyFeedMoreExpandedState = (expanded) => {
 };
 
 export const syncFeedMoreState = () => applyFeedMoreExpandedState(state.feedMoreExpanded);
-
-const getMarkAllReadGuards = () =>
-  Array.from(document.querySelectorAll(".mark-all-read-guard[data-mark-all-read-guard]"));
-
-const markAllReadGuardElements = (guard) => {
-  if (!guard) {
-    return {};
-  }
-
-  return {
-    armButton: guard.querySelector("button[data-mark-all-read-arm]"),
-    cancelButton: guard.querySelector("button[data-mark-all-read-cancel]"),
-    confirmButton: guard.querySelector("button[data-mark-all-read-confirm]"),
-    panel: guard.querySelector("[data-mark-all-read-panel]"),
-  };
-};
-
-const setMarkAllReadGuardArmed = (guard, armed, options = {}) => {
-  const { armButton, confirmButton, panel } = markAllReadGuardElements(guard);
-  if (!armButton || !panel) {
-    return false;
-  }
-
-  const nextArmed = Boolean(armed);
-  const restoreFocus = options.restoreFocus !== false;
-  const activeElement = document.activeElement;
-  const focusReturn =
-    restoreFocus && !nextArmed && activeElement && panel.contains(activeElement);
-
-  guard.classList.toggle("is-armed", nextArmed);
-  armButton.setAttribute("aria-expanded", nextArmed ? "true" : "false");
-  panel.hidden = !nextArmed;
-
-  if (nextArmed) {
-    if (typeof htmx !== "undefined" && typeof htmx.process === "function") {
-      htmx.process(panel);
-    }
-    if (confirmButton) {
-      confirmButton.focus({ preventScroll: true });
-    }
-  } else if (focusReturn) {
-    armButton.focus({ preventScroll: true });
-  }
-
-  return true;
-};
-
-const closeMarkAllReadGuards = (exceptGuard = null, options = {}) => {
-  getMarkAllReadGuards().forEach((guard) => {
-    if (guard === exceptGuard || !guard.classList.contains("is-armed")) {
-      return;
-    }
-    setMarkAllReadGuardArmed(guard, false, options);
-  });
-};
 
 const toggleFeedMoreState = () => {
   state.feedMoreExpanded = !state.feedMoreExpanded;
@@ -733,57 +677,13 @@ export const bindFeedPanelInteractions = () => {
   document.body.dataset.feedPanelInteractionsBound = "true";
 
   document.addEventListener("click", (event) => {
-    const armButton = event.target.closest("button[data-mark-all-read-arm]");
-    if (armButton) {
-      const guard = armButton.closest(".mark-all-read-guard[data-mark-all-read-guard]");
-      if (!guard) {
-        return;
-      }
-      event.preventDefault();
-      closeMarkAllReadGuards(guard, { restoreFocus: false });
-      setMarkAllReadGuardArmed(guard, true);
-      setPanelFocus("items");
-      return;
-    }
-
-    const cancelButton = event.target.closest("button[data-mark-all-read-cancel]");
-    if (cancelButton) {
-      const guard = cancelButton.closest(".mark-all-read-guard[data-mark-all-read-guard]");
-      if (!guard) {
-        return;
-      }
-      event.preventDefault();
-      setMarkAllReadGuardArmed(guard, false);
-      setPanelFocus("items");
-      return;
-    }
-
-    if (!event.target.closest(".mark-all-read-guard[data-mark-all-read-guard]")) {
-      closeMarkAllReadGuards(null, { restoreFocus: false });
-    }
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || isTextEntryTarget(event.target)) {
-      return;
-    }
-
-    const openGuard = getMarkAllReadGuards().find((guard) =>
-      guard.classList.contains("is-armed")
+    const markAllReadButton = event.target.closest(
+      "button[data-mark-all-read-button], button[data-mark-all-read-undo-button]"
     );
-    if (!openGuard) {
+    if (markAllReadButton) {
+      setPanelFocus("items");
       return;
     }
-
-    const activeInsideGuard =
-      event.target instanceof Element && openGuard.contains(event.target);
-    if (!activeInsideGuard) {
-      return;
-    }
-
-    event.preventDefault();
-    setMarkAllReadGuardArmed(openGuard, false);
-    setPanelFocus("items");
   });
 
   document.addEventListener("click", (event) => {
