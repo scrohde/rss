@@ -263,7 +263,6 @@ func fetchRobotsResponse(ctx context.Context, robotsURL string) (*http.Response,
 
 	req.Header.Set("User-Agent", feedUserAgent)
 
-	//nolint:gosec // robotsURL derives from a validated, user-provided subscription host.
 	resp, err := newFeedHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch robots.txt: %w", err)

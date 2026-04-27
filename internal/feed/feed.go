@@ -120,8 +120,6 @@ func NormalizeURL(raw string) (string, error) {
 }
 
 // Fetch retrieves and parses a feed URL with conditional request headers.
-//
-//nolint:gosec // Validated URL fetch path and branchy flow.
 func Fetch(ctx context.Context, feedURL, etag, lastModified string) (*FetchResult, error) {
 	normalizedURL, err := NormalizeURL(feedURL)
 	if err != nil {

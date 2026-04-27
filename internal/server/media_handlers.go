@@ -204,7 +204,6 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 
 	writeImageProxyHeaders(w, resp, result.ContentType, len(result.Body))
 
-	//nolint:gosec // Content is validated as image bytes and served as-is from trusted proxy flow.
 	_, writeErr := w.Write(result.Body)
 	if writeErr != nil {
 		log.Printf("image proxy copy: %v", writeErr)

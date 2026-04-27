@@ -490,7 +490,7 @@ func assertResponseCode(
 }
 
 func postRequest(app *App, target string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, target, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, target, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -498,7 +498,7 @@ func postRequest(app *App, target string) *httptest.ResponseRecorder {
 }
 
 func postHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, target, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, target, http.NoBody)
 	req.Header.Set("Hx-Request", "true")
 
 	rec := httptest.NewRecorder()
@@ -579,7 +579,7 @@ func getRequest(
 	target string,
 	cookies ...*http.Cookie,
 ) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, http.NoBody)
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
@@ -591,7 +591,7 @@ func getRequest(
 }
 
 func getHTMXRequest(app *App, target string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, http.NoBody)
 	req.Header.Set("Hx-Request", "true")
 
 	rec := httptest.NewRecorder()
@@ -1159,7 +1159,7 @@ func newURLEncodedRequest(
 	target string,
 	form url.Values,
 ) *http.Request {
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodPost,
 		target,
 		strings.NewReader(form.Encode()),
@@ -1461,7 +1461,7 @@ func TestSubscribeAndList(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("url", feedURL)
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodPost,
 		"/feeds",
 		strings.NewReader(form.Encode()),
@@ -1514,7 +1514,7 @@ func TestSubscribeBlockedByRobotsPolicy(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("url", feedURL)
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodPost,
 		"/feeds",
 		strings.NewReader(form.Encode()),
@@ -1608,7 +1608,7 @@ func TestFeedItemsUpdatesFeedListSelection(t *testing.T) {
 	otherFeedID := fixtureIDs.otherFeedID
 	selectedFeedID := fixtureIDs.selectedFeedID
 
-	req := httptest.NewRequest(
+	req := httptest.NewRequestWithContext(context.Background(),
 		http.MethodGet,
 		feedItemsPath(selectedFeedID),
 		http.NoBody,
@@ -1888,7 +1888,7 @@ func TestItemExpandedKeepsActiveClass(t *testing.T) {
 		items[firstItemIndex].ID,
 		items[firstItemIndex].ID,
 	)
-	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, itemPath, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -1923,7 +1923,7 @@ func TestItemExpandedSummaryOnlyRendersSummaryFallbackInContentPanel(t *testing.
 		items[firstItemIndex].ID,
 		items[firstItemIndex].ID,
 	)
-	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, itemPath, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -1981,7 +1981,7 @@ func TestItemExpandedRendersPanelActionButtons(t *testing.T) {
 
 	itemID := items[firstItemIndex].ID
 	itemPath := fmt.Sprintf("/items/%d?selected_item_id=item-%d", itemID, itemID)
-	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, itemPath, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -2027,7 +2027,7 @@ func TestItemExpandedCompactsCollapsedItemViaOOB(t *testing.T) {
 		collapseItemIDParam,
 		collapseID,
 	)
-	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, itemPath, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -2075,7 +2075,7 @@ func TestItemCompactClosesContentPanel(t *testing.T) {
 		items[firstItemIndex].ID,
 		items[firstItemIndex].ID,
 	)
-	req := httptest.NewRequest(http.MethodGet, itemPath, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, itemPath, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -2125,7 +2125,7 @@ func TestItemCompactExpandRequestIncludesSelectedItemID(t *testing.T) {
 	}
 
 	itemsPath := feedItemsPath(feedID)
-	req := httptest.NewRequest(http.MethodGet, itemsPath, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, itemsPath, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -2158,7 +2158,7 @@ func TestFeedItemsRenderCompactPreviewForSummaryOnlyItems(t *testing.T) {
 
 	assertItemCount(t, items, expectedSingleItem)
 
-	req := httptest.NewRequest(http.MethodGet, feedItemsPath(feedID), http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, feedItemsPath(feedID), http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -2215,7 +2215,7 @@ func TestFeedItemsRenderNoPreviewCompactRowsWithPublishedMeta(t *testing.T) {
 
 	assertItemCount(t, items, expectedSingleItem)
 
-	req := httptest.NewRequest(http.MethodGet, feedItemsPath(feedID), http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, feedItemsPath(feedID), http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -2268,7 +2268,7 @@ func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
 		PublishedParsed: new(time.Now().Add(-time.Hour)),
 	}})
 
-	req := httptest.NewRequest(http.MethodGet, feedItemsPath(feedID), http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, feedItemsPath(feedID), http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3483,7 +3483,7 @@ func TestIndexOmitsInlineDeleteControls(t *testing.T) {
 		t.Fatalf(errStoreUpsertFeed, err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3511,7 +3511,10 @@ func TestDeleteFeedConfirmEndpointRemoved(t *testing.T) {
 		t.Fatalf(errStoreUpsertFeed, err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/feeds/%d/delete/confirm", feedID), http.NoBody)
+	target := fmt.Sprintf("/feeds/%d/delete/confirm", feedID)
+	req := httptest.NewRequestWithContext(
+		context.Background(), http.MethodGet, target, http.NoBody,
+	)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3525,7 +3528,7 @@ func TestIndexIncludesSubscriptionAndOPMLControls(t *testing.T) {
 
 	app := newTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3562,7 +3565,7 @@ func TestExportOPML(t *testing.T) {
 		t.Fatalf("store.UpsertFeed beta: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/opml/export", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/opml/export", http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3603,7 +3606,7 @@ func TestImportOPML(t *testing.T) {
   </body>
 </opml>`)
 
-	req := httptest.NewRequest(http.MethodPost, "/opml/import", body)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/opml/import", body)
 	req.Header.Set(headerContentType, contentType)
 
 	rec := httptest.NewRecorder()
@@ -3635,7 +3638,7 @@ func TestRoutesMethodMismatchReturns405(t *testing.T) {
 
 	app := newTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/feeds", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/feeds", http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3654,7 +3657,9 @@ func TestRoutesInvalidFeedIDReturns404(t *testing.T) {
 
 	app := newTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/feeds/not-a-number/items", http.NoBody)
+	req := httptest.NewRequestWithContext(
+		context.Background(), http.MethodGet, "/feeds/not-a-number/items", http.NoBody,
+	)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3668,7 +3673,9 @@ func TestRoutesInvalidItemIDReturns404(t *testing.T) {
 
 	app := newTestApp(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/items/not-a-number/toggle", http.NoBody)
+	req := httptest.NewRequestWithContext(
+		context.Background(), http.MethodPost, "/items/not-a-number/toggle", http.NoBody,
+	)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3756,7 +3763,7 @@ func TestFeedListCollapsesZeroUnreadFeeds(t *testing.T) {
 	app := newTestApp(t)
 	setupFeedListCollapseFixtures(t, app)
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3804,7 +3811,7 @@ func TestFeedListHidesMoreButtonWithoutZeroUnreadFeeds(t *testing.T) {
 		t.Fatalf("store.UpsertItems beta: %v", upsertErr)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	rec := httptest.NewRecorder()
 	app.Routes().ServeHTTP(rec, req)
 
@@ -3819,7 +3826,7 @@ func TestFeedListHidesMoreButtonWithoutZeroUnreadFeeds(t *testing.T) {
 }
 
 func newSelectedItemIDRequest(raw string) *http.Request {
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 
 	q := req.URL.Query()
 	q.Set(selectedItemIDParam, raw)
@@ -3944,7 +3951,7 @@ func TestImageProxyNon2xxLogsAtDebugLevel(t *testing.T) {
 
 	targetImageURL := "https://cdn-images-1.medium.com/max/1024/example.png"
 	proxyURL := content.ImageProxyPath + imageProxyURLQuery + url.QueryEscape(targetImageURL)
-	req := httptest.NewRequest(http.MethodGet, proxyURL, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, proxyURL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rec, req)
@@ -3994,7 +4001,7 @@ func TestImageProxyNon2xxDoesNotLogAtInfoLevel(t *testing.T) {
 
 	targetImageURL := "https://cdn-images-1.medium.com/max/1024/example.png"
 	proxyURL := content.ImageProxyPath + imageProxyURLQuery + url.QueryEscape(targetImageURL)
-	req := httptest.NewRequest(http.MethodGet, proxyURL, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, proxyURL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rec, req)
@@ -4030,7 +4037,7 @@ func TestImageProxyRejectsResolvedPrivateHost(t *testing.T) {
 	}))
 
 	proxyURL := content.ImageProxyPath + imageProxyURLQuery + url.QueryEscape("https://example.com/image.png")
-	req := httptest.NewRequest(http.MethodGet, proxyURL, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, proxyURL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rec, req)
@@ -4065,7 +4072,7 @@ func TestImageProxyRejectsOversizedImage(t *testing.T) {
 	}))
 
 	proxyURL := content.ImageProxyPath + imageProxyURLQuery + url.QueryEscape("https://example.com/image.png")
-	req := httptest.NewRequest(http.MethodGet, proxyURL, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, proxyURL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rec, req)
@@ -4104,7 +4111,7 @@ func TestImageProxyServesImageWithinSizeLimit(t *testing.T) {
 	}))
 
 	proxyURL := content.ImageProxyPath + imageProxyURLQuery + url.QueryEscape("https://example.com/image.png")
-	req := httptest.NewRequest(http.MethodGet, proxyURL, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, proxyURL, http.NoBody)
 	rec := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rec, req)
@@ -4306,7 +4313,7 @@ func TestParseSelectedFeedID(t *testing.T) {
 	t.Parallel()
 
 	formBody := strings.NewReader(url.Values{formSelectedFeedID: {"42"}}.Encode())
-	formRequest := httptest.NewRequest(http.MethodPost, pathMobileStream, formBody)
+	formRequest := httptest.NewRequestWithContext(context.Background(), http.MethodPost, pathMobileStream, formBody)
 	formRequest.Header.Set(headerContentType, formURLEncoded)
 
 	testCases := []struct {
@@ -4316,7 +4323,10 @@ func TestParseSelectedFeedID(t *testing.T) {
 	}{
 		{
 			name: "query parameter",
-			req:  httptest.NewRequest(http.MethodGet, pathMobileStream+"?selected_feed_id=21", http.NoBody),
+			req: httptest.NewRequestWithContext(
+				context.Background(), http.MethodGet,
+				pathMobileStream+"?selected_feed_id=21", http.NoBody,
+			),
 			want: 21,
 		},
 		{
@@ -4326,7 +4336,10 @@ func TestParseSelectedFeedID(t *testing.T) {
 		},
 		{
 			name: "zero value",
-			req:  httptest.NewRequest(http.MethodGet, pathMobileStream+"?selected_feed_id=0", http.NoBody),
+			req: httptest.NewRequestWithContext(
+				context.Background(), http.MethodGet,
+				pathMobileStream+"?selected_feed_id=0", http.NoBody,
+			),
 			want: 0,
 		},
 	}
@@ -4380,7 +4393,7 @@ func TestMobileStreamSelectorHTMXKeepsActiveSelectorMounted(t *testing.T) {
 
 	fixture := newMobileStreamSelectorFixture(t)
 	target := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, fixture.brightID)
-	req := httptest.NewRequest(http.MethodGet, target, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, http.NoBody)
 	req.Header.Set("Hx-Request", "true")
 	req.Header.Set("Hx-Trigger", "mobile-stream-feed-filter")
 

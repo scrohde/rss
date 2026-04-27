@@ -104,7 +104,7 @@ func TestAuthRedirectsUnauthenticatedRequestsToSetupBeforeInitialCode(t *testing
 
 	app := newAuthEnabledTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	rr := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rr, req)
@@ -135,7 +135,7 @@ func TestAuthRedirectsUnauthenticatedRequestsToLoginAfterInitialCode(t *testing.
 		t.Fatal("expected setup unlock cookie")
 	}
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	req.AddCookie(cookies[0])
 
 	rr := httptest.NewRecorder()
@@ -156,7 +156,7 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 
 	app := newAuthEnabledTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/login", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/login", http.NoBody)
 	rr := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rr, req)
@@ -197,7 +197,7 @@ func TestAuthLoginPageAutoStartsWhenCredentialExists(t *testing.T) {
 	app := newAuthEnabledTestApp(t)
 	seedAuthCredential(t, app)
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/login", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/login", http.NoBody)
 	rr := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rr, req)
@@ -227,7 +227,7 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 	seedAuthCredential(t, app)
 	cookie := issueAuthCookie(t, app)
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	req.AddCookie(cookie)
 
 	rr := httptest.NewRecorder()
@@ -271,7 +271,7 @@ func TestAuthenticatedIndexAppliesStoredThemeToRootMarkup(t *testing.T) {
 	}
 
 	cookie := issueAuthCookie(t, app)
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	req.AddCookie(cookie)
 
 	rr := httptest.NewRecorder()
@@ -302,7 +302,7 @@ func TestAuthenticatedIndexAppliesLightThemeToRootMarkup(t *testing.T) {
 	}
 
 	cookie := issueAuthCookie(t, app)
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	req.AddCookie(cookie)
 
 	rr := httptest.NewRecorder()
@@ -332,7 +332,7 @@ func TestAuthLoginPageDoesNotEmitStoredThemeMarker(t *testing.T) {
 		t.Fatalf("UpdateAuthOwnerAppearanceTheme: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/login", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/login", http.NoBody)
 	rr := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rr, req)
@@ -351,7 +351,7 @@ func TestAuthDisabledIndexDoesNotExposeAppearanceControlsOrThemeMarker(t *testin
 
 	app := newTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	rr := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rr, req)
@@ -386,7 +386,7 @@ func TestAuthSecurityPageNoLongerShowsAppearanceControls(t *testing.T) {
 	}
 
 	cookie := issueAuthCookie(t, app)
-	req := httptest.NewRequest(http.MethodGet, "/auth/security", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/security", http.NoBody)
 	req.AddCookie(cookie)
 
 	rr := httptest.NewRecorder()
@@ -413,7 +413,8 @@ func TestAuthCSRFRequiredForUnsafeRequests(t *testing.T) {
 	cookie := issueAuthCookie(t, app)
 
 	form := url.Values{"url": {exampleRSSURL}}
-	req := httptest.NewRequest(http.MethodPost, "/feeds", strings.NewReader(form.Encode()))
+	ctx := context.Background()
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/feeds", strings.NewReader(form.Encode()))
 	req.Header.Set(headerContentType, formURLEncoded)
 	req.AddCookie(cookie)
 
@@ -437,7 +438,11 @@ func TestAuthThemeUpdatePersistsAndRedirects(t *testing.T) {
 		"theme":      {store.AuthAppearanceThemeDark},
 		"csrf_token": {session.csrfToken},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/auth/theme", strings.NewReader(form.Encode()))
+	ctx := context.Background()
+	body := strings.NewReader(form.Encode())
+	req := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/theme", body,
+	)
 	req.Header.Set(headerContentType, formURLEncoded)
 	req.AddCookie(session.cookie)
 
@@ -474,7 +479,11 @@ func TestAuthThemeUpdateRejectsExternalReturnTarget(t *testing.T) {
 		"theme":      {store.AuthAppearanceThemeDark},
 		"csrf_token": {session.csrfToken},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/auth/theme", strings.NewReader(form.Encode()))
+	ctx := context.Background()
+	body := strings.NewReader(form.Encode())
+	req := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/theme", body,
+	)
 	req.Header.Set(headerContentType, formURLEncoded)
 	req.AddCookie(session.cookie)
 
@@ -501,7 +510,11 @@ func TestAuthThemeUpdateRejectsInvalidValue(t *testing.T) {
 		"theme":      {"violet"},
 		"csrf_token": {session.csrfToken},
 	}
-	req := httptest.NewRequest(http.MethodPost, "/auth/theme", strings.NewReader(form.Encode()))
+	ctx := context.Background()
+	body := strings.NewReader(form.Encode())
+	req := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/theme", body,
+	)
 	req.Header.Set(headerContentType, formURLEncoded)
 	req.AddCookie(session.cookie)
 
@@ -534,7 +547,11 @@ func TestAuthLoginVerifyRejectsInvalidChallenge(t *testing.T) {
 	payload := `{"challenge_id":"missing","credential":` +
 		`{"id":"x","rawId":"eA","type":"public-key","response":` +
 		`{"clientDataJSON":"e30","authenticatorData":"e30","signature":"e30"}}}`
-	req := httptest.NewRequest(http.MethodPost, "/auth/webauthn/login/verify", strings.NewReader(payload))
+	ctx := context.Background()
+	req := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/webauthn/login/verify",
+		strings.NewReader(payload),
+	)
 	req.Header.Set(headerContentType, "application/json")
 
 	rr := httptest.NewRecorder()
@@ -551,7 +568,11 @@ func TestAuthRegisterOptionsRequiresSetupOrSession(t *testing.T) {
 
 	app := newAuthEnabledTestApp(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/auth/webauthn/register/options", strings.NewReader(`{}`))
+	ctx := context.Background()
+	req := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/webauthn/register/options",
+		strings.NewReader(`{}`),
+	)
 	req.Header.Set(headerContentType, "application/json")
 
 	rr := httptest.NewRecorder()
@@ -568,8 +589,13 @@ func TestAuthSetupUnlockRequiresToken(t *testing.T) {
 
 	app := newAuthEnabledTestApp(t)
 
+	ctx := context.Background()
+
 	wrong := url.Values{"setup_token": {"wrong-token"}}
-	wrongReq := httptest.NewRequest(http.MethodPost, "/auth/setup/unlock", strings.NewReader(wrong.Encode()))
+	wrongBody := strings.NewReader(wrong.Encode())
+	wrongReq := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/setup/unlock", wrongBody,
+	)
 	wrongReq.Header.Set(headerContentType, formURLEncoded)
 
 	wrongResp := httptest.NewRecorder()
@@ -580,7 +606,10 @@ func TestAuthSetupUnlockRequiresToken(t *testing.T) {
 	}
 
 	valid := url.Values{"setup_token": {"setup-token"}}
-	validReq := httptest.NewRequest(http.MethodPost, "/auth/setup/unlock", strings.NewReader(valid.Encode()))
+	validBody := strings.NewReader(valid.Encode())
+	validReq := httptest.NewRequestWithContext(
+		ctx, http.MethodPost, "/auth/setup/unlock", validBody,
+	)
 	validReq.Header.Set(headerContentType, formURLEncoded)
 
 	validResp := httptest.NewRecorder()
@@ -604,7 +633,7 @@ func TestAuthSetupPageLockedShowsOnlyCodeEntry(t *testing.T) {
 
 	app := newAuthEnabledTestApp(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/setup", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/setup", http.NoBody)
 	rr := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rr, req)
@@ -644,7 +673,8 @@ func TestAuthSetupPageAutoStartFlagAfterUnlock(t *testing.T) {
 		t.Fatal("expected setup unlock cookie")
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/setup?autoregister=1", http.NoBody)
+	ctx := context.Background()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/auth/setup?autoregister=1", http.NoBody)
 	req.AddCookie(cookies[0])
 
 	rr := httptest.NewRecorder()
@@ -670,8 +700,9 @@ func TestAuthSetupUnlockBlockedAfterCredentialExists(t *testing.T) {
 	app := newAuthEnabledTestApp(t)
 	seedAuthCredential(t, app)
 
+	ctx := context.Background()
 	valid := url.Values{"setup_token": {"setup-token"}}
-	req := httptest.NewRequest(http.MethodPost, "/auth/setup/unlock", strings.NewReader(valid.Encode()))
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/auth/setup/unlock", strings.NewReader(valid.Encode()))
 	req.Header.Set(headerContentType, formURLEncoded)
 
 	rr := httptest.NewRecorder()
@@ -708,7 +739,7 @@ func TestAuthSessionExpiryRedirectsToLogin(t *testing.T) {
 
 	time.Sleep(80 * time.Millisecond)
 
-	req := httptest.NewRequest(http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
 	req.AddCookie(cookie)
 
 	rr := httptest.NewRecorder()

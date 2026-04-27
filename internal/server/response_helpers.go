@@ -8,6 +8,8 @@ import (
 )
 
 func parseFormOrBadRequest(w http.ResponseWriter, r *http.Request, message string) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+
 	err := r.ParseForm()
 	if err != nil {
 		http.Error(w, message, http.StatusBadRequest)

@@ -44,7 +44,7 @@ var (
 	//nolint:gochecknoglobals // Shared registry maps synthetic hosts to test servers for robots lookups.
 	feedHostRegistry = make(map[string]*FeedServer)
 	//nolint:gochecknoglobals // Monotonic counter ensures synthetic hosts stay unique in parallel tests.
-	feedServerCounter uint64
+	feedServerCounter atomic.Uint64
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -74,7 +74,7 @@ func NewFeedServer(t *testing.T, feedXML string) (server *FeedServer, feedURL st
 	server.headers = http.Header{
 		"Content-Type": []string{"application/rss+xml"},
 	}
-	host := fmt.Sprintf("feed-%d.feed.test", atomic.AddUint64(&feedServerCounter, 1))
+	host := fmt.Sprintf("feed-%d.feed.test", feedServerCounter.Add(1))
 	feedURL = "https://" + host + "/" + url.PathEscape(t.Name())
 
 	feedRegistryMu.Lock()

@@ -25,6 +25,7 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
 	feedID, err := a.subscribeAndStoreFeed(r.Context(), r.FormValue("url"))
 	if err != nil {
 		a.renderSubscribeError(w, err)
@@ -54,7 +55,7 @@ func (a *App) subscribeAndStoreFeed(ctx context.Context, rawURL string) (int64, 
 
 	robotsErr := feed.CheckRobotsAllowed(ctx, feedURL)
 	if robotsErr != nil {
-		slog.Warn("subscribe blocked by robots policy", "feed_url", feedURL, "err", robotsErr)
+		slog.Warn("subscribe blocked by robots policy", "feed_url", url.QueryEscape(feedURL), "err", robotsErr)
 
 		return 0, fmt.Errorf("check robots policy: %w", robotsErr)
 	}

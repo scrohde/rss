@@ -572,8 +572,8 @@ func (a *App) setSetupUnlockCookie(w http.ResponseWriter) error {
 		return err
 	}
 
-	expiresAt := time.Now().UTC().Add(setupUnlockTTL).Unix()
-	payload := strconv.FormatInt(expiresAt, 10) + ":" + nonce
+	expiresAtSec := time.Now().UTC().Add(setupUnlockTTL).Unix()
+	payload := strconv.FormatInt(expiresAtSec, 10) + ":" + nonce
 	signature := signSetupPayload(a.authSetupSignerKey, payload)
 	value := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
 		base64.RawURLEncoding.EncodeToString(signature)
@@ -638,12 +638,12 @@ func (a *App) setupUnlocked(r *http.Request) bool {
 		return false
 	}
 
-	expiresAt, err := strconv.ParseInt(expRaw, 10, 64)
+	expiresAtSec, err := strconv.ParseInt(expRaw, 10, 64)
 	if err != nil {
 		return false
 	}
 
-	return time.Now().UTC().Before(time.Unix(expiresAt, 0).UTC())
+	return time.Now().UTC().Before(time.Unix(expiresAtSec, 0).UTC())
 }
 
 func signSetupPayload(key []byte, payload string) []byte {
@@ -768,6 +768,8 @@ func (a *App) handleAuthSetupUnlock(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 
 	err = r.ParseForm()
 	if err != nil {
@@ -916,6 +918,7 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
 	theme := strings.TrimSpace(r.FormValue("theme"))
 
 	err := store.UpdateAuthOwnerAppearanceTheme(r.Context(), a.db, theme)
@@ -931,6 +934,7 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
 	redirectTarget := authThemeRedirectTarget(r.FormValue("return_to"))
 	if redirectTarget == "" {
 		redirectTarget = "/auth/security?message=" + url.QueryEscape("Appearance updated.")
@@ -1040,6 +1044,7 @@ func (a *App) handleAuthRecoveryUse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
 	code := strings.TrimSpace(r.FormValue("recovery_code"))
 
 	consumed, err := a.authManager.ConsumeRecoveryCode(r.Context(), code)
