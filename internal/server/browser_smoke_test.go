@@ -52,6 +52,7 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
 		chromedp.WaitVisible("#main-content", chromedp.ByQuery),
 	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
 	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
 
 	runFeedSelectionFlow(t, ctx, fixture)
@@ -80,6 +81,7 @@ func TestBrowserSmokeHiddenSelectionFallback(t *testing.T) {
 		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
 		chromedp.WaitVisible("#main-content", chromedp.ByQuery),
 	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
 	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
 
 	runFeedSelectionFlow(t, ctx, fixture)
@@ -100,6 +102,7 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		chromedp.EmulateViewport(390, 844),
 		chromedp.Navigate(server.URL),
 	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
 	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
@@ -179,6 +182,7 @@ func TestBrowserSmokeMobileTopBarFlows(t *testing.T) {
 		chromedp.EmulateViewport(390, 844),
 		chromedp.Navigate(server.URL),
 	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
 	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
@@ -200,6 +204,7 @@ func TestBrowserSmokeMobileFilteredFeedFlows(t *testing.T) {
 		chromedp.EmulateViewport(390, 844),
 		chromedp.Navigate(server.URL),
 	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
 	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile stream URL")
@@ -1011,6 +1016,8 @@ func runActions(t *testing.T, ctx context.Context, actions ...chromedp.Action) {
 func clickElement(t *testing.T, ctx context.Context, selector, label string) {
 	t.Helper()
 
+	waitForJS(t, ctx, htmxElementReadyExpression(selector), label+" htmx ready")
+
 	expression := fmt.Sprintf(
 		`(() => {
 			const el = document.querySelector(%q);
@@ -1259,6 +1266,27 @@ func itemOutlineAbsentExpression(rowSelector string) string {
 
 func desktopLayoutExpression() string {
 	return `(() => !window.matchMedia("(max-width: 960px)").matches)()`
+}
+
+func htmxReadyExpression() string {
+	return `(() => !!window.htmx && typeof window.htmx.ajax === "function")()`
+}
+
+func htmxElementReadyExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const el = document.querySelector(%q);
+			if (!el) {
+				return false;
+			}
+			if (!el.matches("[hx-get], [hx-post], [hx-put], [hx-delete], [hx-patch]")) {
+				return true;
+			}
+			const data = el["htmx-internal-data"];
+			return !!data && Array.isArray(data.listenerInfos) && data.listenerInfos.length > 0;
+		})()`,
+		selector,
+	)
 }
 
 func mobileLayoutExpression() string {

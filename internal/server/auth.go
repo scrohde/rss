@@ -918,8 +918,7 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
-	theme := strings.TrimSpace(r.FormValue("theme"))
+	theme := strings.TrimSpace(r.PostForm.Get("theme"))
 
 	err := store.UpdateAuthOwnerAppearanceTheme(r.Context(), a.db, theme)
 	if errors.Is(err, store.ErrInvalidAppearanceTheme) {
@@ -934,8 +933,7 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
-	redirectTarget := authThemeRedirectTarget(r.FormValue("return_to"))
+	redirectTarget := authThemeRedirectTarget(r.PostForm.Get("return_to"))
 	if redirectTarget == "" {
 		redirectTarget = "/auth/security?message=" + url.QueryEscape("Appearance updated.")
 	}
@@ -1044,8 +1042,7 @@ func (a *App) handleAuthRecoveryUse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
-	code := strings.TrimSpace(r.FormValue("recovery_code"))
+	code := strings.TrimSpace(r.PostForm.Get("recovery_code"))
 
 	consumed, err := a.authManager.ConsumeRecoveryCode(r.Context(), code)
 	if err != nil {

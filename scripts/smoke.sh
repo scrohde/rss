@@ -6,5 +6,10 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 
+GO_BUILD_CACHE="${GO_BUILD_CACHE:-/tmp/go-build-cache}"
+
+mkdir -p "$GO_BUILD_CACHE"
+export GOCACHE="$GO_BUILD_CACHE"
+
 echo "==> go test -tags=smoke -count=1 ./internal/server -run TestBrowserSmokeReaderFlows"
 go test -tags=smoke -count=1 ./internal/server -run TestBrowserSmokeReaderFlows "$@"

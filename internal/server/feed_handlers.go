@@ -25,8 +25,7 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//nolint:gosec // G120: body limited by parseFormOrBadRequest.
-	feedID, err := a.subscribeAndStoreFeed(r.Context(), r.FormValue("url"))
+	feedID, err := a.subscribeAndStoreFeed(r.Context(), r.PostForm.Get("url"))
 	if err != nil {
 		a.renderSubscribeError(w, err)
 
