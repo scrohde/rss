@@ -1724,6 +1724,77 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   margin-top: 1.1em;
 }
 
+html[data-theme="dark"] .content-panel-body,
+html[data-theme="dark"] .mobile-reader-body {
+  --reader-light-block-link: #0f766e;
+  --reader-light-block-text: #1f2937;
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme="system"] .content-panel-body,
+  html[data-theme="system"] .mobile-reader-body,
+  html:not([data-theme]) .content-panel-body,
+  html:not([data-theme]) .mobile-reader-body {
+    --reader-light-block-link: #0f766e;
+    --reader-light-block-text: #1f2937;
+  }
+}
+
+.content-panel-body :where(
+  [style*="background-color:#ffffff" i],
+  [style*="background-color:#fff" i],
+  [style*="background-color:#f1f1f1" i],
+  [style*="background-color:#efefef" i],
+  [style*="background-color:#f6b718" i],
+  [style*="background:#f6b718" i]
+),
+.mobile-reader-body :where(
+  [style*="background-color:#ffffff" i],
+  [style*="background-color:#fff" i],
+  [style*="background-color:#f1f1f1" i],
+  [style*="background-color:#efefef" i],
+  [style*="background-color:#f6b718" i],
+  [style*="background:#f6b718" i]
+),
+.content-panel-body :where(
+  [style*="background-color:#ffffff" i],
+  [style*="background-color:#fff" i],
+  [style*="background-color:#f1f1f1" i],
+  [style*="background-color:#efefef" i],
+  [style*="background-color:#f6b718" i],
+  [style*="background:#f6b718" i]
+) :where(p, span, div, td, th, li, blockquote, strong, em, b, i, font),
+.mobile-reader-body :where(
+  [style*="background-color:#ffffff" i],
+  [style*="background-color:#fff" i],
+  [style*="background-color:#f1f1f1" i],
+  [style*="background-color:#efefef" i],
+  [style*="background-color:#f6b718" i],
+  [style*="background:#f6b718" i]
+) :where(p, span, div, td, th, li, blockquote, strong, em, b, i, font) {
+  color: var(--reader-light-block-text) !important;
+  color-scheme: only light;
+}
+
+.content-panel-body :where(
+  [style*="background-color:#ffffff" i],
+  [style*="background-color:#fff" i],
+  [style*="background-color:#f1f1f1" i],
+  [style*="background-color:#efefef" i],
+  [style*="background-color:#f6b718" i],
+  [style*="background:#f6b718" i]
+) a,
+.mobile-reader-body :where(
+  [style*="background-color:#ffffff" i],
+  [style*="background-color:#fff" i],
+  [style*="background-color:#f1f1f1" i],
+  [style*="background-color:#efefef" i],
+  [style*="background-color:#f6b718" i],
+  [style*="background:#f6b718" i]
+) a {
+  color: var(--reader-light-block-link) !important;
+}
+
 .empty-state {
   text-align: center;
   padding: 48px 20px;
