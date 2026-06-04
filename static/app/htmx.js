@@ -44,6 +44,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
   const focusFeedPanel = () => feed.focusFeedPanel();
   const getFeedLinks = (options = {}) => feed.getFeedLinks(options);
   const isFeedEditMode = () => feed.isFeedEditMode();
+  const syncDisplayedFeedSelection = () => feed.syncDisplayedFeedSelection();
   const focusFeedEditTitleInput = () => feed.focusFeedEditTitleInput();
   const clearFeedDragState = () => feed.clearFeedDragState();
   const ensureActive = () => content.ensureActive();
@@ -177,6 +178,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
   });
 
   document.body.addEventListener("htmx:afterSettle", () => {
+    syncDisplayedFeedSelection();
     if (state.pendingPanelFocus !== "content") {
       return;
     }

@@ -38,13 +38,14 @@
             />
             <path d="M11.3 4.7L15.3 8.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
           </svg>
-          <span class="sr-only">Edit feeds</span>
+          <span class="edit-feeds-label" aria-hidden="true">Edit</span>
         </button>
       {{end}}
     </div>
   </div>
   <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
   {{if .FeedEditMode}}
+    <p class="feed-edit-hint">Rename, reorder, or mark feeds for removal. Save to apply changes.</p>
     <form
       id="feed-edit-form"
       class="feed-edit-form"

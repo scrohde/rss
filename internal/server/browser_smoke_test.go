@@ -424,6 +424,13 @@ func runFeedSelectionFlow(t *testing.T, ctx context.Context, fixture smokeFixtur
 		chromedp.WaitVisible(itemListSelector, chromedp.ByQuery),
 		chromedp.WaitVisible(firstItemSelector, chromedp.ByQuery),
 	)
+	waitForJS(
+		t,
+		ctx,
+		feedSelectionSettledExpression(fixture.secondaryFeedID, "Secondary Feed"),
+		"secondary feed selection settled",
+	)
+	waitForJS(t, ctx, activeElementMatchesExpression(feedSelector), "secondary feed retains focus after swap")
 }
 
 func runMoreTogglePersistenceFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
@@ -1204,6 +1211,25 @@ func activeElementMatchesExpression(selector string) string {
 	return fmt.Sprintf(
 		`(() => { const el = document.querySelector(%q); return !!el && document.activeElement === el; })()`,
 		selector,
+	)
+}
+
+func feedSelectionSettledExpression(feedID int64, feedTitle string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const feedID = %q;
+			const active = document.querySelector("#feed-list .feed-link.active");
+			const input = document.querySelector("#selected-feed-id");
+			const list = document.querySelector("#item-list");
+			const title = document.querySelector(".items-title");
+			return !!active && !!input && !!list && !!title &&
+				active.dataset.feedId === feedID &&
+				input.value === feedID &&
+				list.dataset.feedId === feedID &&
+				title.textContent.trim() === %q;
+		})()`,
+		fmt.Sprintf("%d", feedID),
+		feedTitle,
 	)
 }
 

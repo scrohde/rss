@@ -339,6 +339,19 @@ const setSelectedFeed = (feedButton) => {
   }
 };
 
+export const syncDisplayedFeedSelection = () => {
+  const displayedFeedID = getDisplayedFeedID();
+  if (!displayedFeedID || isFeedEditMode()) {
+    return false;
+  }
+  const selectedFeed = getFeedLinks().find((link) => link.dataset.feedId === displayedFeedID);
+  if (!selectedFeed) {
+    return false;
+  }
+  setSelectedFeed(selectedFeed);
+  return true;
+};
+
 const requestFeedItems = (feedButton, pendingPanelFocus) => {
   if (!feedButton || typeof feedButton.click !== "function") {
     return false;

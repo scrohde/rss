@@ -750,6 +750,12 @@ func assertEnterFeedEditModeLayout(t *testing.T, body string) {
 		`class="feed-edit-actions"`,
 		"expected edit actions in edit mode",
 	)
+	assertContains(
+		t,
+		body,
+		`class="feed-edit-hint">Rename, reorder, or mark feeds for removal. Save to apply changes.</p>`,
+		"expected edit mode helper text",
+	)
 	assertContains(t, body, `id="feed-edit-form"`, "expected edit mode form")
 	assertContains(
 		t,
@@ -2284,8 +2290,20 @@ func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
 	assertContains(
 		t,
 		body,
-		`<span class="item-inline-open-hint">Read inline</span>`,
-		"expected content rows to render an inline-read hint",
+		`<span class="item-inline-open-hint">Read in app</span>`,
+		"expected content rows to render an in-app read hint",
+	)
+	assertContains(
+		t,
+		body,
+		`<h3>Choose an item to read</h3>`,
+		"expected empty reader panel heading",
+	)
+	assertContains(
+		t,
+		body,
+		`<p>Select "Read in app" on any story with reader content to open it here.</p>`,
+		"expected empty reader panel to point at the in-app reader action",
 	)
 }
 
@@ -3140,6 +3158,18 @@ func TestCancelFeedEditModeEndpoint(t *testing.T) {
 		body,
 		`class="edit-feeds-button"`,
 		"expected pencil edit control after cancel",
+	)
+	assertContains(
+		t,
+		body,
+		`aria-label="Edit feeds"`,
+		"expected edit control to keep its accessible name",
+	)
+	assertContains(
+		t,
+		body,
+		`<span class="edit-feeds-label" aria-hidden="true">Edit</span>`,
+		"expected visible edit control label after cancel",
 	)
 	assertNotContains(
 		t,

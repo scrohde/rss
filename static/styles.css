@@ -833,10 +833,16 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   margin-bottom: 10px;
 }
 
+.sidebar-header > span {
+  min-width: 0;
+}
+
 .sidebar-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .feed-edit-actions {
@@ -863,18 +869,22 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   background: var(--icon-button-bg);
   color: var(--icon-button-color);
   border: 1px solid var(--icon-button-border);
-  width: 28px;
+  min-width: 0;
   height: 28px;
-  padding: 0;
-  border-radius: 50%;
+  max-width: 72px;
+  padding: 0 9px 0 7px;
+  border-radius: 999px;
   cursor: pointer;
   transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0;
-  line-height: 0;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
   box-shadow: var(--icon-button-shadow);
+  white-space: nowrap;
 }
 
 .edit-feeds-button:hover {
@@ -1063,8 +1073,23 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 }
 
 .edit-feeds-button .icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.edit-feeds-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-edit-hint {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
 }
 
 .feed-remove .icon {
