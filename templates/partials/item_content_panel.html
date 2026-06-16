@@ -19,6 +19,19 @@
 {{define "item_content_panel_actions"}}
   <div class="content-panel-actions" role="group" aria-label="Article panel actions">
     <button
+      class="content-panel-action-button content-panel-mark-read-button"
+      type="button"
+      aria-label="Mark read and open next article"
+      title="Mark read and open next article"
+      data-content-panel-mark-read="true"
+    >
+      <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+          stroke-linejoin="round" />
+      </svg>
+      <span class="sr-only">Mark read and open next article</span>
+    </button>
+    <button
       class="content-panel-action-button content-panel-full-toggle"
       type="button"
       data-content-panel-full-toggle="true"

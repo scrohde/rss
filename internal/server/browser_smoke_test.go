@@ -34,6 +34,7 @@ type smokeFixture struct {
 	primaryFirstItemID     int64
 	secondaryFirstItemID   int64
 	secondarySecondItemID  int64
+	secondaryNoReaderID    int64
 	secondarySummaryItemID int64
 }
 
@@ -63,6 +64,7 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	runExpandCollapseFlow(t, ctx, fixture)
 	runToggleReadFlow(t, ctx, fixture)
 	runKeyboardFlow(t, ctx, fixture)
+	runContentPanelMarkReadButtonFlow(t, ctx, fixture)
 	runFeedBoundaryKeyboardFlow(t, ctx, fixture)
 }
 
@@ -254,6 +256,12 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	mustUpsertItems(t, app, secondaryFeedID, []*gofeed.Item{
 		newSmokeItem("Secondary One", "https://example.com/s1", "secondary-1", base),
 		newSmokeItem("Secondary Two", "https://example.com/s2", "secondary-2", base.Add(-time.Hour)),
+		newSmokeNoReaderItem(
+			"Secondary No Reader",
+			"https://example.com/s-no-reader",
+			"secondary-no-reader",
+			base.Add(-90*time.Minute),
+		),
 		newSmokeSummaryOnlyItem(
 			"Secondary Summary Only",
 			"https://example.com/s3",
@@ -272,7 +280,7 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 	assertItemCount(t, primaryItems, 1)
 
 	secondaryItems := mustListItems(t, app, secondaryFeedID)
-	assertItemCount(t, secondaryItems, 3)
+	assertItemCount(t, secondaryItems, 4)
 
 	return smokeFixture{
 		primaryFeedID:          primaryFeedID,
@@ -283,7 +291,8 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 		primaryFirstItemID:     primaryItems[0].ID,
 		secondaryFirstItemID:   secondaryItems[0].ID,
 		secondarySecondItemID:  secondaryItems[1].ID,
-		secondarySummaryItemID: secondaryItems[2].ID,
+		secondaryNoReaderID:    secondaryItems[2].ID,
+		secondarySummaryItemID: secondaryItems[3].ID,
 	}
 }
 
@@ -304,6 +313,15 @@ func newSmokeSummaryOnlyItem(title, link, guid string, publishedAt time.Time) *g
 		Link:            link,
 		GUID:            guid,
 		Description:     `<div><h2>Summary-only heading</h2><p>Summary-only fallback preview.</p><img src="https://example.com/summary.jpg" alt="summary image"></div>`,
+		PublishedParsed: timePtr(publishedAt),
+	}
+}
+
+func newSmokeNoReaderItem(title, link, guid string, publishedAt time.Time) *gofeed.Item {
+	return &gofeed.Item{
+		Title:           title,
+		Link:            link,
+		GUID:            guid,
 		PublishedParsed: timePtr(publishedAt),
 	}
 }
@@ -555,12 +573,15 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 	quaternaryListSelector := fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, fixture.quaternaryFeedID)
 	secondaryFirstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 	secondarySecondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
+	secondaryNoReaderRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryNoReaderID)
 	secondarySummaryRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySummaryItemID)
 	secondaryFirstRowTarget := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
 	secondarySecondRowTarget := fmt.Sprintf("#item-%d", fixture.secondarySecondItemID)
+	secondaryNoReaderRowTarget := fmt.Sprintf("#item-%d", fixture.secondaryNoReaderID)
 	secondarySummaryRowTarget := fmt.Sprintf("#item-%d", fixture.secondarySummaryItemID)
 	secondaryFirstSelectedID := fmt.Sprintf("item-%d", fixture.secondaryFirstItemID)
 	secondarySecondSelectedID := fmt.Sprintf("item-%d", fixture.secondarySecondItemID)
+	secondaryNoReaderSelectedID := fmt.Sprintf("item-%d", fixture.secondaryNoReaderID)
 	secondarySummarySelectedID := fmt.Sprintf("item-%d", fixture.secondarySummaryItemID)
 	tertiaryListTarget := `#main-content > section.items`
 
@@ -598,6 +619,16 @@ func runHiddenSelectionFallbackFlow(t *testing.T, ctx context.Context, fixture s
 		secondarySecondSelectedID,
 	)
 	waitForJS(t, ctx, hasClassExpression(secondarySecondRowSelector, "is-read"), "secondary second row marked read")
+
+	requestHTMX(
+		t,
+		ctx,
+		"POST",
+		fmt.Sprintf("/items/%d/toggle", fixture.secondaryNoReaderID),
+		secondaryNoReaderRowTarget,
+		secondaryNoReaderSelectedID,
+	)
+	waitForJS(t, ctx, hasClassExpression(secondaryNoReaderRowSelector, "is-read"), "secondary no-reader row marked read")
 
 	requestHTMX(
 		t,
@@ -1012,6 +1043,64 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	waitForJS(t, ctx, itemOutlineVisibleExpression(secondRowSelector), "outline visible after return and keyboard nav")
 }
 
+func runContentPanelMarkReadButtonFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	firstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
+	secondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
+	noReaderRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryNoReaderID)
+	summaryRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySummaryItemID)
+	markReadSelector := `#content-panel button[data-content-panel-mark-read="true"]`
+
+	clickElement(t, ctx, firstRowSelector, "open first article before panel mark-read flow")
+	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "content panel open before mark-read")
+	waitForJS(t, ctx, contentPanelItemExpression(fixture.secondaryFirstItemID), "first article open in content panel")
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-read"), "first article starts read before mark-read")
+	waitForJS(
+		t,
+		ctx,
+		feedUnreadCountExpression(fixture.secondaryFeedID, "3"),
+		"secondary feed unread count before mark-read",
+	)
+
+	clickElement(t, ctx, markReadSelector, "advance from read first article in content panel")
+	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-read"), "first article stays read after panel advance")
+	waitForJS(
+		t,
+		ctx,
+		contentPanelItemExpression(fixture.secondarySecondItemID),
+		"second article opens after read first article",
+	)
+	waitForJS(
+		t,
+		ctx,
+		feedUnreadCountExpression(fixture.secondaryFeedID, "3"),
+		"secondary feed unread count unchanged after read article advance",
+	)
+
+	clickElement(t, ctx, markReadSelector, "mark second article read from content panel")
+	waitForJS(t, ctx, hasClassExpression(secondRowSelector, "is-read"), "second article marked read from content panel")
+	waitForJS(
+		t,
+		ctx,
+		missingClassExpression(noReaderRowSelector, "is-expanded"),
+		"no-reader row skipped by panel mark-read",
+	)
+	waitForJS(
+		t,
+		ctx,
+		contentPanelItemExpression(fixture.secondarySummaryItemID),
+		"summary article opens after skipping no-reader row",
+	)
+	waitForJS(t, ctx, hasClassExpression(summaryRowSelector, "is-expanded"), "summary row expanded after no-reader skip")
+	waitForJS(
+		t,
+		ctx,
+		feedUnreadCountExpression(fixture.secondaryFeedID, "2"),
+		"secondary feed unread count after second mark-read",
+	)
+}
+
 func runActions(t *testing.T, ctx context.Context, actions ...chromedp.Action) {
 	t.Helper()
 
@@ -1344,6 +1433,21 @@ func contentPanelItemExpression(itemID int64) string {
 			return !!article && article.getAttribute("data-item-id") === %q;
 		})()`,
 		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func feedUnreadCountExpression(feedID int64, want string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const feed = document.querySelector(%q);
+			if (!feed) {
+				return false;
+			}
+			const count = feed.querySelector(".feed-count");
+			return !!count && count.textContent.trim() === %q;
+		})()`,
+		fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, feedID),
+		want,
 	)
 }
 

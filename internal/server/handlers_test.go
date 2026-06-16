@@ -1312,6 +1312,24 @@ func assertExpandedPanelActions(t *testing.T, body string, itemID int64) {
 	assertContains(
 		t,
 		body,
+		`data-content-panel-mark-read="true"`,
+		"expected mark-read action in expanded content panel",
+	)
+	assertContains(
+		t,
+		body,
+		`aria-label="Mark read and open next article"`,
+		"expected mark-read action accessible label",
+	)
+	assertContains(
+		t,
+		body,
+		`title="Mark read and open next article"`,
+		"expected mark-read action title",
+	)
+	assertContains(
+		t,
+		body,
 		`data-content-panel-full-toggle="true"`,
 		"expected full-page toggle action in expanded content panel",
 	)

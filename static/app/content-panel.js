@@ -385,7 +385,7 @@ export const openActiveLink = () => {
   }
 };
 
-const handleReadingModalReadShortcut = () => {
+export const markContentPanelArticleReadAndAdvance = () => {
   const current = getReadingModalRow();
   if (!current) {
     return false;
@@ -415,7 +415,7 @@ const handleReadingModalReadShortcut = () => {
 };
 
 export const toggleRead = () => {
-  if (handleReadingModalReadShortcut()) {
+  if (markContentPanelArticleReadAndAdvance()) {
     return;
   }
 
@@ -722,6 +722,13 @@ export const bindContentPanelInteractions = () => {
     if (fullToggle) {
       event.preventDefault();
       setContentPanelFloating(!isContentPanelFloating());
+      return;
+    }
+
+    const markReadButton = target.closest("button[data-content-panel-mark-read='true']");
+    if (markReadButton) {
+      event.preventDefault();
+      markContentPanelArticleReadAndAdvance();
       return;
     }
 
