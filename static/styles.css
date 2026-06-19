@@ -25,12 +25,12 @@
   --surface-highlight-2: rgba(238, 247, 246, 0.96);
   --field-bg: rgba(255, 255, 255, 0.9);
   --floating-action-bg: rgba(255, 255, 255, 0.8);
-  --icon-button-bg: transparent;
-  --icon-button-bg-hover: rgba(15, 118, 110, 0.08);
-  --icon-button-border: transparent;
-  --icon-button-color: var(--muted);
-  --icon-button-shadow: none;
-  --icon-button-shadow-hover: 0 10px 20px rgba(15, 23, 42, 0.12);
+  --icon-button-bg: rgba(255, 255, 255, 0.72);
+  --icon-button-bg-hover: rgba(237, 250, 248, 0.96);
+  --icon-button-border: rgba(15, 118, 110, 0.22);
+  --icon-button-color: #3e4b5a;
+  --icon-button-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  --icon-button-shadow-hover: 0 10px 20px rgba(15, 23, 42, 0.14);
   --text-secondary: #344050;
   --text-reading: #202833;
   --mobile-hero-start: rgba(255, 255, 255, 0.98);
@@ -289,9 +289,9 @@ body {
 }
 
 .topbar-shortcuts-button {
-  border: none;
-  background: transparent;
-  color: var(--muted);
+  border: 1px solid var(--icon-button-border);
+  background: var(--icon-button-bg);
+  color: var(--icon-button-color);
   width: 30px;
   height: 30px;
   padding: 0;
@@ -301,12 +301,13 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: none;
+  box-shadow: var(--icon-button-shadow);
 }
 
 .topbar-shortcuts-button:hover {
+  background: var(--icon-button-bg-hover);
   transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  box-shadow: var(--icon-button-shadow-hover);
 }
 
 .topbar-shortcuts-button:focus-visible {
