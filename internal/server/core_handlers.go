@@ -57,21 +57,9 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data.Feeds = feeds
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.FeedEditMode = feedEditModeEnabled(r)
 	a.renderTemplate(w, "index", data)
-}
-
-func (a *App) renderPulseMessage(w http.ResponseWriter, message, className string) {
-	data := subscribeResponseData{
-		ItemList:       nil,
-		Message:        message,
-		MessageClass:   className,
-		Feeds:          nil,
-		SelectedFeedID: 0,
-		Update:         false,
-		FeedEditMode:   false,
-	}
-	a.renderTemplate(w, "subscribe_response", data)
 }
 
 func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
@@ -86,10 +74,11 @@ func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, fee
 	}
 
 	data := itemListResponseData{
-		ItemList:       itemList,
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
-		FeedEditMode:   feedEditModeEnabled(r),
+		ItemList:          itemList,
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    feedID,
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "item_list_response", data)
 }
@@ -113,14 +102,15 @@ func (a *App) newPageData(r *http.Request) (pageData, error) {
 	}
 
 	return pageData{
-		fullPageData:   base,
-		ItemList:       nil,
-		MobileStream:   nil,
-		MobileReader:   nil,
-		MobileTopBar:   nil,
-		Feeds:          nil,
-		SelectedFeedID: 0,
-		FeedEditMode:   false,
+		fullPageData:      base,
+		ItemList:          nil,
+		MobileStream:      nil,
+		MobileReader:      nil,
+		MobileTopBar:      nil,
+		FeedPulseStatuses: nil,
+		Feeds:             nil,
+		SelectedFeedID:    0,
+		FeedEditMode:      false,
 	}, nil
 }
 
@@ -301,4 +291,13 @@ func mobilePulsePath(selectedFeedID int64) string {
 	}
 
 	return fmt.Sprintf("/mobile/pulse?selected_feed_id=%d", selectedFeedID)
+}
+
+func mobileFeedRefreshPath(feedID, selectedFeedID int64) string {
+	path := fmt.Sprintf("/mobile/feeds/%d/refresh", feedID)
+	if selectedFeedID <= 0 {
+		return path
+	}
+
+	return fmt.Sprintf("%s?selected_feed_id=%d", path, selectedFeedID)
 }

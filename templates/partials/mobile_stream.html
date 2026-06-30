@@ -1,41 +1,45 @@
 {{define "mobile_stream"}}
   <section class="mobile-stream" data-mobile-stream="true">
     <div id="mobile-stream-content">
-      {{if .StatusMessage}}
-        <p class="mobile-stream-status" role="status">{{.StatusMessage}}</p>
-      {{end}}
-
       {{if .Items}}
         <div class="mobile-stream-list">
           {{range .Items}}
             <article class="mobile-card">
-              <button
-                class="mobile-card-open"
-                type="button"
-                hx-get="/mobile/items/{{.ID}}/reader{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
-                hx-target="#main-content"
-                hx-swap="innerHTML"
-              >
+              <div class="mobile-card-meta">
                 <span class="mobile-card-source">{{.FeedTitle}}</span>
-                <span class="mobile-card-title">{{.Title}}</span>
                 <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>
-              </button>
+              </div>
+              <div class="mobile-card-title-row">
+                <button
+                  class="mobile-card-open"
+                  type="button"
+                  hx-get="/mobile/items/{{.ID}}/reader{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
+                  hx-target="#main-content"
+                  hx-swap="innerHTML"
+                >
+                  <span class="mobile-card-title">{{.Title}}</span>
+                </button>
+                <button
+                  class="mobile-card-mark-read"
+                  type="button"
+                  aria-label="Mark {{.Title}} read"
+                  title="Mark read"
+                  hx-post="/mobile/items/{{.ID}}/read{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
+                  hx-target="#main-content"
+                  hx-swap="innerHTML"
+                >
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span class="sr-only">Mark read</span>
+                </button>
+              </div>
               {{if .CompactPreview}}
                 <div class="mobile-card-summary">
                   <p>{{.CompactPreview}}</p>
                 </div>
               {{end}}
-              <div class="mobile-card-actions">
-                <button
-                  class="mobile-card-mark-read"
-                  type="button"
-                  hx-post="/mobile/items/{{.ID}}/read{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
-                  hx-target="#main-content"
-                  hx-swap="innerHTML"
-                >
-                  Mark read
-                </button>
-              </div>
             </article>
           {{end}}
         </div>

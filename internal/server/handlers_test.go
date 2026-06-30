@@ -34,80 +34,82 @@ import (
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 const (
-	pathParentDir        = ".."
-	pathIndex            = "/"
-	pathPulseFeeds       = "/feeds/pulse"
-	pathFeedEditMode     = "/feeds/edit-mode"
-	pathEditModeCancel   = "/feeds/edit-mode/cancel"
-	pathEditModeSave     = "/feeds/edit-mode/save"
-	pathMobileStream     = "/mobile/stream"
-	pathMobilePulse      = "/mobile/pulse"
-	errIndexStatusFmt    = "index status: %d"
-	expectedNoItems      = 0
-	expectedSingleFeed   = 1
-	expectedSingleItem   = 1
-	firstFeedIndex       = 0
-	firstItemIndex       = 0
-	expectedTwoItems     = 2
-	expectedTwoUnread    = 2
-	expectedOneUnread    = 1
-	errStoreListFeeds    = "store.ListFeeds: %v"
-	errStoreUpsertFeed   = "store.UpsertFeed: %v"
-	errStoreUpsertItems  = "store.UpsertItems: %v"
-	errStoreListItems    = "store.ListItems: %v"
-	headerContentType    = "Content-Type"
-	headerSetCookie      = "Set-Cookie"
-	formURLEncoded       = "application/x-www-form-urlencoded"
-	formSelectedFeedID   = "selected_feed_id"
-	classIsActive        = "is-active"
-	classFeedListEdit    = `class="feed-list edit-mode"`
-	decimalBase          = 10
-	sqlItemReadAtByID    = "SELECT read_at FROM items WHERE id = ?"
-	sqlUpdateItemReadAt  = "UPDATE items SET read_at = ? WHERE id = ?"
-	expectedTombstoneMsg = "expected tombstone to be recorded"
-	exampleRSSURL        = "http://example.com/rss"
-	sourceTitle          = "Source Title"
-	customTitle          = "Custom Title"
-	manualRefreshTitle   = "Manual Refresh Feed"
-	sweepOtherFeedURL    = "http://example.com/other"
-	sweepGUIDKeep        = "1"
-	sweepGUIDA           = "2"
-	sweepGUIDB           = "3"
-	sweepGUIDOther       = "4"
-	deleteFeedTitle      = "Delete Feed"
-	itemLimitFeedTitle   = "Feed"
-	pollFeedTitle        = "Poll Feed"
-	pulseFeedOneTitle    = "Pulse Feed One"
-	pulseFeedTwoTitle    = "Pulse Feed Two"
-	emptyStateNoFeed     = "Pick a feed to start reading."
-	newFeedTitle         = "New Title"
-	itemLimitTotal       = 210
-	itemLimitPruned      = 10
-	itemLimitKept        = 200
-	itemLimitFirstGUID   = "guid-010"
-	feedListIDAttr       = `id="feed-list"`
-	feedListSwapAttr     = `hx-swap-oob="innerHTML"`
-	contentPanelIDAttr   = `id="content-panel"`
-	contentPanelSwapAttr = `hx-swap-oob="outerHTML"`
-	msgFeedListOOB       = "expected feed list OOB update"
-	msgFeedListOOBSwap   = "expected OOB innerHTML swap for feed list"
-	expectedItemsFmt     = "expected %d items, got %d"
-	msgPollStatus        = "poll status"
-	msgFeedItemsStatus   = "feed items status"
-	valueEnabled         = "1"
-	cookieClearedToken   = "Max-Age=0"
-	imageProxyURLQuery   = "?url="
-	examplePublicIP      = "93.184.216.34"
-	selectedItemIDParam  = "selected_item_id"
-	collapseItemIDParam  = "collapse_item_id"
-	selectedItemIDPlain  = int64(42)
-	selectedItemIDRaw    = "42"
-	selectedItemIDPrefix = "item-42"
-	threeUnits           = 3
-	hoursInThreeDays     = 72
-	sqlCountFeedByID     = "SELECT COUNT(*) FROM feeds WHERE id = ?"
-	sqlCountItemsByFeed  = "SELECT COUNT(*) FROM items WHERE feed_id = ?"
-	sqlCountTombByFeed   = "SELECT COUNT(*) FROM tombstones WHERE feed_id = ?"
+	pathParentDir         = ".."
+	pathIndex             = "/"
+	pathPulseFeeds        = "/feeds/pulse"
+	pathPulseStatus       = "/feeds/pulse/status"
+	pathFeedEditMode      = "/feeds/edit-mode"
+	pathEditModeCancel    = "/feeds/edit-mode/cancel"
+	pathEditModeSave      = "/feeds/edit-mode/save"
+	pathMobileStream      = "/mobile/stream"
+	pathMobilePulse       = "/mobile/pulse"
+	pathMobileFeedRefresh = "/mobile/feeds/%d/refresh"
+	errIndexStatusFmt     = "index status: %d"
+	expectedNoItems       = 0
+	expectedSingleFeed    = 1
+	expectedSingleItem    = 1
+	firstFeedIndex        = 0
+	firstItemIndex        = 0
+	expectedTwoItems      = 2
+	expectedTwoUnread     = 2
+	expectedOneUnread     = 1
+	errStoreListFeeds     = "store.ListFeeds: %v"
+	errStoreUpsertFeed    = "store.UpsertFeed: %v"
+	errStoreUpsertItems   = "store.UpsertItems: %v"
+	errStoreListItems     = "store.ListItems: %v"
+	headerContentType     = "Content-Type"
+	headerSetCookie       = "Set-Cookie"
+	formURLEncoded        = "application/x-www-form-urlencoded"
+	formSelectedFeedID    = "selected_feed_id"
+	classIsActive         = "is-active"
+	classFeedListEdit     = `class="feed-list edit-mode"`
+	decimalBase           = 10
+	sqlItemReadAtByID     = "SELECT read_at FROM items WHERE id = ?"
+	sqlUpdateItemReadAt   = "UPDATE items SET read_at = ? WHERE id = ?"
+	expectedTombstoneMsg  = "expected tombstone to be recorded"
+	exampleRSSURL         = "http://example.com/rss"
+	sourceTitle           = "Source Title"
+	customTitle           = "Custom Title"
+	manualRefreshTitle    = "Manual Refresh Feed"
+	sweepOtherFeedURL     = "http://example.com/other"
+	sweepGUIDKeep         = "1"
+	sweepGUIDA            = "2"
+	sweepGUIDB            = "3"
+	sweepGUIDOther        = "4"
+	deleteFeedTitle       = "Delete Feed"
+	itemLimitFeedTitle    = "Feed"
+	pollFeedTitle         = "Poll Feed"
+	pulseFeedOneTitle     = "Pulse Feed One"
+	pulseFeedTwoTitle     = "Pulse Feed Two"
+	emptyStateNoFeed      = "Pick a feed to start reading."
+	newFeedTitle          = "New Title"
+	itemLimitTotal        = 210
+	itemLimitPruned       = 10
+	itemLimitKept         = 200
+	itemLimitFirstGUID    = "guid-010"
+	feedListIDAttr        = `id="feed-list"`
+	feedListSwapAttr      = `hx-swap-oob="innerHTML"`
+	contentPanelIDAttr    = `id="content-panel"`
+	contentPanelSwapAttr  = `hx-swap-oob="outerHTML"`
+	msgFeedListOOB        = "expected feed list OOB update"
+	msgFeedListOOBSwap    = "expected OOB innerHTML swap for feed list"
+	expectedItemsFmt      = "expected %d items, got %d"
+	msgPollStatus         = "poll status"
+	msgFeedItemsStatus    = "feed items status"
+	valueEnabled          = "1"
+	cookieClearedToken    = "Max-Age=0"
+	imageProxyURLQuery    = "?url="
+	examplePublicIP       = "93.184.216.34"
+	selectedItemIDParam   = "selected_item_id"
+	collapseItemIDParam   = "collapse_item_id"
+	selectedItemIDPlain   = int64(42)
+	selectedItemIDRaw     = "42"
+	selectedItemIDPrefix  = "item-42"
+	threeUnits            = 3
+	hoursInThreeDays      = 72
+	sqlCountFeedByID      = "SELECT COUNT(*) FROM feeds WHERE id = ?"
+	sqlCountItemsByFeed   = "SELECT COUNT(*) FROM items WHERE feed_id = ?"
+	sqlCountTombByFeed    = "SELECT COUNT(*) FROM tombstones WHERE feed_id = ?"
 )
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -2757,6 +2759,14 @@ func assertRecentFeedSkippedAfterPulse(t *testing.T, app *App, recentFeedID int6
 	}
 }
 
+func assertPulseFeedStatus(t *testing.T, app *App, feedID int64, want pulseFeedStatus) {
+	t.Helper()
+
+	if got := app.pulseFeedStatus(feedID); got != want {
+		t.Fatalf("expected pulse status %q for feed %d, got %q", want, feedID, got)
+	}
+}
+
 func TestPulseRefreshAllFeeds(t *testing.T) {
 	t.Parallel()
 
@@ -2776,6 +2786,181 @@ func TestPulseRefreshAllFeeds(t *testing.T) {
 
 	staleItems := mustListItems(t, app, fixture.staleFeedID)
 	assertItemCount(t, staleItems, expectedTwoItems)
+}
+
+func TestPulseStatusModelTracksSkippedPendingAndFreshFeeds(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	app := newTestApp(t)
+	fixture := setupPulseRefreshFixture(t, app, base)
+
+	fixture.feedServerStale.SetFeedXML(fixture.staleUpdated)
+
+	app.refreshMu.Lock()
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse refresh status")
+
+	assertPulseFeedStatus(t, app, fixture.recentFeedID, pulseFeedStatusFresh)
+	assertPulseFeedStatus(t, app, fixture.staleFeedID, pulseFeedStatusPending)
+	assertPulseFeedStatus(t, app, fixture.staleFeedID+999, pulseFeedStatusNone)
+
+	app.refreshMu.Unlock()
+	waitForPulseIdle(t, app)
+
+	assertPulseFeedStatus(t, app, fixture.recentFeedID, pulseFeedStatusFresh)
+	assertPulseFeedStatus(t, app, fixture.staleFeedID, pulseFeedStatusFresh)
+}
+
+func TestPulseResponseRendersFeedListIndicatorsAndPoller(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	app := newTestApp(t)
+	fixture := setupPulseRefreshFixture(t, app, base)
+
+	app.refreshMu.Lock()
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse status response status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `id="feed-list" hx-swap-oob="innerHTML"`, "expected feed-list OOB update")
+	assertContains(t, body, fmt.Sprintf(`data-feed-id="%d"`, fixture.recentFeedID), "expected recent feed row")
+	assertContains(t, body, fmt.Sprintf(`data-feed-id="%d"`, fixture.staleFeedID), "expected stale feed row")
+	assertContains(t, body, `class="feed-pulse-indicator fresh"`, "expected fresh feed indicator")
+	assertContains(t, body, `role="img"`, "expected pulse indicators to expose accessible status labels")
+	assertContains(t, body, `aria-label="Fresh"`, "expected fresh feed status label")
+	assertContains(t, body, `class="feed-pulse-indicator pending"`, "expected pending feed indicator")
+	assertContains(t, body, `aria-label="Refreshing"`, "expected pending feed status label")
+	assertContains(t, body, `id="pulse-status-poller"`, "expected pulse poller slot update")
+	assertContains(t, body, `hx-get="/feeds/pulse/status"`, "expected pulse status polling")
+	assertContains(t, body, "Pulse running.", "expected pulse running message")
+
+	app.refreshMu.Unlock()
+	waitForPulseIdle(t, app)
+}
+
+func TestPulseStatusEndpointStopsPollingWhenIdle(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, pulseFeedOneTitle)
+	app.resetPulseStatuses([]int64{feedID}, nil)
+
+	rec := getRequest(app, pathPulseStatus)
+	assertResponseCode(t, rec, "pulse idle status response")
+
+	body := rec.Body.String()
+	assertContains(t, body, `id="subscribe-message"`, "expected message OOB response")
+	assertContains(t, body, `hx-swap-oob="outerHTML"`, "expected message OOB swap")
+	assertContains(t, body, `id="feed-list" hx-swap-oob="innerHTML"`, "expected feed-list OOB update")
+	assertContains(t, body, `class="feed-pulse-indicator fresh"`, "expected fresh status to remain visible")
+	assertContains(t, body, `id="pulse-status-poller"`, "expected poller slot")
+	assertNotContains(t, body, `hx-get="/feeds/pulse/status"`, "expected idle response to stop polling")
+}
+
+func TestPulseStatusViewsExpireFreshIndicatorsAfterWindow(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, pulseFeedOneTitle)
+	now := time.Now().UTC()
+
+	app.markPulseFeedStatusAt(feedID, pulseFeedStatusFresh, now.Add(-pulseRecentRefreshWindow))
+
+	views := app.pulseStatusViewsAt(now)
+	if _, ok := views[feedID]; ok {
+		t.Fatalf("expected fresh pulse status to expire after %s", pulseRecentRefreshWindow)
+	}
+
+	app.markPulseFeedStatusAt(feedID, pulseFeedStatusFresh, now.Add(-pulseRecentRefreshWindow+time.Second))
+
+	views = app.pulseStatusViewsAt(now)
+	if _, ok := views[feedID]; !ok {
+		t.Fatalf("expected fresh pulse status inside %s to remain visible", pulseRecentRefreshWindow)
+	}
+}
+
+func TestPulseStatusModelMarksFailedFeedsError(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "not a valid feed url", pulseFeedOneTitle)
+
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse refresh status")
+
+	waitForPulseIdle(t, app)
+
+	assertPulseFeedStatus(t, app, feedID, pulseFeedStatusError)
+}
+
+func TestPulseStatusEndpointRendersFailedFeedErrorWithoutUpstreamText(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "not a valid feed url", "Broken Pulse Feed")
+
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse refresh status")
+	waitForPulseIdle(t, app)
+
+	statusRec := getRequest(app, pathPulseStatus)
+	assertResponseCode(t, statusRec, "pulse failed status response")
+
+	body := statusRec.Body.String()
+	assertContains(t, body, fmt.Sprintf(`data-feed-id="%d"`, feedID), "expected failed feed row")
+	assertContains(t, body, `class="feed-pulse-indicator error"`, "expected failed feed indicator")
+	assertContains(t, body, `aria-label="Refresh failed"`, "expected generic failed feed status label")
+	assertNotContains(t, body, "unsupported protocol scheme", "expected upstream error detail to stay hidden")
+	assertNotContains(t, body, "not a valid feed url", "expected upstream feed URL to stay hidden")
+}
+
+func TestPulseStatusSnapshotIsIndependent(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, pulseFeedOneTitle)
+	app.resetPulseStatuses([]int64{feedID}, nil)
+
+	statuses := app.pulseFeedStatuses()
+	statuses[feedID] = pulseFeedStatusError
+
+	assertPulseFeedStatus(t, app, feedID, pulseFeedStatusFresh)
+}
+
+func TestPulseAlreadyRunningDoesNotReplaceStatuses(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	app := newTestApp(t)
+	fixture := setupPulseRefreshFixture(t, app, base)
+
+	app.refreshMu.Lock()
+	rec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, rec, "pulse refresh status")
+
+	assertPulseFeedStatus(t, app, fixture.recentFeedID, pulseFeedStatusFresh)
+	assertPulseFeedStatus(t, app, fixture.staleFeedID, pulseFeedStatusPending)
+
+	secondRec := postRequest(app, pathPulseFeeds)
+	assertResponseCode(t, secondRec, "pulse already running status")
+	secondBody := secondRec.Body.String()
+	assertContains(
+		t,
+		secondBody,
+		"Pulse already running.",
+		"expected pulse already running message",
+	)
+	assertContains(t, secondBody, `id="feed-list" hx-swap-oob="innerHTML"`, "expected feed-list status UI")
+	assertContains(t, secondBody, `class="feed-pulse-indicator fresh"`, "expected fresh indicator to remain")
+	assertContains(t, secondBody, `class="feed-pulse-indicator pending"`, "expected pending indicator to remain")
+	assertContains(t, secondBody, `hx-get="/feeds/pulse/status"`, "expected polling to continue")
+	assertPulseFeedStatus(t, app, fixture.recentFeedID, pulseFeedStatusFresh)
+	assertPulseFeedStatus(t, app, fixture.staleFeedID, pulseFeedStatusPending)
+
+	app.refreshMu.Unlock()
+	waitForPulseIdle(t, app)
 }
 
 func TestPulseRefreshAlreadyRunning(t *testing.T) {
@@ -2800,6 +2985,12 @@ func TestPulseRefreshAlreadyRunning(t *testing.T) {
 		rec.Body.String(),
 		"Pulse already running.",
 		"expected pulse already running message",
+	)
+	assertContains(
+		t,
+		rec.Body.String(),
+		`hx-get="/feeds/pulse/status"`,
+		"expected already-running response to include status polling",
 	)
 }
 
@@ -4434,6 +4625,25 @@ func TestMobileStreamHTMXReplacesURL(t *testing.T) {
 		`hx-post="/mobile/pulse"`,
 		"expected mobile stream response to wire the brand button to mobile pulse",
 	)
+	assertContains(
+		t,
+		body,
+		`hx-indicator="#topbar-brand-button"`,
+		"expected brand button to show request feedback while pulsing",
+	)
+	assertNotContains(t, body, `class="mobile-stream-refresh-button"`, "expected separate refresh button to be removed")
+	assertContains(
+		t,
+		body,
+		`aria-label="Refresh all feeds"`,
+		"expected all-feeds refresh label on the brand button",
+	)
+	assertContains(
+		t,
+		body,
+		`<span class="brand-subtitle-pending" aria-live="polite">Refreshing all feeds</span>`,
+		"expected all-feeds refreshing feedback text",
+	)
 }
 
 func TestMobileStreamSelectorHTMXKeepsActiveSelectorMounted(t *testing.T) {
@@ -4594,9 +4804,115 @@ func TestMobileStreamSelectorMarksSelectedFeed(t *testing.T) {
 	assertContains(
 		t,
 		rec.Body.String(),
-		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
-		"expected brand button to preserve selected feed in mobile pulse URL",
+		fmt.Sprintf(`hx-post="/mobile/feeds/%d/refresh?selected_feed_id=%d"`, feedID, feedID),
+		"expected brand button to refresh the selected feed",
 	)
+	assertContains(
+		t,
+		rec.Body.String(),
+		`<span class="brand-subtitle-pending" aria-live="polite">Refreshing Bright Feed</span>`,
+		"expected selected-feed refreshing feedback text",
+	)
+}
+
+func TestMobileStreamRendersFlatRowsWithIconMarkRead(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "http://example.com/a-feed", "Alpha Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Alpha Story",
+		"http://example.com/alpha-story",
+		"alpha-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	rec := getRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile flat row status")
+
+	body := rec.Body.String()
+	assertNotContains(
+		t,
+		body,
+		`class="mobile-feed-status-panel"`,
+		"expected mobile feed status panel to be removed",
+	)
+	assertNotContains(t, body, `class="mobile-stream-refresh-button"`, "expected separate refresh button to be removed")
+	assertNotContains(t, body, `class="mobile-card-actions"`, "expected trailing card action row to be removed")
+	assertContains(t, body, `class="mobile-card-title-row"`, "expected title row to hold item actions")
+	assertContains(t, body, `class="mobile-card-mark-read"`, "expected icon-only mark-read button")
+	assertContains(t, body, `aria-label="Mark Alpha Story read"`, "expected mark-read button accessible name")
+	assertContains(t, body, `<svg class="icon"`, "expected mark-read button to render an icon")
+	assertContains(
+		t,
+		body,
+		`hx-post="/mobile/pulse"`,
+		"expected all-feeds refresh action to stay on the brand button",
+	)
+	assertContains(
+		t,
+		body,
+		`aria-label="Refresh all feeds"`,
+		"expected all-feeds brand button accessible name",
+	)
+}
+
+func TestMobileFeedRefreshPreservesFilteredSelectionAndURL(t *testing.T) {
+	t.Parallel()
+
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	feedServer, feedURL := testutil.NewFeedServer(t, manualRefreshInitialXML(base))
+	app := newTestApp(t)
+
+	feedID, err := store.UpsertFeed(context.Background(), app.db, feedURL, manualRefreshTitle)
+	requireNoErr(t, err, errStoreUpsertFeed)
+
+	_, refreshErr := feedpkg.Refresh(context.Background(), app.db, feedID)
+	requireNoErr(t, refreshErr, "feedpkg.Refresh initial: %v")
+
+	feedServer.SetFeedXML(manualRefreshUpdatedXML(base))
+
+	target := fmt.Sprintf(pathMobileFeedRefresh+"?selected_feed_id=%d", feedID, feedID)
+	rec := postHTMXRequest(app, target)
+	assertResponseCode(t, rec, "mobile feed refresh status")
+
+	expectedURL := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, feedID)
+	if got := rec.Header().Get("Hx-Replace-Url"); got != expectedURL {
+		t.Fatalf("expected filtered HX-Replace-Url, got %q", got)
+	}
+
+	body := rec.Body.String()
+	assertContains(t, body, "Second", "expected refreshed item in mobile stream")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-post="/mobile/feeds/%d/refresh?selected_feed_id=%d"`, feedID, feedID),
+		"expected mobile refresh response to preserve selected feed on the brand button",
+	)
+
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, expectedTwoItems)
+}
+
+func TestMobilePulseHidesUpstreamRefreshErrorDetails(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "not a valid feed url", "Broken Mobile Feed")
+	setPulseRefreshState(t, app, feedID, time.Now().UTC().Add(-2*time.Hour), "")
+
+	rec := postHTMXRequest(app, pathMobilePulse)
+	assertResponseCode(t, rec, "mobile pulse error status")
+
+	body := rec.Body.String()
+	assertNotContains(t, body, `class="mobile-stream-status"`, "expected mobile pulse response to omit status pill")
+	assertNotContains(t, body, "Updated 0 feeds.", "expected mobile pulse text to stay hidden")
+	assertNotContains(t, body, "unsupported protocol scheme", "expected upstream error detail to stay hidden")
+	assertNotContains(t, body, "not a valid feed url", "expected upstream feed URL to stay hidden")
+	assertPulseFeedStatus(t, app, feedID, pulseFeedStatusError)
 }
 
 func TestMobileStreamFilteredEmptyStateNamesSelectedFeed(t *testing.T) {
@@ -4684,8 +5000,8 @@ func TestMobileMarkReadPreservesFilteredSelectionAndURL(t *testing.T) {
 	assertContains(
 		t,
 		body,
-		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
-		"expected mark-read response to keep mobile pulse tied to the selected feed",
+		fmt.Sprintf(`hx-post="/mobile/feeds/%d/refresh?selected_feed_id=%d"`, feedID, feedID),
+		"expected mark-read response to keep brand refresh tied to the selected feed",
 	)
 }
 
@@ -4732,12 +5048,13 @@ func TestMobilePulsePreservesFilteredSelectionAndURL(t *testing.T) {
 
 	body := rec.Body.String()
 	assertMobileTopBarOOBUpdate(t, body)
-	assertContains(t, body, "Already fresh enough.", "expected calm pulse status")
+	assertNotContains(t, body, `class="mobile-stream-status"`, "expected filtered pulse response to omit status pill")
+	assertNotContains(t, body, "Already fresh enough.", "expected filtered pulse status text to stay hidden")
 	assertFilteredMobileEmptyState(t, body, "Caught Up Feed", feedID, otherFeedID)
 	assertContains(
 		t,
 		body,
-		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
+		fmt.Sprintf(`hx-post="/mobile/feeds/%d/refresh?selected_feed_id=%d"`, feedID, feedID),
 		"expected pulse response to preserve selected feed in mobile brand button",
 	)
 }
@@ -4838,7 +5155,7 @@ func TestMobileReaderPreservesSelectedFeedID(t *testing.T) {
 	assertContains(
 		t,
 		body,
-		fmt.Sprintf(`hx-post="/mobile/pulse?selected_feed_id=%d"`, feedID),
+		fmt.Sprintf(`hx-post="/mobile/feeds/%d/refresh?selected_feed_id=%d"`, feedID, feedID),
 		"expected reader response to preserve selected feed in mobile brand button",
 	)
 	assertContains(
@@ -4948,7 +5265,8 @@ func TestMobilePulseRendersStreamWithoutCounts(t *testing.T) {
 
 	body := rec.Body.String()
 	assertContains(t, body, `data-mobile-stream="true"`, "expected mobile stream from pulse response")
-	assertContains(t, body, "Already fresh enough.", "expected calm pulse status when no feed is due")
+	assertNotContains(t, body, `class="mobile-stream-status"`, "expected mobile pulse response to omit status pill")
+	assertNotContains(t, body, "Already fresh enough.", "expected mobile pulse status text to stay hidden")
 	assertNotContains(t, body, `feed-count">`, "expected unread counters to be absent")
 	assertNotContains(t, body, "New items (", "expected desktop new-items UI to be absent")
 }

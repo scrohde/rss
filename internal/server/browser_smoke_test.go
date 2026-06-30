@@ -18,6 +18,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 	"github.com/mmcdole/gofeed"
+
+	"rss/internal/store"
 )
 
 const (
@@ -215,6 +217,39 @@ func TestBrowserSmokeMobileFilteredFeedFlows(t *testing.T) {
 	runMobileFilteredEmptyStateFlow(t, ctx, fixture)
 }
 
+func TestBrowserSmokePulseIndicatorFlows(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	seedSmokePulseStatuses(t, app, fixture)
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
+	waitForJS(t, ctx, desktopPulseIndicatorsExpression(fixture), "desktop pulse indicators")
+
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(320, 568),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready after mobile resize")
+	waitForJS(t, ctx, mobileLayoutExpression(), "narrow mobile layout")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile stream loaded")
+
+	selectMobileFeedFilter(t, ctx, fixture.secondaryFeedID)
+	waitForJS(t, ctx, mobileFlatStreamLayoutExpression(fixture), "narrow mobile flat stream layout")
+}
+
 func newSmokeApp(t *testing.T) *App {
 	t.Helper()
 
@@ -223,6 +258,28 @@ func newSmokeApp(t *testing.T) *App {
 	app.SetStaticFS(os.DirFS(staticRoot))
 
 	return app
+}
+
+func seedSmokePulseStatuses(t *testing.T, app *App, fixture smokeFixture) {
+	t.Helper()
+
+	longTitle := "Primary Feed With An Extraordinarily Long Name For Pulse Layout Verification"
+	err := store.UpdateFeedTitle(context.Background(), app.db, fixture.primaryFeedID, longTitle)
+	if err != nil {
+		t.Fatalf("store.UpdateFeedTitle: %v", err)
+	}
+
+	app.resetPulseStatuses(
+		[]int64{
+			fixture.primaryFeedID,
+			fixture.secondaryFeedID,
+			fixture.tertiaryFeedID,
+			fixture.quaternaryFeedID,
+			fixture.archiveFeedID,
+		},
+		[]int64{fixture.secondaryFeedID},
+	)
+	app.markPulseFeedStatus(fixture.tertiaryFeedID, pulseFeedStatusError)
 }
 
 func newSmokeServer(t *testing.T, handler http.Handler) *httptest.Server {
@@ -1448,6 +1505,85 @@ func feedUnreadCountExpression(feedID int64, want string) string {
 		})()`,
 		fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, feedID),
 		want,
+	)
+}
+
+func desktopPulseIndicatorsExpression(fixture smokeFixture) string {
+	return fmt.Sprintf(
+		`(() => {
+			const checks = [
+				[%q, "fresh", "Fresh"],
+				[%q, "pending", "Refreshing"],
+				[%q, "error", "Refresh failed"],
+			];
+			if (document.documentElement.scrollWidth > window.innerWidth + 1) {
+				return false;
+			}
+			return checks.every(([feedID, className, label]) => {
+				const feed = document.querySelector(
+					'#feed-list .feed-link[data-feed-id="' + feedID + '"]'
+				);
+				const indicator = feed && feed.querySelector(".feed-pulse-indicator." + className);
+				if (!feed || !indicator || indicator.getAttribute("role") !== "img" ||
+					indicator.getAttribute("aria-label") !== label) {
+					return false;
+				}
+				const style = window.getComputedStyle(feed);
+				const columns = style.gridTemplateColumns.split(" ");
+				return columns.length === 3 && Math.round(parseFloat(columns[0])) === 10;
+			});
+		})()`,
+		fmt.Sprintf("%d", fixture.primaryFeedID),
+		fmt.Sprintf("%d", fixture.secondaryFeedID),
+		fmt.Sprintf("%d", fixture.tertiaryFeedID),
+	)
+}
+
+func mobileFlatStreamLayoutExpression(fixture smokeFixture) string {
+	return fmt.Sprintf(
+		`(() => {
+			const panel = document.querySelector(".mobile-feed-status-panel");
+			const refreshRow = document.querySelector(".mobile-stream-refresh-row");
+			const refreshButton = document.querySelector(".mobile-stream-refresh-button");
+			const brandButton = document.querySelector("#topbar-brand-button");
+			const list = document.querySelector(".mobile-stream-list");
+			const card = document.querySelector(".mobile-card");
+			const titleRow = card && card.querySelector(".mobile-card-title-row");
+			const openButton = card && card.querySelector(".mobile-card-open");
+			const markRead = card && card.querySelector(".mobile-card-mark-read");
+			if (panel || refreshRow || refreshButton || !brandButton || !list || !card ||
+				!titleRow || !openButton || !markRead || document.documentElement.scrollWidth > window.innerWidth + 1) {
+				return false;
+			}
+			const hxPost = brandButton.getAttribute("hx-post") || "";
+			if (!hxPost.includes(%q) || !hxPost.includes(%q)) {
+				return false;
+			}
+			if (brandButton.getAttribute("aria-label") !== "Refresh feed Secondary Feed") {
+				return false;
+			}
+			if (brandButton.getAttribute("hx-indicator") !== "#topbar-brand-button") {
+				return false;
+			}
+			const pending = brandButton.querySelector(".brand-subtitle-pending");
+			if (!pending || pending.textContent.trim() !== "Refreshing Secondary Feed") {
+				return false;
+			}
+			const listStyle = window.getComputedStyle(list);
+			const cardStyle = window.getComputedStyle(card);
+			if (listStyle.borderTopStyle === "none" || cardStyle.borderBottomStyle === "none" ||
+				cardStyle.borderRadius !== "0px" || cardStyle.boxShadow !== "none") {
+				return false;
+			}
+			const titleRect = openButton.getBoundingClientRect();
+			const markRect = markRead.getBoundingClientRect();
+			if (markRect.left <= titleRect.right || markRect.width < 34 || markRect.height < 34) {
+				return false;
+			}
+			return Boolean(markRead.querySelector("svg.icon")) && markRect.right <= window.innerWidth + 1;
+		})()`,
+		fmt.Sprintf("/mobile/feeds/%d/refresh", fixture.secondaryFeedID),
+		fmt.Sprintf("%d", fixture.secondaryFeedID),
 	)
 }
 

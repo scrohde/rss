@@ -11,5 +11,7 @@ GO_BUILD_CACHE="${GO_BUILD_CACHE:-/tmp/go-build-cache}"
 mkdir -p "$GO_BUILD_CACHE"
 export GOCACHE="$GO_BUILD_CACHE"
 
-echo "==> go test -tags=smoke -count=1 ./internal/server -run TestBrowserSmokeReaderFlows"
-go test -tags=smoke -count=1 ./internal/server -run TestBrowserSmokeReaderFlows "$@"
+SMOKE_PATTERN='TestBrowserSmoke(ReaderFlows|PulseIndicatorFlows)'
+
+echo "==> go test -tags=smoke -count=1 ./internal/server -run ${SMOKE_PATTERN}"
+go test -tags=smoke -count=1 ./internal/server -run "${SMOKE_PATTERN}" "$@"

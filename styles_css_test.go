@@ -177,6 +177,11 @@ func TestStylesMobileReaderContracts(t *testing.T) {
 			msg: "expected mobile reader styles to be defined",
 		},
 		{
+			ok: cssRuleContains(source, ".mobile-reader-article", "border-top: 1px solid var(--panel-divider);") &&
+				cssRuleContains(source, ".mobile-reader-article", "background: transparent;"),
+			msg: "expected mobile reader article to use flat separators instead of a card shell",
+		},
+		{
 			ok:  cssRuleContains(source, ".feed-panel", "display: none;"),
 			msg: "expected mobile layout to hide feed panel",
 		},
@@ -191,6 +196,65 @@ func TestStylesMobileReaderContracts(t *testing.T) {
 		{
 			ok:  cssRuleContains(source, ".mobile-card-title", "overflow-wrap: anywhere;"),
 			msg: "expected mobile card titles to wrap instead of widening the viewport",
+		},
+	}
+
+	for _, check := range checks {
+		if !check.ok {
+			t.Fatal(check.msg)
+		}
+	}
+}
+
+func TestStylesPulseStatusContracts(t *testing.T) {
+	t.Parallel()
+
+	source := readStylesCSS(t)
+
+	checks := []struct {
+		msg string
+		ok  bool
+	}{
+		{
+			ok:  cssRuleContains(source, ".feed-link", "grid-template-columns: 10px minmax(0, 1fr) auto;"),
+			msg: "expected desktop feed rows to reserve pulse status space",
+		},
+		{
+			ok:  cssRuleContains(source, ".feed-pulse-indicator.none", "opacity: 0;"),
+			msg: "expected empty desktop pulse status slots to stay invisible",
+		},
+		{
+			ok:  cssRuleContains(source, ".feed-link:focus-visible", "outline: 2px solid var(--accent);"),
+			msg: "expected desktop feed rows to have a visible keyboard focus state",
+		},
+		{
+			ok: cssRuleContains(source, ".brand-subtitle-pending", "display: none;") &&
+				cssRuleContains(source, ".brand-pulse.htmx-request .brand-subtitle-default", "display: none;") &&
+				cssRuleContains(source, ".brand-pulse.htmx-request .brand-subtitle-pending", "display: inline;"),
+			msg: "expected brand pulse button to show temporary refreshing feedback during htmx requests",
+		},
+		{
+			ok:  cssRuleContains(source, ".mobile-stream-list", "border-top: 1px solid var(--panel-divider);"),
+			msg: "expected mobile stream list to start with a thin divider",
+		},
+		{
+			ok: cssRuleContains(source, ".mobile-card", "border-bottom: 1px solid var(--panel-divider);") &&
+				cssRuleContains(source, ".mobile-card", "background: transparent;"),
+			msg: "expected mobile items to render as divided rows instead of cards",
+		},
+		{
+			ok: cssRuleContains(source, ".mobile-card-mark-read", "width: 34px;") &&
+				cssRuleContains(source, ".mobile-card-mark-read", "height: 34px;"),
+			msg: "expected mobile mark-read icon button to have a stable compact touch target",
+		},
+		{
+			ok: strings.Contains(source, ".mobile-card-mark-read:focus-visible") &&
+				strings.Contains(source, "outline: 2px solid var(--accent);"),
+			msg: "expected mobile mark-read icon button to have a visible keyboard focus state",
+		},
+		{
+			ok:  strings.Contains(source, "@media (prefers-reduced-motion: reduce)"),
+			msg: "expected pending pulse animation to respect reduced motion",
 		},
 	}
 

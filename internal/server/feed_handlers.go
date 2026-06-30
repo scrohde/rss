@@ -156,13 +156,14 @@ func (a *App) buildSubscribeResponseData(
 	itemList = a.attachMarkAllReadUndo(itemList)
 
 	return subscribeResponseData{
-		Message:        "",
-		MessageClass:   "",
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
-		ItemList:       itemList,
-		Update:         true,
-		FeedEditMode:   feedEditModeEnabled(r),
+		Message:           "",
+		MessageClass:      "",
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    feedID,
+		ItemList:          itemList,
+		Update:            true,
+		FeedEditMode:      feedEditModeEnabled(r),
 	}, nil
 }
 
@@ -172,6 +173,7 @@ func (a *App) renderSubscribeError(w http.ResponseWriter, err error) {
 	data.Message = err.Error()
 	data.MessageClass = "error"
 	data.Update = false
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	a.renderTemplate(w, "subscribe_response", data)
 }
 
@@ -187,6 +189,7 @@ func (a *App) handleEnterFeedEditMode(w http.ResponseWriter, r *http.Request) {
 
 	data.ItemList = nil
 	data.Feeds = feeds
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = parseSelectedFeedID(r)
 	data.FeedEditMode = true
 	a.renderTemplate(w, "feed_list", data)
@@ -204,6 +207,7 @@ func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
 
 	data.ItemList = nil
 	data.Feeds = feeds
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = parseSelectedFeedID(r)
 	data.FeedEditMode = false
 	a.renderTemplate(w, "feed_list", data)
@@ -287,6 +291,7 @@ func (a *App) renderFeedEditSaveResponse(
 
 	data.ItemList = selection.itemList
 	data.Feeds = feeds
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = selection.selectedFeedID
 	data.FeedEditMode = false
 	a.renderTemplate(w, "feed_edit_save_response", data)
@@ -483,6 +488,7 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 
 	data.Banner = view.NewItemsData{FeedID: feedID, Count: count, SwapOOB: false}
 	data.Feeds = feeds
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.RefreshDisplay = refreshDisplay
 	data.LastError = lastError
 	data.SelectedFeedID = feedID
@@ -630,12 +636,13 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := toggleReadResponseData{
-		Item:           item,
-		Feeds:          feeds,
-		SelectedFeedID: feedID,
-		View:           currentView,
-		FeedEditMode:   feedEditModeEnabled(r),
-		UpdatePanel:    true,
+		Item:              item,
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    feedID,
+		View:              currentView,
+		FeedEditMode:      feedEditModeEnabled(r),
+		UpdatePanel:       true,
 	}
 	a.renderTemplate(w, "item_toggle_response", data)
 }
@@ -750,27 +757,85 @@ func (a *App) handlePulseFeeds(w http.ResponseWriter, r *http.Request) {
 
 	feedIDs, err := store.ListPulseFeedIDs(r.Context(), a.db, cutoff)
 	if err != nil {
-		a.renderPulseMessage(w, "pulse failed", "error")
+		a.renderPulseStatusResponse(w, r, "pulse failed", "error", false, true)
 
 		return
 	}
 
+	feeds, err := store.ListFeeds(r.Context(), a.db)
+	if err != nil {
+		a.renderPulseStatusResponse(w, r, "pulse failed", "error", false, true)
+
+		return
+	}
+
+	allFeedIDs := feedIDsFromViews(feeds)
 	if len(feedIDs) == 0 {
-		a.renderPulseMessage(w, "No feeds to pulse.", "")
+		a.resetPulseStatuses(allFeedIDs, nil)
+		a.renderPulseStatusResponseWithFeeds(w, r, feeds, "No feeds to pulse.", "", false, true)
 
 		return
 	}
 
-	if !a.startPulse(r.Context(), feedIDs) {
-		a.renderPulseMessage(w, "Pulse already running.", "")
+	if !a.startPulse(r.Context(), allFeedIDs, feedIDs) {
+		a.renderPulseStatusResponseWithFeeds(w, r, feeds, "Pulse already running.", "", true, true)
 
 		return
 	}
 
-	a.renderPulseMessage(w, "", "")
+	a.renderPulseStatusResponseWithFeeds(w, r, feeds, "Pulse running.", "", true, true)
 }
 
-func (a *App) startPulse(ctx context.Context, feedIDs []int64) bool {
+func (a *App) handlePulseStatus(w http.ResponseWriter, r *http.Request) {
+	running := a.isPulseRunning()
+
+	message := ""
+	if running {
+		message = "Pulse running."
+	}
+
+	a.renderPulseStatusResponse(w, r, message, "", running, false)
+}
+
+func (a *App) renderPulseStatusResponse(
+	w http.ResponseWriter,
+	r *http.Request,
+	message string,
+	className string,
+	running bool,
+	initial bool,
+) {
+	feeds, ok := a.listFeedsOrError(w, r)
+	if !ok {
+		return
+	}
+
+	a.renderPulseStatusResponseWithFeeds(w, r, feeds, message, className, running, initial)
+}
+
+func (a *App) renderPulseStatusResponseWithFeeds(
+	w http.ResponseWriter,
+	r *http.Request,
+	feeds []view.FeedView,
+	message string,
+	className string,
+	running bool,
+	initial bool,
+) {
+	data := pulseStatusResponseData{
+		Message:           message,
+		MessageClass:      className,
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    parseSelectedFeedID(r),
+		FeedEditMode:      feedEditModeEnabled(r),
+		Running:           running,
+		Initial:           initial,
+	}
+	a.renderTemplate(w, "pulse_status_response", data)
+}
+
+func (a *App) startPulse(ctx context.Context, allFeedIDs, feedIDs []int64) bool {
 	a.pulseMu.Lock()
 	if a.pulseRunning {
 		a.pulseMu.Unlock()
@@ -779,6 +844,7 @@ func (a *App) startPulse(ctx context.Context, feedIDs []int64) bool {
 	}
 
 	a.pulseRunning = true
+	a.pulseStatuses = buildInitialPulseStatuses(allFeedIDs, feedIDs)
 	a.pulseMu.Unlock()
 
 	feedIDsCopy := append([]int64(nil), feedIDs...)
@@ -804,7 +870,11 @@ func (a *App) runPulse(ctx context.Context, feedIDs []int64) {
 		if err != nil {
 			failed++
 
+			a.markPulseFeedStatus(feedID, pulseFeedStatusError)
+
 			slog.Warn("pulse refresh failed", "feed_id", feedID, "err", err)
+		} else {
+			a.markPulseFeedStatus(feedID, pulseFeedStatusFresh)
 		}
 	}
 
@@ -876,10 +946,11 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := itemListResponseData{
-		ItemList:       itemList,
-		Feeds:          feeds,
-		SelectedFeedID: selectedFeedID,
-		FeedEditMode:   feedEditModeEnabled(r),
+		ItemList:          itemList,
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    selectedFeedID,
+		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "delete_feed_response", data)
 }

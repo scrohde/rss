@@ -1,0 +1,26 @@
+{{define "pulse_status_response"}}
+  <div
+    id="subscribe-message"
+    class="message {{.MessageClass}}"
+    {{if not .Initial}}hx-swap-oob="outerHTML"{{end}}
+  >{{.Message}}</div>
+  {{if not .FeedEditMode}}
+    <div id="feed-list" hx-swap-oob="innerHTML">
+      {{template "feed_list" .}}
+    </div>
+  {{end}}
+  <div
+    id="pulse-status-poller"
+    {{if .Initial}}hx-swap-oob="outerHTML"{{end}}
+  >
+    {{if .Running}}
+      <div
+        class="pulse-status-poller"
+        hx-get="/feeds/pulse/status"
+        hx-trigger="every 800ms"
+        hx-target="#pulse-status-poller"
+        hx-swap="outerHTML"
+      ></div>
+    {{end}}
+  </div>
+{{end}}

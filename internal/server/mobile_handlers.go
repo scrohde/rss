@@ -15,7 +15,7 @@ import (
 )
 
 func (a *App) handleMobileStream(w http.ResponseWriter, r *http.Request) {
-	a.renderMobileStream(w, r, "")
+	a.renderMobileStream(w, r)
 }
 
 func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +29,7 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 	item, err := store.GetUnreadStreamItem(r.Context(), a.db, itemID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			a.renderMobileStream(w, r, "That story is no longer in your unread stream.")
+			a.renderMobileStream(w, r)
 
 			return
 		}
@@ -64,7 +64,7 @@ func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
 	err := store.MarkItemRead(r.Context(), a.db, itemID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			a.renderMobileStream(w, r, "That story was already cleared.")
+			a.renderMobileStream(w, r)
 
 			return
 		}
@@ -74,12 +74,19 @@ func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.renderMobileStream(w, r, "Saved for now.")
+	a.renderMobileStream(w, r)
 }
 
 func (a *App) handleMobilePulse(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), mobilePulseTimeout)
 	defer cancel()
+
+	feeds, err := store.ListFeeds(ctx, a.db)
+	if err != nil {
+		http.Error(w, "failed to pulse feeds", http.StatusInternalServerError)
+
+		return
+	}
 
 	feedIDs, err := a.mobilePulseFeedIDs(ctx)
 	if err != nil {
@@ -88,16 +95,45 @@ func (a *App) handleMobilePulse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allFeedIDs := feedIDsFromViews(feeds)
 	if len(feedIDs) == 0 {
-		a.renderMobileStream(w, r, "Already fresh enough.")
+		a.resetPulseStatuses(allFeedIDs, nil)
+		a.renderMobileStream(w, r)
 
 		return
 	}
 
-	updated, pulseErr := a.runMobilePulseRefresh(ctx, feedIDs)
-	status := mobilePulseStatusMessage(updated, pulseErr)
+	a.resetPulseStatuses(allFeedIDs, feedIDs)
 
-	a.renderMobileStream(w, r, status)
+	updated, pulseErr := a.runMobilePulseRefresh(ctx, feedIDs)
+	if pulseErr != nil {
+		slog.Warn("mobile pulse refresh incomplete", "updated", updated, "err", pulseErr)
+	}
+
+	a.renderMobileStream(w, r)
+}
+
+//nolint:gosec // Mobile manual refresh logs include request-derived feed IDs for operational visibility.
+func (a *App) handleMobileRefreshFeed(w http.ResponseWriter, r *http.Request) {
+	feedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	a.refreshMu.Lock()
+	_, err := feed.Refresh(r.Context(), a.db, feedID)
+	a.refreshMu.Unlock()
+
+	if err != nil {
+		a.markPulseFeedStatus(feedID, pulseFeedStatusError)
+		slog.Warn("mobile manual refresh failed", "feed_id", feedID, "err", err)
+	} else {
+		a.markPulseFeedStatus(feedID, pulseFeedStatusFresh)
+	}
+
+	a.renderMobileStream(w, r)
 }
 
 func (a *App) mobilePulseFeedIDs(ctx context.Context) ([]int64, error) {
@@ -137,8 +173,12 @@ func shouldStopMobilePulse(ctx context.Context) bool {
 func (a *App) mobilePulseRefreshDelta(ctx context.Context, feedID int64) int {
 	refreshed, refreshErr := a.refreshFeedForMobilePulse(ctx, feedID)
 	if refreshErr != nil {
+		a.markPulseFeedStatus(feedID, pulseFeedStatusError)
+
 		return 0
 	}
+
+	a.markPulseFeedStatus(feedID, pulseFeedStatusFresh)
 
 	if refreshed {
 		return 1
@@ -171,15 +211,7 @@ func wrapMobilePulseContextErr(ctx context.Context) error {
 	return fmt.Errorf("mobile pulse context: %w", ctxErr)
 }
 
-func mobilePulseStatusMessage(updated int, pulseErr error) string {
-	if errors.Is(pulseErr, context.DeadlineExceeded) {
-		return fmt.Sprintf("Updated %d feeds before timeout.", updated)
-	}
-
-	return fmt.Sprintf("Updated %d feeds.", updated)
-}
-
-func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusMessage string) {
+func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
 	topBar, ok := a.mobileTopBarOrError(w, r, "failed to load feeds")
 	if !ok {
 		return
@@ -191,9 +223,8 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request, statusM
 	}
 
 	data := mobileStreamResponseData{
-		Items:         items,
-		StatusMessage: statusMessage,
-		TopBar:        topBar,
+		Items:  items,
+		TopBar: topBar,
 	}
 
 	if isHTMXRequest(r) {
@@ -242,6 +273,12 @@ type mobileStreamSelection struct {
 	FeedID    int64
 }
 
+type mobileStreamRefreshActionData struct {
+	Label        string
+	Path         string
+	PendingLabel string
+}
+
 func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, error) {
 	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
@@ -265,12 +302,16 @@ func (a *App) mobileTopBarData(r *http.Request) (mobileTopBarData, error) {
 		return mobileTopBarData{}, err
 	}
 
+	refreshAction := mobileStreamRefreshAction(selection.FeedID, selection.FeedTitle)
+
 	return mobileTopBarData{
 		FeedOptions:              selection.Options,
+		PulseLabel:               refreshAction.Label,
+		PulsePendingLabel:        refreshAction.PendingLabel,
+		PulsePath:                refreshAction.Path,
 		SelectedFeedTitle:        selection.FeedTitle,
 		SelectedFeedID:           selection.FeedID,
 		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
-		PulsePath:                mobilePulsePath(selection.FeedID),
 	}, nil
 }
 
@@ -280,6 +321,30 @@ func shouldShowCaughtUpSelectedFeed(selection mobileStreamSelection) bool {
 	}
 
 	return !feedOptionsContainID(selection.Options, selection.FeedID)
+}
+
+func mobileStreamRefreshAction(selectedFeedID int64, selectedFeedTitle string) mobileStreamRefreshActionData {
+	if selectedFeedID <= 0 {
+		return mobileStreamRefreshActionData{
+			Label:        "Refresh all feeds",
+			Path:         mobilePulsePath(0),
+			PendingLabel: "Refreshing all feeds",
+		}
+	}
+
+	label := "Refresh selected feed"
+	pendingLabel := "Refreshing selected feed"
+
+	if selectedFeedTitle != "" {
+		label = "Refresh feed " + selectedFeedTitle
+		pendingLabel = "Refreshing " + selectedFeedTitle
+	}
+
+	return mobileStreamRefreshActionData{
+		Label:        label,
+		Path:         mobileFeedRefreshPath(selectedFeedID, selectedFeedID),
+		PendingLabel: pendingLabel,
+	}
 }
 
 func (a *App) mobileStreamItems(r *http.Request, selectedFeedID int64) ([]view.ItemView, error) {

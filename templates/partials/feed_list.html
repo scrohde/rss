@@ -132,6 +132,16 @@
               hx-target="#main-content"
               hx-swap="innerHTML"
             >
+              {{with index $.FeedPulseStatuses .ID}}
+                <span
+                  class="feed-pulse-indicator {{.Class}}"
+                  title="{{.Label}}"
+                  role="img"
+                  aria-label="{{.Label}}"
+                ></span>
+              {{else}}
+                <span class="feed-pulse-indicator none" aria-hidden="true"></span>
+              {{end}}
               <span class="feed-title">{{.Title}}</span>
               <span class="feed-count">{{.UnreadCount}}</span>
             </button>
@@ -162,6 +172,16 @@
                     hx-target="#main-content"
                     hx-swap="innerHTML"
                   >
+                    {{with index $.FeedPulseStatuses .ID}}
+                      <span
+                        class="feed-pulse-indicator {{.Class}}"
+                        title="{{.Label}}"
+                        role="img"
+                        aria-label="{{.Label}}"
+                      ></span>
+                    {{else}}
+                      <span class="feed-pulse-indicator none" aria-hidden="true"></span>
+                    {{end}}
                     <span class="feed-title">{{.Title}}</span>
                     <span class="feed-count">{{.UnreadCount}}</span>
                   </button>

@@ -11,23 +11,25 @@ type fullPageData struct {
 type pageData struct {
 	fullPageData
 
-	ItemList       *view.ItemListData
-	MobileStream   *mobileStreamResponseData
-	MobileReader   *mobileReaderResponseData
-	MobileTopBar   *mobileTopBarData
-	Feeds          []view.FeedView
-	SelectedFeedID int64
-	FeedEditMode   bool
+	ItemList          *view.ItemListData
+	MobileStream      *mobileStreamResponseData
+	MobileReader      *mobileReaderResponseData
+	MobileTopBar      *mobileTopBarData
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
+	Feeds             []view.FeedView
+	SelectedFeedID    int64
+	FeedEditMode      bool
 }
 
 type subscribeResponseData struct {
-	ItemList       *view.ItemListData
-	Message        string
-	MessageClass   string
-	Feeds          []view.FeedView
-	SelectedFeedID int64
-	Update         bool
-	FeedEditMode   bool
+	ItemList          *view.ItemListData
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
+	Message           string
+	MessageClass      string
+	Feeds             []view.FeedView
+	SelectedFeedID    int64
+	Update            bool
+	FeedEditMode      bool
 }
 
 type newItemsResponseData struct {
@@ -37,28 +39,42 @@ type newItemsResponseData struct {
 }
 
 type pollResponseData struct {
-	RefreshDisplay string
-	LastError      string
-	Feeds          []view.FeedView
-	Banner         view.NewItemsData
-	SelectedFeedID int64
-	FeedEditMode   bool
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
+	RefreshDisplay    string
+	LastError         string
+	Feeds             []view.FeedView
+	Banner            view.NewItemsData
+	SelectedFeedID    int64
+	FeedEditMode      bool
 }
 
 type itemListResponseData struct {
-	ItemList       *view.ItemListData
-	Feeds          []view.FeedView
-	SelectedFeedID int64
-	FeedEditMode   bool
+	ItemList          *view.ItemListData
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
+	Feeds             []view.FeedView
+	SelectedFeedID    int64
+	FeedEditMode      bool
 }
 
 type toggleReadResponseData struct {
-	View           string
-	Feeds          []view.FeedView
-	Item           view.ItemView
-	SelectedFeedID int64
-	FeedEditMode   bool
-	UpdatePanel    bool
+	View              string
+	Feeds             []view.FeedView
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
+	Item              view.ItemView
+	SelectedFeedID    int64
+	FeedEditMode      bool
+	UpdatePanel       bool
+}
+
+type pulseStatusResponseData struct {
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
+	Message           string
+	MessageClass      string
+	Feeds             []view.FeedView
+	SelectedFeedID    int64
+	FeedEditMode      bool
+	Running           bool
+	Initial           bool
 }
 
 type itemExpandedResponseData struct {
@@ -68,6 +84,8 @@ type itemExpandedResponseData struct {
 
 type mobileTopBarData struct {
 	SelectedFeedTitle        string
+	PulseLabel               string
+	PulsePendingLabel        string
 	PulsePath                string
 	FeedOptions              []view.FeedView
 	SelectedFeedID           int64
@@ -75,9 +93,8 @@ type mobileTopBarData struct {
 }
 
 type mobileStreamResponseData struct {
-	StatusMessage string
-	Items         []view.ItemView
-	TopBar        mobileTopBarData
+	Items  []view.ItemView
+	TopBar mobileTopBarData
 }
 
 type mobileReaderResponseData struct {

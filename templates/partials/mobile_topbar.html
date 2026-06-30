@@ -4,15 +4,17 @@
     class="brand brand-pulse"
     type="button"
     {{if .}}
-      title="Refresh current mobile stream"
-      aria-label="Refresh current mobile stream"
+      title="{{.PulseLabel}}"
+      aria-label="{{.PulseLabel}}"
       hx-post="{{.PulsePath}}"
+      hx-indicator="#topbar-brand-button"
       hx-target="#main-content"
       hx-swap="innerHTML"
     {{else}}
       title="Refresh all feeds"
       aria-label="Refresh all feeds"
       hx-post="/feeds/pulse"
+      hx-indicator="#topbar-brand-button"
       hx-target="#subscribe-message"
       hx-swap="outerHTML"
     {{end}}
@@ -20,7 +22,12 @@
     <div class="brand-mark">o</div>
     <div>
       <div class="brand-title">Pulse RSS</div>
-      <div class="brand-subtitle">Send a PULSE</div>
+      <div class="brand-subtitle">
+        <span class="brand-subtitle-default">Send a PULSE</span>
+        {{if .}}
+          <span class="brand-subtitle-pending" aria-live="polite">{{.PulsePendingLabel}}</span>
+        {{end}}
+      </div>
     </div>
   </button>
 {{end}}

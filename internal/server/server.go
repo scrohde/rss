@@ -41,9 +41,10 @@ type App struct {
 	imageProxyLookup           content.LookupIPAddrFunc
 	authRateLimiter            *authRateLimiter
 	markAllReadUndoTokenByFeed map[int64]string
-	authSetupToken             string
+	pulseStatuses              map[int64]pulseFeedStatusEntry
 	authSetupCookieName        string
 	authCookieName             string
+	authSetupToken             string
 	authSetupSignerKey         []byte
 	refreshMu                  sync.Mutex
 	pulseMu                    sync.Mutex
@@ -72,6 +73,7 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	app.refreshMu = sync.Mutex{}
 	app.pulseMu = sync.Mutex{}
 	app.markAllReadUndoMu = sync.Mutex{}
+	app.pulseStatuses = make(map[int64]pulseFeedStatusEntry)
 	app.pulseRunning = false
 	app.authEnabled = false
 	app.authCookieSecure = false
@@ -119,6 +121,7 @@ func (a *App) registerCoreRoutes(mux *http.ServeMux) {
 func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /feeds", a.handleSubscribe)
 	mux.HandleFunc("POST /feeds/pulse", a.handlePulseFeeds)
+	mux.HandleFunc("GET /feeds/pulse/status", a.handlePulseStatus)
 	mux.HandleFunc("POST /feeds/edit-mode", a.handleEnterFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/save", a.handleSaveFeedEditMode)
 	mux.HandleFunc("POST /feeds/edit-mode/cancel", a.handleCancelFeedEditMode)
@@ -134,6 +137,7 @@ func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)
 	mux.HandleFunc("POST /items/{itemID}/toggle", a.handleToggleRead)
 	mux.HandleFunc("GET /mobile/stream", a.handleMobileStream)
+	mux.HandleFunc("POST /mobile/feeds/{feedID}/refresh", a.handleMobileRefreshFeed)
 	mux.HandleFunc("GET /mobile/items/{itemID}/reader", a.handleMobileReader)
 	mux.HandleFunc("POST /mobile/items/{itemID}/read", a.handleMobileMarkRead)
 	mux.HandleFunc("POST /mobile/pulse", a.handleMobilePulse)

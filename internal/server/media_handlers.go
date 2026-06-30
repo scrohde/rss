@@ -155,6 +155,7 @@ func (a *App) renderOPMLImportResponse(
 	data.Message = message
 	data.MessageClass = messageClass
 	data.Feeds = feeds
+	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.Update = update
 	data.FeedEditMode = feedEditModeEnabled(r)
 	a.renderTemplate(w, "opml_import_response", data)
