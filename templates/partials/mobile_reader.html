@@ -1,25 +1,37 @@
 {{define "mobile_reader"}}
   <section class="mobile-reader" data-mobile-reader="true">
-    <header class="mobile-reader-header">
+    <div class="mobile-reader-actions" role="group" aria-label="Reader actions">
       <button
-        class="mobile-reader-back"
+        class="mobile-reader-back mobile-reader-fab"
         type="button"
+        aria-label="Back to stream"
+        title="Back to stream"
         hx-get="/mobile/stream{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >
-        Back
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M15 6L9 12L15 18" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="sr-only">Back to stream</span>
       </button>
       <button
-        class="mobile-reader-mark-read"
+        class="mobile-reader-mark-read mobile-reader-fab"
         type="button"
+        aria-label="Mark read"
+        title="Mark read"
         hx-post="/mobile/items/{{.Item.ID}}/read{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >
-        Mark read
+        <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="sr-only">Mark read</span>
       </button>
-    </header>
+    </div>
 
     <article class="mobile-reader-article">
       <p class="mobile-reader-source">{{.Item.FeedTitle}}</p>

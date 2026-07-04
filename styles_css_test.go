@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+const mobileReaderActionsPaddingToken = "padding-top: calc(\n" +
+	"      var(--mobile-reader-fab-gap) + var(--mobile-reader-fab-size) + var(--mobile-reader-content-gap)\n" +
+	"    );"
+
 func readStylesCSS(t *testing.T) string {
 	t.Helper()
 
@@ -177,8 +181,8 @@ func TestStylesMobileReaderContracts(t *testing.T) {
 			msg: "expected mobile reader styles to be defined",
 		},
 		{
-			ok: cssRuleContains(source, ".mobile-reader-article", "border-top: 1px solid var(--panel-divider);") &&
-				cssRuleContains(source, ".mobile-reader-article", "background: transparent;"),
+			ok: cssRuleContains(source, ".mobile-reader-article", "background: transparent;") &&
+				!cssRuleContains(source, ".mobile-reader-article", "border-top: 1px solid var(--panel-divider);"),
 			msg: "expected mobile reader article to use flat separators instead of a card shell",
 		},
 		{
@@ -196,6 +200,17 @@ func TestStylesMobileReaderContracts(t *testing.T) {
 		{
 			ok:  cssRuleContains(source, ".mobile-card-title", "overflow-wrap: anywhere;"),
 			msg: "expected mobile card titles to wrap instead of widening the viewport",
+		},
+		{
+			ok: cssRuleContains(source, ".mobile-reader-fab", "width: 34px;") &&
+				cssRuleContains(source, ".mobile-reader-actions", "position: fixed;") &&
+				cssRuleContains(source, ".mobile-reader-actions", "z-index: 5;") &&
+				cssRuleContains(
+					source,
+					".mobile-reader",
+					mobileReaderActionsPaddingToken,
+				),
+			msg: "expected mobile reader actions to float at the top with reserved content space",
 		},
 	}
 
