@@ -3,7 +3,7 @@
 Project: Pulse RSS
 
 ## Stack
-- Go 1.26
+- Go 1.26.5 or newer
 - SQLite (`modernc.org/sqlite`)
 - htmx + HTML templates
 - CSS (no framework)

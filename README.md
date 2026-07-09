@@ -13,6 +13,10 @@ A compact RSS reader built with Go, htmx, and SQLite.
 - Auto-delete read items after 30 minutes
 - Non-disruptive polling with a "New items (N)" banner
 
+## Requirements
+
+- Go 1.26.5 or newer. This minimum includes required standard-library security fixes and is enforced by `go.mod`.
+
 ## Run
 ```bash
 go mod tidy
@@ -37,6 +41,8 @@ Quick deploy helper:
 ```bash
 ./scripts/deploy-linux.sh
 ```
+
+When `BUILD_BINARY=true`, the deployment host must provide Go 1.26.5 or newer.
 
 `scripts/deploy-linux.sh` defaults to:
 - optional `sudo` escalation when run as a non-root user
