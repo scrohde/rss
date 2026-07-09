@@ -20,6 +20,22 @@
     <section data-auth-login-pending {{if not .AutoStartLogin}}hidden{{end}}>
       <p>Trying your saved passkey now.</p>
     </section>
+    {{if .AutoStartLogin}}
+      <section class="auth-login-autofill" data-auth-login-autofill hidden>
+        <label for="passkey-autofill">Choose a saved passkey</label>
+        <p id="passkey-autofill-help">Select a passkey suggested by your browser to sign in.</p>
+        <input
+          id="passkey-autofill"
+          type="text"
+          name="username"
+          autocomplete="username webauthn"
+          autocapitalize="none"
+          spellcheck="false"
+          data-passkey-autofill="true"
+          aria-describedby="passkey-autofill-help"
+        >
+      </section>
+    {{end}}
     <section data-auth-login-fallback {{if .AutoStartLogin}}hidden{{end}}>
       <p>
         <button
@@ -28,14 +44,14 @@
           data-passkey-login="true"
           {{if .AutoStartLogin}}data-passkey-autostart="true"{{end}}
         >
-          Continue with passkey
+          {{if .AutoStartLogin}}Use another passkey{{else}}Continue with passkey{{end}}
         </button>
       </p>
       {{if .ShowSetupLink}}
         <p><a href="/auth/setup">Initial setup</a></p>
       {{end}}
-      <p><a href="/auth/recovery">Use emergency recovery code</a></p>
     </section>
+    <p class="auth-recovery-link"><a href="/auth/recovery">Use emergency recovery code</a></p>
   </main>
 </body>
 </html>

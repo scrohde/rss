@@ -98,7 +98,7 @@
     return (meta.getAttribute("content") || "").trim();
   };
 
-  const postJSON = async (url, payload) => {
+  const postJSON = async (url, payload, { signal } = {}) => {
     const headers = {
       "Content-Type": "application/json",
     };
@@ -113,6 +113,7 @@
       headers,
       credentials: "same-origin",
       body: JSON.stringify(payload),
+      signal,
     });
 
     if (!response.ok) {
@@ -182,20 +183,62 @@
     }
   };
 
-  const startLogin = async () => {
-    const optionsData = await postJSON("/auth/webauthn/login/options", {});
+  const setLoginAutoFillVisible = (visible) => {
+    const autoFill = document.querySelector("[data-auth-login-autofill]");
+    if (autoFill) {
+      autoFill.hidden = !visible;
+    }
+  };
+
+  const isPasskeyLoginSupported = () => Boolean(window.PublicKeyCredential && navigator.credentials);
+
+  const isAbortError = (error) => Boolean(error && typeof error === "object" && error.name === "AbortError");
+
+  const newAbortError = () => {
+    const error = new Error("passkey request aborted");
+    error.name = "AbortError";
+    return error;
+  };
+
+  const throwIfLoginCanceled = (signal, shouldContinue) => {
+    if (signal && signal.aborted) {
+      throw newAbortError();
+    }
+
+    if (typeof shouldContinue === "function" && !shouldContinue()) {
+      throw newAbortError();
+    }
+  };
+
+  const startLogin = async ({ mediation = "", onCredential, onOptions, shouldContinue, signal } = {}) => {
+    const optionsData = await postJSON("/auth/webauthn/login/options", {}, { signal });
+    if (typeof onOptions === "function") {
+      onOptions(optionsData);
+    }
+    throwIfLoginCanceled(signal, shouldContinue);
+
     const assertion = optionsData.options || {};
     const publicKey = decodePublicKeyRequest(assertion.publicKey || {});
 
     const requestOptions = { publicKey };
-    if (assertion.mediation && assertion.mediation !== "conditional") {
+    if (mediation) {
+      requestOptions.mediation = mediation;
+    } else if (assertion.mediation && assertion.mediation !== "conditional") {
       requestOptions.mediation = assertion.mediation;
+    }
+    if (signal) {
+      requestOptions.signal = signal;
     }
 
     const credential = await navigator.credentials.get(requestOptions);
+    throwIfLoginCanceled(signal, shouldContinue);
 
     if (!credential) {
       throw new Error("no credential selected");
+    }
+
+    if (typeof onCredential === "function") {
+      onCredential();
     }
 
     const verify = await postJSON("/auth/webauthn/login/verify", {
@@ -242,12 +285,40 @@
     }
 
     button.dataset.bound = "true";
-    const runLogin = async (autoStart) => {
+    let conditionalController = null;
+    let conditionalCredentialSelected = false;
+    let conditionalExpiryTimer = null;
+    let conditionalLoginPromise = null;
+    let conditionalStarted = false;
+    let loginPageHidden = false;
+    let manualLoginInProgress = false;
+    let manualLoginRequested = false;
+
+    const clearConditionalExpiryTimer = () => {
+      if (conditionalExpiryTimer === null) {
+        return;
+      }
+
+      window.clearTimeout(conditionalExpiryTimer);
+      conditionalExpiryTimer = null;
+    };
+
+    const abortConditionalLogin = () => {
+      const pendingLogin = conditionalLoginPromise;
+      if (conditionalController) {
+        conditionalController.abort();
+      }
+
+      clearConditionalExpiryTimer();
+      return pendingLogin;
+    };
+
+    const runModalLogin = async (autoStart, mediation) => {
       if (button.dataset.running === "true") {
         return;
       }
 
-      if (!window.PublicKeyCredential || !navigator.credentials) {
+      if (!isPasskeyLoginSupported()) {
         setLoginFallbackVisible(true);
         showMessage("Passkeys are not supported in this browser.", true);
         return;
@@ -265,7 +336,7 @@
       button.disabled = true;
 
       try {
-        await startLogin();
+        await startLogin({ mediation });
       } catch (error) {
         console.warn("passkey login failed", error);
         setLoginFallbackVisible(true);
@@ -276,8 +347,141 @@
       }
     };
 
+    const startConditionalLogin = () => {
+      if (conditionalStarted || loginPageHidden || manualLoginRequested) {
+        return Promise.resolve();
+      }
+
+      const autoFillInput = document.querySelector("[data-passkey-autofill='true']");
+      if (!autoFillInput || !isPasskeyLoginSupported() || typeof window.AbortController !== "function") {
+        setLoginAutoFillVisible(false);
+        setLoginFallbackVisible(true);
+        return Promise.resolve();
+      }
+
+      conditionalStarted = true;
+      conditionalCredentialSelected = false;
+      const controller = new window.AbortController();
+      let conditionalExpired = false;
+      conditionalController = controller;
+      setLoginAutoFillVisible(true);
+      setLoginFallbackVisible(true);
+      showMessage("", false);
+
+      let promise;
+      promise = (async () => {
+        try {
+          await startLogin({
+            mediation: "conditional",
+            onCredential: () => {
+              conditionalCredentialSelected = true;
+            },
+            onOptions: (optionsData) => {
+              const expiresAt = Date.parse(optionsData.expires_at || "");
+              if (!Number.isFinite(expiresAt)) {
+                return;
+              }
+
+              const delay = Math.max(0, expiresAt - Date.now() - 5000);
+              if (delay === 0) {
+                conditionalExpired = true;
+                controller.abort();
+                return;
+              }
+
+              conditionalExpiryTimer = window.setTimeout(() => {
+                conditionalExpiryTimer = null;
+                conditionalExpired = true;
+                controller.abort();
+              }, delay);
+            },
+            shouldContinue: () => !manualLoginRequested && !loginPageHidden,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted || isAbortError(error)) {
+            if (conditionalExpired && !manualLoginRequested) {
+              setLoginAutoFillVisible(false);
+              setLoginFallbackVisible(true);
+              showMessage("", false);
+            }
+            return;
+          }
+
+          if (error && typeof error === "object" && error.name === "NotAllowedError") {
+            setLoginAutoFillVisible(true);
+            setLoginFallbackVisible(true);
+            showMessage("", false);
+            return;
+          }
+
+          console.warn("conditional passkey login failed", error);
+          setLoginAutoFillVisible(false);
+          setLoginFallbackVisible(true);
+          showMessage(authErrorMessage(error, "login"), true);
+        } finally {
+          if (conditionalController === controller) {
+            conditionalController = null;
+            conditionalCredentialSelected = false;
+            clearConditionalExpiryTimer();
+          }
+          if (conditionalLoginPromise === promise) {
+            conditionalLoginPromise = null;
+          }
+        }
+      })();
+      conditionalLoginPromise = promise;
+      return promise;
+    };
+
+    const startMobileConditionalLogin = async () => {
+      setLoginFallbackVisible(true);
+
+      if (
+        !isPasskeyLoginSupported() ||
+        typeof window.PublicKeyCredential.isConditionalMediationAvailable !== "function"
+      ) {
+        setLoginAutoFillVisible(false);
+        return;
+      }
+
+      let conditionalAvailable = false;
+      try {
+        conditionalAvailable = await window.PublicKeyCredential.isConditionalMediationAvailable();
+      } catch (error) {
+        console.warn("conditional passkey login is unavailable", error);
+      }
+
+      if (loginPageHidden || manualLoginRequested || !conditionalAvailable) {
+        setLoginAutoFillVisible(false);
+        return;
+      }
+
+      await startConditionalLogin();
+    };
+
     button.addEventListener("click", async () => {
-      await runLogin(false);
+      if (conditionalCredentialSelected || manualLoginInProgress) {
+        return;
+      }
+
+      manualLoginRequested = true;
+      manualLoginInProgress = true;
+      const pendingConditionalLogin = abortConditionalLogin();
+      setLoginAutoFillVisible(false);
+      button.disabled = true;
+
+      try {
+        if (pendingConditionalLogin) {
+          await pendingConditionalLogin;
+        }
+        await runModalLogin(false, "required");
+      } finally {
+        manualLoginInProgress = false;
+        if (button.dataset.running !== "true") {
+          button.disabled = false;
+        }
+      }
     });
 
     if (button.dataset.passkeyAutostartBound === "true" || button.dataset.passkeyAutostart !== "true") {
@@ -285,8 +489,41 @@
     }
 
     button.dataset.passkeyAutostartBound = "true";
+    const isMobileLogin =
+      typeof window.matchMedia === "function" && window.matchMedia("(max-width: 960px)").matches;
+    if (isMobileLogin) {
+      void startMobileConditionalLogin();
+      window.addEventListener("pagehide", () => {
+        loginPageHidden = true;
+        void abortConditionalLogin();
+      });
+      window.addEventListener("pageshow", (event) => {
+        if (!event.persisted || manualLoginRequested) {
+          return;
+        }
+
+        void (async () => {
+          const pendingConditionalLogin = conditionalLoginPromise;
+          if (pendingConditionalLogin) {
+            await pendingConditionalLogin;
+          }
+          if (manualLoginRequested) {
+            return;
+          }
+
+          loginPageHidden = false;
+          conditionalStarted = false;
+          setLoginAutoFillVisible(false);
+          await startMobileConditionalLogin();
+        })();
+      });
+      return;
+    }
+
     window.setTimeout(() => {
-      void runLogin(true);
+      if (!manualLoginRequested) {
+        void runModalLogin(true, "");
+      }
     }, 0);
   };
 

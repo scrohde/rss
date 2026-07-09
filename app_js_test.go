@@ -218,6 +218,82 @@ func TestAppJSSelectorContractsMatchTemplates(t *testing.T) {
 	}
 }
 
+func TestAuthJSConditionalPasskeyLoginContracts(t *testing.T) {
+	t.Parallel()
+
+	source := readTextFile(t, filepath.Join("static", "auth.js"))
+
+	contracts := []struct {
+		name  string
+		token string
+	}{
+		{
+			name:  "mobile breakpoint",
+			token: `max-width: 960px`,
+		},
+		{
+			name:  "conditional mediation availability check",
+			token: "isConditionalMediationAvailable",
+		},
+		{
+			name:  "conditional mediation request",
+			token: `mediation: "conditional"`,
+		},
+		{
+			name:  "pending conditional request controller",
+			token: "AbortController",
+		},
+		{
+			name:  "intentional abort handling",
+			token: "AbortError",
+		},
+		{
+			name:  "manual required mediation request",
+			token: `mediation: "required"`,
+		},
+		{
+			name:  "conditional challenge expiry",
+			token: "optionsData.expires_at",
+		},
+		{
+			name:  "manual fallback waits for conditional cancellation",
+			token: "await pendingConditionalLogin",
+		},
+		{
+			name:  "conditional verification cancellation guard",
+			token: "throwIfLoginCanceled",
+		},
+		{
+			name:  "page cache restore handling",
+			token: "pageshow",
+		},
+		{
+			name:  "AutoFill section selector",
+			token: "[data-auth-login-autofill]",
+		},
+		{
+			name:  "AutoFill field selector",
+			token: "[data-passkey-autofill='true']",
+		},
+		{
+			name:  "manual passkey fallback selector",
+			token: "[data-passkey-login='true']",
+		},
+	}
+
+	for _, contract := range contracts {
+		if !strings.Contains(source, contract.token) {
+			t.Fatalf("expected auth.js to keep %s token %q", contract.name, contract.token)
+		}
+	}
+
+	awaitIndex := strings.Index(source, "await pendingConditionalLogin")
+	manualIndex := strings.Index(source, `runModalLogin(false, "required")`)
+	if awaitIndex > manualIndex {
+		t.Fatal("expected manual passkey login to wait for conditional cancellation")
+	}
+}
+
 func TestMobileBootstrapContracts(t *testing.T) {
 	t.Parallel()
 

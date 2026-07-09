@@ -78,6 +78,7 @@ type SessionIssue struct {
 
 // LoginBeginResult contains WebAuthn options plus challenge handle.
 type LoginBeginResult struct {
+	ExpiresAt   time.Time
 	Assertion   *protocol.CredentialAssertion
 	ChallengeID string
 }
@@ -192,7 +193,7 @@ func (m *Manager) BeginDiscoverableLogin(ctx context.Context) (LoginBeginResult,
 		return LoginBeginResult{}, fmt.Errorf("begin discoverable login: %w", err)
 	}
 
-	challengeID, err := m.storeChallenge(
+	challengeID, expiresAt, err := m.storeChallenge(
 		ctx,
 		challengeFlowLogin,
 		sql.NullInt64{Int64: 0, Valid: false},
@@ -202,7 +203,7 @@ func (m *Manager) BeginDiscoverableLogin(ctx context.Context) (LoginBeginResult,
 		return LoginBeginResult{}, err
 	}
 
-	return LoginBeginResult{ChallengeID: challengeID, Assertion: assertion}, nil
+	return LoginBeginResult{ChallengeID: challengeID, Assertion: assertion, ExpiresAt: expiresAt}, nil
 }
 
 // FinishDiscoverableLogin verifies a discoverable passkey assertion and creates a session.
@@ -288,7 +289,7 @@ func (m *Manager) BeginRegistration(ctx context.Context, userID int64) (Registra
 		return RegistrationBeginResult{}, fmt.Errorf("begin registration: %w", err)
 	}
 
-	challengeID, err := m.storeChallenge(
+	challengeID, _, err := m.storeChallenge(
 		ctx,
 		challengeFlowRegister,
 		sql.NullInt64{Int64: user.id, Valid: true},
@@ -564,35 +565,36 @@ func (m *Manager) storeChallenge(
 	flow string,
 	userID sql.NullInt64,
 	session *webauthn.SessionData,
-) (string, error) {
+) (string, time.Time, error) {
 	blob, err := json.Marshal(session)
 	if err != nil {
-		return "", fmt.Errorf("marshal webauthn session: %w", err)
+		return "", time.Time{}, fmt.Errorf("marshal webauthn session: %w", err)
 	}
 
 	challengeID, err := randomToken(challengeIDBytes)
 	if err != nil {
-		return "", fmt.Errorf("generate challenge id: %w", err)
+		return "", time.Time{}, fmt.Errorf("generate challenge id: %w", err)
 	}
 
 	now := time.Now().UTC()
+	expiresAt := now.Add(m.challengeTTL)
 
 	record := store.AuthChallengeRecord{
 		UsedAt:        sql.NullTime{Time: time.Time{}, Valid: false},
 		ChallengeID:   challengeID,
 		Flow:          flow,
 		ChallengeBlob: blob,
-		ExpiresAt:     now.Add(m.challengeTTL),
+		ExpiresAt:     expiresAt,
 		UserID:        userID,
 		CreatedAt:     now,
 	}
 
 	err = store.CreateAuthChallenge(ctx, m.db, &record)
 	if err != nil {
-		return "", fmt.Errorf("store auth challenge: %w", err)
+		return "", time.Time{}, fmt.Errorf("store auth challenge: %w", err)
 	}
 
-	return challengeID, nil
+	return challengeID, expiresAt, nil
 }
 
 func (m *Manager) consumeChallenge(

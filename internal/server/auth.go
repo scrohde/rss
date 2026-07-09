@@ -82,10 +82,11 @@ type passkeyVerifyRequest struct {
 	Credential  json.RawMessage `json:"credential"`
 }
 
+//nolint:tagliatelle // Frontend contract uses snake_case payload keys.
 type passkeyOptionsResponse struct {
-	Options any `json:"options"`
-	//nolint:tagliatelle // Frontend contract uses snake_case payload keys.
-	ChallengeID string `json:"challenge_id"`
+	Options     any        `json:"options"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	ChallengeID string     `json:"challenge_id"`
 }
 
 func newAuthRateLimiter() *authRateLimiter {
@@ -691,7 +692,11 @@ func (a *App) handleAuthLoginOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, passkeyOptionsResponse{ChallengeID: result.ChallengeID, Options: result.Assertion})
+	writeJSON(w, passkeyOptionsResponse{
+		ChallengeID: result.ChallengeID,
+		ExpiresAt:   &result.ExpiresAt,
+		Options:     result.Assertion,
+	})
 }
 
 func (a *App) handleAuthLoginVerify(w http.ResponseWriter, r *http.Request) {
@@ -812,7 +817,11 @@ func (a *App) handleAuthRegisterOptions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, passkeyOptionsResponse{ChallengeID: result.ChallengeID, Options: result.Creation})
+	writeJSON(w, passkeyOptionsResponse{
+		ChallengeID: result.ChallengeID,
+		ExpiresAt:   nil,
+		Options:     result.Creation,
+	})
 }
 
 func (a *App) handleAuthRegisterVerify(w http.ResponseWriter, r *http.Request) {

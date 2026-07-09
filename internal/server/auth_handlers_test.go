@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -182,12 +183,28 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 		t.Fatal("did not expect passkey auto-start without a registered credential")
 	}
 
+	assertBodyExcludesTokens(t, body,
+		`data-auth-login-autofill`,
+		`data-passkey-autofill="true"`,
+		`autocomplete="username webauthn"`,
+	)
+
 	if !strings.Contains(body, `data-auth-message`) {
 		t.Fatal("expected auth message placeholder")
 	}
 
 	if !strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
 		t.Fatal("expected setup link before any passkey is registered")
+	}
+}
+
+func assertBodyExcludesTokens(t *testing.T, body string, tokens ...string) {
+	t.Helper()
+
+	for _, token := range tokens {
+		if strings.Contains(body, token) {
+			t.Fatalf("did not expect response body to contain %q", token)
+		}
 	}
 }
 
@@ -215,8 +232,61 @@ func TestAuthLoginPageAutoStartsWhenCredentialExists(t *testing.T) {
 		t.Fatal("expected pending login section")
 	}
 
+	if !strings.Contains(body, `data-auth-login-autofill`) {
+		t.Fatal("expected passkey AutoFill section when a credential exists")
+	}
+
+	if !strings.Contains(body, `data-passkey-autofill="true"`) {
+		t.Fatal("expected passkey AutoFill field when a credential exists")
+	}
+
+	if !strings.Contains(body, `autocomplete="username webauthn"`) {
+		t.Fatal("expected passkey AutoFill autocomplete token when a credential exists")
+	}
+
 	if strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
 		t.Fatal("did not expect setup link after initial setup is complete")
+	}
+}
+
+func TestAuthLoginOptionsIncludesChallengeExpiry(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	before := time.Now().UTC()
+
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/auth/webauthn/login/options",
+		http.NoBody,
+	)
+	rr := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected login options status 200, got %d", rr.Code)
+	}
+
+	var response struct {
+		//nolint:tagliatelle // Frontend contract uses snake_case payload keys.
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+
+	err := json.NewDecoder(rr.Body).Decode(&response)
+	if err != nil {
+		t.Fatalf("decode login options response: %v", err)
+	}
+
+	if response.ExpiresAt.IsZero() || !response.ExpiresAt.After(before) {
+		t.Fatalf("expected future challenge expiry, got %s", response.ExpiresAt)
+	}
+
+	if response.ExpiresAt.After(before.Add(6 * time.Minute)) {
+		t.Fatalf("expected challenge expiry near configured TTL, got %s", response.ExpiresAt)
 	}
 }
 
