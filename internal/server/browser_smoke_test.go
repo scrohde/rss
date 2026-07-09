@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/mmcdole/gofeed"
 
@@ -38,6 +39,62 @@ type smokeFixture struct {
 	secondarySecondItemID  int64
 	secondaryNoReaderID    int64
 	secondarySummaryItemID int64
+}
+
+func TestBrowserSmokeAuthLoginRetriesCanceledAutoStart(t *testing.T) {
+	app := newAuthEnabledTestApp(t)
+	staticRoot := filepath.Join(pathParentDir, pathParentDir, "static")
+	app.SetStaticFS(os.DirFS(staticRoot))
+	seedAuthCredential(t, app)
+
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	passkeyStub := `(() => {
+		window.__passkeyAttempts = 0;
+		Object.defineProperty(window, "PublicKeyCredential", {
+			configurable: true,
+			value: function PublicKeyCredential() {},
+		});
+		Object.defineProperty(navigator, "credentials", {
+			configurable: true,
+			value: {
+				get: () => {
+					window.__passkeyAttempts += 1;
+					if (window.__passkeyAttempts === 1) {
+						return Promise.reject(new DOMException("prompt dismissed", "NotAllowedError"));
+					}
+					return new Promise(() => {});
+				},
+			},
+		});
+	})();`
+
+	runActions(
+		t,
+		ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_, err := page.AddScriptToEvaluateOnNewDocument(passkeyStub).Do(ctx)
+
+			return err
+		}),
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Navigate(server.URL+"/auth/login"),
+	)
+	waitForJS(t, ctx, `(() => window.__passkeyAttempts === 2)()`, "automatic passkey retry")
+	waitForJS(
+		t,
+		ctx,
+		elementHiddenExpression(`[data-auth-login-fallback]`),
+		"login fallback hidden during retry",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementVisibleExpression(`[data-auth-login-pending]`),
+		"login pending state visible during retry",
+	)
 }
 
 func TestBrowserSmokeReaderFlows(t *testing.T) {

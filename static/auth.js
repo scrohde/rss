@@ -1,6 +1,9 @@
 (() => {
   "use strict";
 
+  const autoLoginMaxAttempts = 2;
+  const autoLoginRetryDelayMS = 750;
+
   const base64ToBytes = (value) => {
     const padded = value.replace(/-/g, "+").replace(/_/g, "/");
     const padLength = (4 - (padded.length % 4)) % 4;
@@ -182,6 +185,9 @@
     }
   };
 
+  const shouldRetryAutoLogin = (error, attempt) =>
+    error && error.name === "NotAllowedError" && attempt < autoLoginMaxAttempts;
+
   const startLogin = async () => {
     const optionsData = await postJSON("/auth/webauthn/login/options", {});
     const assertion = optionsData.options || {};
@@ -254,6 +260,8 @@
       }
 
       if (autoStart) {
+        const attempts = Number.parseInt(button.dataset.passkeyAutoAttempts || "0", 10);
+        button.dataset.passkeyAutoAttempts = String(attempts + 1);
         setLoginFallbackVisible(false);
         showMessage("Approve the passkey prompt to continue.", false);
       } else {
@@ -268,6 +276,16 @@
         await startLogin();
       } catch (error) {
         console.warn("passkey login failed", error);
+        const autoAttempts = Number.parseInt(button.dataset.passkeyAutoAttempts || "0", 10);
+        if (autoStart && shouldRetryAutoLogin(error, autoAttempts)) {
+          setLoginFallbackVisible(false);
+          showMessage("Passkey prompt was dismissed. Trying again...", false);
+          window.setTimeout(() => {
+            void runLogin(true);
+          }, autoLoginRetryDelayMS);
+          return;
+        }
+
         setLoginFallbackVisible(true);
         showMessage(authErrorMessage(error, "login"), true);
       } finally {
