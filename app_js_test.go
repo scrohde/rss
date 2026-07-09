@@ -256,8 +256,8 @@ func TestAuthJSConditionalPasskeyLoginContracts(t *testing.T) {
 			token: "optionsData.expires_at",
 		},
 		{
-			name:  "manual fallback waits for conditional cancellation",
-			token: "await pendingConditionalLogin",
+			name:  "manual fallback cancels conditional login",
+			token: "abortConditionalLogin();",
 		},
 		{
 			name:  "conditional verification cancellation guard",
@@ -287,10 +287,14 @@ func TestAuthJSConditionalPasskeyLoginContracts(t *testing.T) {
 		}
 	}
 
-	awaitIndex := strings.Index(source, "await pendingConditionalLogin")
+	abortIndex := strings.Index(source, "abortConditionalLogin();")
 	manualIndex := strings.Index(source, `runModalLogin(false, "required")`)
-	if awaitIndex > manualIndex {
-		t.Fatal("expected manual passkey login to wait for conditional cancellation")
+	if abortIndex < 0 || manualIndex < abortIndex {
+		t.Fatal("expected manual passkey login to abort conditional login before starting")
+	}
+
+	if strings.Contains(source, "await pendingConditionalLogin") {
+		t.Fatal("manual passkey login must not await conditional cancellation")
 	}
 }
 

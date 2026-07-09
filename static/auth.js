@@ -467,14 +467,13 @@
 
       manualLoginRequested = true;
       manualLoginInProgress = true;
-      const pendingConditionalLogin = abortConditionalLogin();
+      // Preserve the tap's user activation for the required passkey request. On mobile Safari,
+      // awaiting the conditional request here can make the subsequent credential request fail.
+      abortConditionalLogin();
       setLoginAutoFillVisible(false);
       button.disabled = true;
 
       try {
-        if (pendingConditionalLogin) {
-          await pendingConditionalLogin;
-        }
         await runModalLogin(false, "required");
       } finally {
         manualLoginInProgress = false;
