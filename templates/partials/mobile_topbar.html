@@ -3,6 +3,7 @@
     id="topbar-brand-button"
     class="brand brand-pulse"
     type="button"
+    data-app-htmx="true"
     {{if .}}
       title="{{.PulseLabel}}"
       aria-label="{{.PulseLabel}}"
@@ -56,6 +57,7 @@
       id="mobile-stream-feed-filter"
       name="selected_feed_id"
       aria-label="Filter unread stream by feed"
+      data-app-htmx="true"
       hx-get="/mobile/stream"
       hx-include="closest form"
       hx-target="#main-content"

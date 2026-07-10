@@ -2,6 +2,7 @@ package content
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -9,35 +10,56 @@ const srcsetStepOne = 1
 
 func rewriteSrcset(value string, base *url.URL) (string, bool) {
 	parts := parseSrcsetCandidates(value)
-	if parts == nil {
-		return value, false
-	}
-
-	changed := false
 
 	var rewritten []string
 
 	for _, part := range parts {
-		imageURL := part.imageURL
-		if updated, ok := ProxyImageURL(imageURL, base); ok {
-			imageURL = updated
-			changed = true
-		}
-
-		if part.descriptor == "" {
-			rewritten = append(rewritten, imageURL)
-
+		candidate, ok := rewriteSrcsetCandidate(part, base)
+		if !ok {
 			continue
 		}
 
-		rewritten = append(rewritten, imageURL+" "+part.descriptor)
+		rewritten = append(rewritten, candidate)
 	}
 
-	if !changed {
-		return value, false
+	if len(rewritten) == 0 {
+		return "", false
 	}
 
 	return strings.Join(rewritten, ", "), true
+}
+
+func rewriteSrcsetCandidate(part srcsetCandidate, base *url.URL) (string, bool) {
+	imageURL, ok := ProxyImageURL(part.imageURL, base)
+	if !ok || !validSrcsetDescriptor(part.descriptor) {
+		return "", false
+	}
+
+	if part.descriptor == "" {
+		return imageURL, true
+	}
+
+	return imageURL + " " + part.descriptor, true
+}
+
+func validSrcsetDescriptor(descriptor string) bool {
+	if descriptor == "" {
+		return true
+	}
+
+	value := descriptor[:len(descriptor)-1]
+	switch descriptor[len(descriptor)-1] {
+	case 'w':
+		width, err := strconv.ParseUint(value, 10, 64)
+
+		return err == nil && width > 0
+	case 'x':
+		density, err := strconv.ParseFloat(value, 64)
+
+		return err == nil && density > 0
+	default:
+		return false
+	}
 }
 
 type srcsetCandidate struct {

@@ -4,9 +4,11 @@
     id="item-{{.ID}}"
     data-item-id="{{.ID}}"
     data-has-content="{{if .HasReaderContent}}true{{else}}false{{end}}"
+    data-app-htmx="true"
   >
     <div
       class="item-row clickable"
+      data-app-htmx="true"
       hx-get="/items/{{.ID}}/compact"
       hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
@@ -30,7 +32,14 @@
         </span>
       </div>
       <div class="item-actions">
-        <button class="chip" hx-post="/items/{{.ID}}/toggle" hx-vals='{"view":"compact"}' hx-target="#item-{{.ID}}" hx-swap="outerHTML">
+        <button
+          class="chip"
+          data-app-htmx="true"
+          hx-post="/items/{{.ID}}/toggle"
+          hx-vals='{"view":"compact"}'
+          hx-target="#item-{{.ID}}"
+          hx-swap="outerHTML"
+        >
           {{if .IsRead}}Mark unread{{else}}Mark read{{end}}
         </button>
       </div>

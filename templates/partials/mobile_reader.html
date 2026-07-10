@@ -6,6 +6,7 @@
         type="button"
         aria-label="Back to stream"
         title="Back to stream"
+        data-app-htmx="true"
         hx-get="/mobile/stream{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
@@ -21,6 +22,7 @@
         type="button"
         aria-label="Mark read"
         title="Mark read"
+        data-app-htmx="true"
         hx-post="/mobile/items/{{.Item.ID}}/read{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
@@ -38,7 +40,7 @@
       <h2 class="mobile-reader-title">{{.Item.Title}}</h2>
       <p class="mobile-reader-meta">{{.Item.PublishedDisplay}}</p>
       <a class="mobile-reader-link" href="{{.Item.Link}}" target="_blank" rel="noopener">Open original</a>
-      <div class="mobile-reader-body">
+      <div class="mobile-reader-body" data-reader-content="true" hx-disable>
         {{if .Item.HasContent}}
           {{.Item.ContentHTML}}
         {{else if .Item.HasSummary}}

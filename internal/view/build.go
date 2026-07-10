@@ -126,7 +126,6 @@ func FormatRelativeShort(t, now time.Time) string {
 	}
 }
 
-//nolint:gosec // HTML content is rewritten/sanitized before rendering in templates.
 func renderOptionalHTML(raw sql.NullString, baseURL string) (template.HTML, bool) {
 	if !raw.Valid {
 		return "", false
@@ -137,9 +136,12 @@ func renderOptionalHTML(raw sql.NullString, baseURL string) (template.HTML, bool
 		return "", false
 	}
 
-	text = content.RewriteSummaryHTML(text, baseURL)
+	safeHTML := content.RewriteSummaryHTML(text, baseURL)
+	if strings.TrimSpace(string(safeHTML)) == "" {
+		return "", false
+	}
 
-	return template.HTML(text), true
+	return safeHTML, true
 }
 
 func buildCompactPreview(summary sql.NullString) string {

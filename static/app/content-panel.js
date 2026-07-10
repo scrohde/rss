@@ -293,6 +293,7 @@ const requestExpandRow = (row, options = {}) => {
     values.collapse_item_id = collapseID;
   }
   htmx.ajax("GET", `/items/${itemID}`, {
+    source: row,
     target: `#${row.id}`,
     swap: "outerHTML",
     values,
@@ -321,6 +322,7 @@ const requestToggleRead = (row, view, selectedItemId) => {
   }
   const selected = selectedItemId || state.activeId;
   htmx.ajax("POST", `/items/${itemID}/toggle`, {
+    source: row,
     target: `#${row.id}`,
     swap: "outerHTML",
     values: { view, selected_item_id: selected },

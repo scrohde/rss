@@ -255,10 +255,9 @@ func (*App) withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 		w.Header().Set(
 			"Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https: http:; "+
-				"font-src 'self' data: https: http:; img-src 'self' data: blob: https: http:; "+
-				"media-src 'self' data: blob: https: http:; connect-src 'self' https: http:; "+
-				"frame-src 'self' data: https: http:; object-src 'none'; base-uri 'self'; "+
+			"default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "+
+				"style-src-elem 'self'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'none'; "+
+				"connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; "+
 				"frame-ancestors 'none'; form-action 'self'",
 		)
 

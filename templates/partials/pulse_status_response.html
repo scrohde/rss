@@ -16,6 +16,7 @@
     {{if .Running}}
       <div
         class="pulse-status-poller"
+        data-app-htmx="true"
         hx-get="/feeds/pulse/status"
         hx-trigger="every 800ms"
         hx-target="#pulse-status-poller"

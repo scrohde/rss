@@ -1,8 +1,8 @@
 package content
 
 import (
+	"html/template"
 	"net/url"
-	"slices"
 	"strings"
 	"time"
 
@@ -25,55 +25,183 @@ const (
 	ImageProxyUserAgent = "Mozilla/5.0 (compatible; PulseRSSImageProxy/1.0; https://localhost)"
 )
 
-const (
-	attrIndexNotFound = -1
-	relAttrKey        = "rel"
-)
-
-type relTokens struct {
-	existing map[string]bool
-	tokens   []string
+// summaryAllowedElements is intentionally small: stored feed markup may format reader content, but it may not create
+// controls, browsing contexts, executable content, or independent network clients.
+//
+//nolint:gochecknoglobals // A package-level literal keeps the security allowlist centralized and auditable.
+var summaryAllowedElements = map[string]bool{
+	"a":          true,
+	"abbr":       true,
+	"address":    true,
+	"article":    true,
+	"aside":      true,
+	"b":          true,
+	"bdi":        true,
+	"bdo":        true,
+	"blockquote": true,
+	"br":         true,
+	"caption":    true,
+	"cite":       true,
+	"code":       true,
+	"col":        true,
+	"colgroup":   true,
+	"dd":         true,
+	"del":        true,
+	"div":        true,
+	"dl":         true,
+	"dt":         true,
+	"em":         true,
+	"figcaption": true,
+	"figure":     true,
+	"footer":     true,
+	"h1":         true,
+	"h2":         true,
+	"h3":         true,
+	"h4":         true,
+	"h5":         true,
+	"h6":         true,
+	"header":     true,
+	"hr":         true,
+	"i":          true,
+	"img":        true,
+	"ins":        true,
+	"kbd":        true,
+	"li":         true,
+	"main":       true,
+	"mark":       true,
+	"nav":        true,
+	"ol":         true,
+	"p":          true,
+	"picture":    true,
+	"pre":        true,
+	"q":          true,
+	"rp":         true,
+	"rt":         true,
+	"ruby":       true,
+	"s":          true,
+	"samp":       true,
+	"section":    true,
+	"small":      true,
+	"source":     true,
+	"span":       true,
+	"strong":     true,
+	"sub":        true,
+	"sup":        true,
+	"table":      true,
+	"tbody":      true,
+	"td":         true,
+	"tfoot":      true,
+	"th":         true,
+	"thead":      true,
+	"time":       true,
+	"tr":         true,
+	"u":          true,
+	"ul":         true,
+	"var":        true,
+	"wbr":        true,
 }
 
-type relAttrLookup struct {
-	existing map[string]bool
-	tokens   []string
-	index    int
+// summaryDroppedSubtrees contain content whose descendants are also unsafe or exist only as active UI fallback.
+//
+//nolint:gochecknoglobals // A package-level literal keeps dangerous subtree handling centralized and auditable.
+var summaryDroppedSubtrees = map[string]bool{
+	"audio":    true,
+	"button":   true,
+	"canvas":   true,
+	"datalist": true,
+	"embed":    true,
+	"fieldset": true,
+	"iframe":   true,
+	"input":    true,
+	"legend":   true,
+	"math":     true,
+	"meter":    true,
+	"noscript": true,
+	"object":   true,
+	"optgroup": true,
+	"option":   true,
+	"output":   true,
+	"progress": true,
+	"script":   true,
+	"select":   true,
+	"style":    true,
+	"svg":      true,
+	"template": true,
+	"textarea": true,
+	"video":    true,
 }
 
-type summarySanitizeResult struct {
-	changed bool
-	removed bool
+//nolint:gochecknoglobals // A package-level literal makes every feed-derived attribute explicit for review.
+var summaryAllowedAttrs = map[string]map[string]bool{
+	"a": {
+		"href": true,
+	},
+	"col": {
+		"span": true,
+	},
+	"colgroup": {
+		"span": true,
+	},
+	"img": {
+		"alt":    true,
+		"height": true,
+		"src":    true,
+		"srcset": true,
+		"width":  true,
+	},
+	"li": {
+		"value": true,
+	},
+	"ol": {
+		"reversed": true,
+		"start":    true,
+		"type":     true,
+	},
+	"source": {
+		"media":  true,
+		"sizes":  true,
+		"srcset": true,
+		"type":   true,
+	},
+	"td": {
+		"colspan": true,
+		"rowspan": true,
+	},
+	"th": {
+		"abbr":    true,
+		"colspan": true,
+		"rowspan": true,
+		"scope":   true,
+	},
+	"time": {
+		"datetime": true,
+	},
 }
 
-type summaryRewriteResult struct {
-	changed bool
-	stop    bool
+//nolint:gochecknoglobals // A package-level literal makes the small shared attribute set explicit for review.
+var summaryAllowedCommonAttrs = map[string]bool{
+	"dir":   true,
+	"lang":  true,
+	"title": true,
 }
 
-// RewriteSummaryHTML rewrites summary HTML image and anchor URLs when possible.
-func RewriteSummaryHTML(text, baseURLRaw string) string {
-	base := parseSummaryBaseURL(baseURLRaw)
-
-	if !containsRewriteTargets(text) {
-		return text
-	}
-
+// RewriteSummaryHTML parses stored feed markup, copies only inactive allowlisted HTML, rewrites image requests through
+// the proxy, and returns the reviewed result as template-safe HTML. Invalid input fails closed.
+func RewriteSummaryHTML(text, baseURLRaw string) template.HTML {
 	nodes, ok := parseSummaryFragment(text)
 	if !ok {
-		return text
+		return ""
 	}
 
-	if !rewriteSummaryNodes(nodes, base) {
-		return text
-	}
+	sanitized := sanitizeSummaryNodes(nodes, parseSummaryBaseURL(baseURLRaw))
 
-	rewritten, ok := renderSummaryNodes(nodes)
+	rewritten, ok := renderSummaryNodes(sanitized)
 	if !ok {
-		return text
+		return ""
 	}
 
-	return rewritten
+	// #nosec G203 -- every emitted node and attribute was created by the strict allowlist above.
+	return template.HTML(rewritten)
 }
 
 func parseSummaryFragment(text string) ([]*html.Node, bool) {
@@ -90,520 +218,180 @@ func parseSummaryFragment(text string) ([]*html.Node, bool) {
 	return nodes, true
 }
 
-func rewriteSummaryNodes(nodes []*html.Node, base *url.URL) bool {
-	changed := false
-
+func sanitizeSummaryNodes(nodes []*html.Node, base *url.URL) []*html.Node {
+	sanitized := make([]*html.Node, 0, len(nodes))
 	for _, node := range nodes {
-		if rewriteSummaryNode(node, base) {
-			changed = true
+		sanitized = append(sanitized, sanitizeSummaryNode(node, "", base)...)
+	}
+
+	return sanitized
+}
+
+func sanitizeSummaryNode(node *html.Node, parentElement string, base *url.URL) []*html.Node {
+	if node == nil {
+		return nil
+	}
+
+	switch node.Type {
+	case html.TextNode:
+		return []*html.Node{{Type: html.TextNode, Data: node.Data}}
+	case html.ElementNode:
+		return sanitizeSummaryElement(node, parentElement, base)
+	case html.ErrorNode, html.DocumentNode, html.CommentNode, html.DoctypeNode, html.RawNode:
+		return nil
+	}
+
+	return nil
+}
+
+func sanitizeSummaryElement(node *html.Node, parentElement string, base *url.URL) []*html.Node {
+	name := strings.ToLower(strings.TrimSpace(node.Data))
+	if node.Namespace != "" || summaryDroppedSubtrees[name] {
+		return nil
+	}
+
+	if !summaryAllowedElements[name] {
+		return sanitizeSummaryChildren(node, parentElement, base)
+	}
+
+	cloned := newSanitizedSummaryElement(node, name, parentElement, base)
+	if cloned == nil {
+		return nil
+	}
+
+	for _, child := range sanitizeSummaryChildren(node, name, base) {
+		cloned.AppendChild(child)
+	}
+
+	return []*html.Node{cloned}
+}
+
+func newSanitizedSummaryElement(
+	node *html.Node,
+	name string,
+	parentElement string,
+	base *url.URL,
+) *html.Node {
+	if name == "source" && parentElement != "picture" {
+		return nil
+	}
+
+	cloned := new(html.Node)
+	cloned.Type = html.ElementNode
+	cloned.DataAtom = atom.Lookup([]byte(name))
+	cloned.Data = name
+
+	cloned.Attr = sanitizeSummaryAttrs(node, name, base)
+	if (name == "img" || name == "source") && !hasSummaryImageSource(cloned) {
+		return nil
+	}
+
+	addEnforcedSummaryAttrs(cloned, name)
+
+	return cloned
+}
+
+func addEnforcedSummaryAttrs(node *html.Node, name string) {
+	if name == "a" {
+		node.Attr = append(node.Attr,
+			html.Attribute{Namespace: "", Key: "target", Val: "_blank"},
+			html.Attribute{Namespace: "", Key: "rel", Val: "noopener noreferrer"},
+		)
+	}
+
+	if name == "img" {
+		node.Attr = append(node.Attr,
+			html.Attribute{Namespace: "", Key: "loading", Val: "lazy"},
+			html.Attribute{Namespace: "", Key: "decoding", Val: "async"},
+			html.Attribute{Namespace: "", Key: "referrerpolicy", Val: "no-referrer"},
+		)
+	}
+}
+
+func sanitizeSummaryChildren(node *html.Node, parentElement string, base *url.URL) []*html.Node {
+	var children []*html.Node
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		children = append(children, sanitizeSummaryNode(child, parentElement, base)...)
+	}
+
+	return children
+}
+
+func sanitizeSummaryAttrs(node *html.Node, element string, base *url.URL) []html.Attribute {
+	allowedForElement := summaryAllowedAttrs[element]
+	seen := make(map[string]bool, len(node.Attr))
+	attrs := make([]html.Attribute, 0, len(node.Attr))
+
+	for _, attr := range node.Attr {
+		key := strings.ToLower(strings.TrimSpace(attr.Key))
+		if attr.Namespace != "" || key == "" || seen[key] ||
+			(!summaryAllowedCommonAttrs[key] && !allowedForElement[key]) {
+			continue
 		}
-	}
 
-	return changed
-}
-
-func renderSummaryNodes(nodes []*html.Node) (string, bool) {
-	var b strings.Builder
-	for _, node := range nodes {
-		renderErr := html.Render(&b, node)
-		if renderErr != nil {
-			return "", false
-		}
-	}
-
-	return b.String(), true
-}
-
-func rewriteSummaryNode(node *html.Node, base *url.URL) bool {
-	if node.Type != html.ElementNode {
-		return rewriteSummaryChildren(node, base)
-	}
-
-	result := rewriteSummaryElementNode(node, base)
-	if result.stop {
-		return result.changed
-	}
-
-	childrenChanged := rewriteSummaryChildren(node, base)
-
-	return result.changed || childrenChanged
-}
-
-func rewriteSummaryChildren(node *html.Node, base *url.URL) bool {
-	changed := false
-
-	for child := node.FirstChild; child != nil; {
-		next := child.NextSibling
-		if rewriteSummaryNode(child, base) {
-			changed = true
+		value, ok := sanitizeSummaryAttrValue(key, attr.Val, base)
+		if !ok {
+			continue
 		}
 
-		child = next
+		seen[key] = true
+		attrs = append(attrs, html.Attribute{Namespace: "", Key: key, Val: value})
 	}
 
-	return changed
+	return attrs
 }
 
-func rewriteSummaryElementNode(node *html.Node, base *url.URL) summaryRewriteResult {
-	sanitized := sanitizeSummaryElement(node)
-	if sanitized.changed {
-		if sanitized.removed {
-			return summaryRewriteResult{
-				changed: true,
-				stop:    true,
-			}
-		}
-
-		if rewriteSummaryElement(node, base) {
-			return summaryRewriteResult{
-				changed: true,
-				stop:    false,
-			}
-		}
-
-		return summaryRewriteResult{
-			changed: true,
-			stop:    false,
-		}
-	}
-
-	return summaryRewriteResult{
-		changed: rewriteSummaryElement(node, base),
-		stop:    false,
-	}
-}
-
-func sanitizeSummaryElement(node *html.Node) summarySanitizeResult {
-	if shouldDropSummaryElement(node) {
-		dropSummaryNode(node)
-
-		return summarySanitizeResult{
-			changed: true,
-			removed: true,
-		}
-	}
-
-	return summarySanitizeResult{
-		changed: dropEventHandlerAttrs(node),
-		removed: false,
-	}
-}
-
-func shouldDropSummaryElement(node *html.Node) bool {
-	if hasClassToken(node, "image-link-expand") {
-		return true
-	}
-
-	switch node.Data {
-	case "script", "object", "embed":
-		return true
-	default:
-		return false
-	}
-}
-
-func hasClassToken(node *html.Node, token string) bool {
-	if node == nil || token == "" {
-		return false
-	}
-
-	classes, found := attrValue(node, "class")
-	if !found {
-		return false
-	}
-
-	return slices.Contains(strings.Fields(classes), token)
-}
-
-func rewriteSummaryElement(node *html.Node, base *url.URL) bool {
-	switch node.Data {
-	case "img":
-		return rewriteSummaryImageNode(node, base)
-	case "source":
-		return rewriteAttr(node, "srcset", func(value string) (string, bool) {
-			return rewriteSrcset(value, base)
-		})
-	case "a":
-		return rewriteSummaryAnchorNode(node, base)
-	case "iframe":
-		return rewriteSummaryIFrameNode(node, base)
-	default:
-		return false
-	}
-}
-
-func rewriteSummaryImageNode(node *html.Node, base *url.URL) bool {
-	changed := rewriteAttr(node, "src", func(value string) (string, bool) {
-		return ProxyImageURL(value, base)
-	})
-
-	if rewriteAttr(node, "srcset", func(value string) (string, bool) {
+func sanitizeSummaryAttrValue(key, value string, base *url.URL) (string, bool) {
+	switch key {
+	case "href":
+		return sanitizeSummaryLink(value, base)
+	case "srcset":
 		return rewriteSrcset(value, base)
-	}) {
-		changed = true
-	}
+	case "src":
+		return ProxyImageURL(value, base)
+	case "dir":
+		direction := strings.ToLower(strings.TrimSpace(value))
 
-	return changed
+		return direction, direction == "ltr" || direction == "rtl" || direction == "auto"
+	default:
+		return value, true
+	}
 }
 
-func rewriteSummaryAnchorNode(node *html.Node, base *url.URL) bool {
-	changed := rewriteAttr(node, "href", func(value string) (string, bool) {
-		return rewriteAnchorURL(value, base)
-	})
-
-	if upsertAttr(node, "target", "_blank") {
-		changed = true
-	}
-
-	if ensureRelTokens(node, "noopener", "noreferrer") {
-		changed = true
-	}
-
-	return changed
-}
-
-func rewriteSummaryIFrameNode(node *html.Node, base *url.URL) bool {
-	src, found := attrValue(node, "src")
-	if !found {
-		dropSummaryNode(node)
-
-		return true
-	}
-
-	parsed, ok := parseAnchorURL(strings.TrimSpace(src))
+func sanitizeSummaryLink(raw string, base *url.URL) (string, bool) {
+	parsed, ok := parseAnchorURL(strings.TrimSpace(raw))
 	if !ok {
-		dropSummaryNode(node)
-
-		return true
+		return "", false
 	}
 
 	resolved, ok := resolveAnchorURL(parsed, base)
 	if !ok {
-		dropSummaryNode(node)
-
-		return true
+		return "", false
 	}
 
-	resolved = rewritePrivacyEmbedURL(resolved)
-
-	changed := keepOnlyAttrs(node, map[string]bool{
-		"allow":          true,
-		"frameborder":    true,
-		"height":         true,
-		"loading":        true,
-		"referrerpolicy": true,
-		"sandbox":        true,
-		"src":            true,
-		"style":          true,
-		"title":          true,
-		"width":          true,
-	})
-
-	rewritten := resolved.String()
-	if upsertAttr(node, "src", rewritten) {
-		changed = true
-	}
-
-	if upsertAttr(node, "loading", "lazy") {
-		changed = true
-	}
-
-	if upsertAttr(node, "allow", "autoplay; encrypted-media; fullscreen; picture-in-picture") {
-		changed = true
-	}
-
-	return changed
+	return resolved.String(), true
 }
 
-func rewritePrivacyEmbedURL(target *url.URL) *url.URL {
-	if target == nil {
-		return nil
-	}
-
-	host := strings.ToLower(strings.TrimSuffix(target.Hostname(), "."))
-	switch host {
-	case "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com":
-		if !strings.HasPrefix(target.EscapedPath(), "/embed/") {
-			return target
-		}
-
-		cloned := cloneURL(target)
-		cloned.Host = "www.youtube-nocookie.com"
-
-		return cloned
-	case "youtu.be":
-		videoID := strings.Trim(target.EscapedPath(), "/")
-		if videoID == "" {
-			return target
-		}
-
-		cloned := cloneURL(target)
-		cloned.Host = "www.youtube-nocookie.com"
-		cloned.Path = "/embed/" + videoID
-		cloned.RawPath = ""
-
-		return cloned
-	default:
-		return target
-	}
-}
-
-func cloneURL(src *url.URL) *url.URL {
-	if src == nil {
-		return nil
-	}
-
-	dst := new(url.URL)
-	*dst = *src
-
-	return dst
-}
-
-func rewriteAttr(
-	node *html.Node,
-	key string,
-	rewrite func(string) (string, bool),
-) bool {
-	for i, attr := range node.Attr {
-		if attr.Key != key {
-			continue
-		}
-
-		if updated, ok := rewrite(attr.Val); ok {
-			node.Attr[i].Val = updated
-
+func hasSummaryImageSource(node *html.Node) bool {
+	for _, attr := range node.Attr {
+		if attr.Key == "src" || attr.Key == "srcset" {
 			return true
 		}
-
-		return false
 	}
 
 	return false
 }
 
-func keepOnlyAttrs(node *html.Node, allowed map[string]bool) bool {
-	if len(node.Attr) == 0 {
-		return false
-	}
-
-	changed := false
-
-	attrs := node.Attr[:0]
-	for _, attr := range node.Attr {
-		if !allowed[attr.Key] {
-			changed = true
-
-			continue
-		}
-
-		attrs = append(attrs, attr)
-	}
-
-	node.Attr = attrs
-
-	return changed
-}
-
-func attrValue(node *html.Node, key string) (string, bool) {
-	for _, attr := range node.Attr {
-		if attr.Key != key {
-			continue
-		}
-
-		return attr.Val, true
-	}
-
-	return "", false
-}
-
-func dropEventHandlerAttrs(node *html.Node) bool {
-	if len(node.Attr) == 0 {
-		return false
-	}
-
-	changed := false
-
-	attrs := node.Attr[:0]
-	for _, attr := range node.Attr {
-		if strings.HasPrefix(attr.Key, "on") {
-			changed = true
-
-			continue
-		}
-
-		attrs = append(attrs, attr)
-	}
-
-	node.Attr = attrs
-
-	return changed
-}
-
-func dropSummaryNode(node *html.Node) {
-	if node.Parent != nil {
-		node.Parent.RemoveChild(node)
-
-		return
-	}
-
-	node.Type = html.TextNode
-	node.DataAtom = 0
-	node.Data = ""
-	node.Attr = nil
-	node.FirstChild = nil
-	node.LastChild = nil
-}
-
-func upsertAttr(node *html.Node, key, value string) bool {
-	for i, attr := range node.Attr {
-		if attr.Key != key {
-			continue
-		}
-
-		if attr.Val == value {
-			return false
-		}
-
-		node.Attr[i].Val = value
-
-		return true
-	}
-
-	node.Attr = append(node.Attr, html.Attribute{
-		Namespace: "",
-		Key:       key,
-		Val:       value,
-	})
-
-	return true
-}
-
-func ensureRelTokens(node *html.Node, required ...string) bool {
-	lookup := findRelAttr(node)
-
-	merged, changed := mergeRelTokens(
-		lookup.tokens,
-		lookup.existing,
-		required,
-	)
-	if lookup.index != attrIndexNotFound {
-		if !changed {
-			return false
-		}
-
-		node.Attr[lookup.index].Val = strings.Join(merged, " ")
-
-		return true
-	}
-
-	node.Attr = append(node.Attr, html.Attribute{
-		Namespace: "",
-		Key:       relAttrKey,
-		Val:       strings.Join(required, " "),
-	})
-
-	return true
-}
-
-func findRelAttr(node *html.Node) relAttrLookup {
-	for i, attr := range node.Attr {
-		if attr.Key != relAttrKey {
-			continue
-		}
-
-		tokenData := collectRelTokens(attr.Val)
-
-		return relAttrLookup{
-			existing: tokenData.existing,
-			tokens:   tokenData.tokens,
-			index:    i,
+func renderSummaryNodes(nodes []*html.Node) (string, bool) {
+	var builder strings.Builder
+	for _, node := range nodes {
+		err := html.Render(&builder, node)
+		if err != nil {
+			return "", false
 		}
 	}
 
-	return relAttrLookup{
-		existing: map[string]bool{},
-		tokens:   nil,
-		index:    attrIndexNotFound,
-	}
-}
-
-func collectRelTokens(raw string) relTokens {
-	fields := strings.Fields(raw)
-	tokens := append([]string(nil), fields...)
-
-	existing := make(map[string]bool, len(fields))
-
-	for _, token := range fields {
-		existing[strings.ToLower(token)] = true
-	}
-
-	return relTokens{
-		tokens:   tokens,
-		existing: existing,
-	}
-}
-
-func mergeRelTokens(tokens []string, existing map[string]bool, required []string) ([]string, bool) {
-	changed := false
-
-	for _, token := range required {
-		normalized := strings.ToLower(token)
-		if existing[normalized] {
-			continue
-		}
-
-		tokens = append(tokens, token)
-		existing[normalized] = true
-		changed = true
-	}
-
-	return tokens, changed
-}
-
-func containsRewriteTargets(text string) bool {
-	lower := strings.ToLower(text)
-
-	targets := [...]string{
-		"<img",
-		"<source",
-		"<a",
-		"<iframe",
-		"<script",
-		"<style",
-		"<object",
-		"<embed",
-		"image-link-expand",
-		"style=",
-		" on",
-	}
-
-	return slices.ContainsFunc(targets[:], func(target string) bool {
-		return strings.Contains(lower, target)
-	})
-}
-
-func rewriteAnchorURL(rawURL string, base *url.URL) (string, bool) {
-	trimmed := strings.TrimSpace(rawURL)
-	if trimmed == "" {
-		return rawURL, false
-	}
-
-	parsed, ok := parseAnchorURL(trimmed)
-	if !ok {
-		return rawURL, false
-	}
-
-	resolved, ok := resolveAnchorURL(parsed, base)
-	if !ok {
-		return rawURL, false
-	}
-
-	rewritten := resolved.String()
-	if rewritten == rawURL {
-		return rawURL, false
-	}
-
-	return rewritten, true
+	return builder.String(), true
 }
 
 func parseAnchorURL(raw string) (*url.URL, bool) {
@@ -627,11 +415,7 @@ func resolveAnchorURL(parsed, base *url.URL) (*url.URL, bool) {
 		resolved.Scheme = base.Scheme
 	}
 
-	if resolved.Host == "" {
-		return nil, false
-	}
-
-	if !isHTTPScheme(resolved.Scheme) {
+	if resolved.Host == "" || !isHTTPScheme(resolved.Scheme) {
 		return nil, false
 	}
 
@@ -642,8 +426,7 @@ func isHTTPScheme(scheme string) bool {
 	return scheme == "http" || scheme == "https"
 }
 
-// parseSummaryBaseURL keeps rewriting deterministic by accepting only absolute
-// http(s) URLs with a host.
+// parseSummaryBaseURL keeps rewriting deterministic by accepting only absolute http(s) URLs with a host.
 func parseSummaryBaseURL(raw string) *url.URL {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -651,11 +434,7 @@ func parseSummaryBaseURL(raw string) *url.URL {
 	}
 
 	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Host == "" {
-		return nil
-	}
-
-	if !isHTTPScheme(parsed.Scheme) {
+	if err != nil || parsed.Host == "" || !isHTTPScheme(parsed.Scheme) {
 		return nil
 	}
 

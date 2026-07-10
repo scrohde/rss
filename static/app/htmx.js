@@ -138,6 +138,11 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       return;
     }
     const source = event.detail.elt;
+    const readerContent = source && source.closest ? source.closest("[data-reader-content]") : null;
+    if (!source || !source.dataset || source.dataset.appHtmx !== "true" || readerContent) {
+      event.preventDefault();
+      return;
+    }
     const sourceRow = source && source.closest ? source.closest(".item-entry") : null;
     const csrfToken = getCSRFToken();
     if (csrfToken) {

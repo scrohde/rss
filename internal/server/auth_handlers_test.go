@@ -165,9 +165,12 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 		t.Fatalf("expected login page status 200, got %d", rr.Code)
 	}
 
-	if rr.Header().Get("Content-Security-Policy") == "" {
+	csp := rr.Header().Get("Content-Security-Policy")
+	if csp == "" {
 		t.Fatal("expected Content-Security-Policy header")
 	}
+
+	assertStrictContentCSP(t, csp)
 
 	if rr.Header().Get("X-Frame-Options") != "DENY" {
 		t.Fatalf("expected X-Frame-Options DENY, got %q", rr.Header().Get("X-Frame-Options"))
@@ -188,6 +191,25 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 
 	if !strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
 		t.Fatal("expected setup link before any passkey is registered")
+	}
+}
+
+func assertStrictContentCSP(t *testing.T, csp string) {
+	t.Helper()
+
+	for _, directive := range []string{
+		"style-src-elem 'self'",
+		"connect-src 'self'",
+		"media-src 'none'",
+		"frame-src 'none'",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("expected CSP directive %q in %q", directive, csp)
+		}
+	}
+
+	if strings.Contains(csp, "https:") || strings.Contains(csp, "http:") {
+		t.Fatalf("expected CSP to reject arbitrary remote origins, got %q", csp)
 	}
 }
 

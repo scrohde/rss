@@ -13,6 +13,7 @@
                 <button
                   class="mobile-card-open"
                   type="button"
+                  data-app-htmx="true"
                   hx-get="/mobile/items/{{.ID}}/reader{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
                   hx-target="#main-content"
                   hx-swap="innerHTML"
@@ -24,6 +25,7 @@
                   type="button"
                   aria-label="Mark {{.Title}} read"
                   title="Mark read"
+                  data-app-htmx="true"
                   hx-post="/mobile/items/{{.ID}}/read{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
                   hx-target="#main-content"
                   hx-swap="innerHTML"

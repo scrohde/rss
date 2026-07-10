@@ -20,7 +20,9 @@ const loadMobileStream = () => {
     return;
   }
 
+  const mainContent = document.getElementById("main-content");
   htmx.ajax("GET", mobileStreamPath, {
+    source: mainContent,
     target: "#main-content",
     swap: "innerHTML",
   });

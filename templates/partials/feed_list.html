@@ -9,6 +9,7 @@
           <button
             class="chip ghost feed-edit-cancel"
             type="button"
+            data-app-htmx="true"
             hx-post="/feeds/edit-mode/cancel"
             hx-target="#feed-list"
             hx-swap="innerHTML"
@@ -23,6 +24,7 @@
           type="button"
           title="Edit feeds"
           aria-label="Edit feeds"
+          data-app-htmx="true"
           hx-post="/feeds/edit-mode"
           hx-target="#feed-list"
           hx-swap="innerHTML"
@@ -49,6 +51,7 @@
     <form
       id="feed-edit-form"
       class="feed-edit-form"
+      data-app-htmx="true"
       hx-post="/feeds/edit-mode/save"
       hx-target="#feed-list"
       hx-swap="innerHTML"
@@ -128,6 +131,7 @@
           <li class="feed-row">
             <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}"
               data-feed-order="{{.SortOrder}}"
+              data-app-htmx="true"
               hx-get="/feeds/{{.ID}}/items"
               hx-target="#main-content"
               hx-swap="innerHTML"
@@ -168,6 +172,7 @@
                     class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}"
                     type="button" data-feed-id="{{.ID}}"
                     data-feed-order="{{.SortOrder}}"
+                    data-app-htmx="true"
                     hx-get="/feeds/{{.ID}}/items"
                     hx-target="#main-content"
                     hx-swap="innerHTML"

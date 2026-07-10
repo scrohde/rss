@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -125,6 +126,63 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	runKeyboardFlow(t, ctx, fixture)
 	runContentPanelMarkReadButtonFlow(t, ctx, fixture)
 	runFeedBoundaryKeyboardFlow(t, ctx, fixture)
+}
+
+func TestBrowserSmokeInactiveFeedContentBoundary(t *testing.T) {
+	app := newSmokeApp(t)
+	feedID := mustUpsertFeed(t, app, "https://example.com/malicious.xml", "Inactive Boundary Feed")
+	published := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title: "Inactive Boundary Item",
+		Link:  "https://example.com/malicious-item",
+		GUID:  "inactive-boundary-item",
+		Content: `<p>Inactive boundary smoke content</p>` +
+			`<div hx-post="/smoke-unauthorized" hx-trigger="load" hx-swap="none"></div>` +
+			`<div data-hx-post="/smoke-unauthorized" data-hx-trigger="every 1ms"></div>`,
+		PublishedParsed: &published,
+	}})
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, 1)
+	itemID := items[0].ID
+
+	var unauthorizedRequests atomic.Int64
+	routes := app.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/smoke-unauthorized" {
+			unauthorizedRequests.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+
+			return
+		}
+
+		routes.ServeHTTP(w, r)
+	})
+	server := newSmokeServer(t, handler)
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+		chromedp.WaitVisible("#main-content", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
+
+	feedSelector := fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, feedID)
+	clickElement(t, ctx, feedSelector, "select inactive-boundary feed")
+	rowSelector := fmt.Sprintf("#item-%d", itemID)
+	waitForJS(t, ctx, elementPresentExpression(rowSelector), "inactive-boundary item row")
+	clickElement(t, ctx, rowSelector, "open inactive-boundary item")
+	waitForJS(t, ctx, contentPanelItemExpression(itemID), "inactive-boundary reader")
+	waitForJS(t, ctx, inactiveReaderBoundaryExpression(), "inactive reader boundary")
+	runActions(t, ctx, chromedp.Sleep(500*time.Millisecond))
+
+	if got := unauthorizedRequests.Load(); got != 0 {
+		t.Fatalf("malicious reader content issued %d unauthorized request(s)", got)
+	}
 }
 
 func TestBrowserSmokeHiddenSelectionFallback(t *testing.T) {
@@ -1284,6 +1342,7 @@ func requestHTMX(t *testing.T, ctx context.Context, method, path, target, select
 				return false;
 			}
 			window.htmx.ajax(%q, %q, {
+				source: document.getElementById("main-content"),
 				target: %q,
 				swap: "outerHTML",
 				values: { selected_item_id: %q },
@@ -1348,6 +1407,21 @@ func hasClassExpression(selector, className string) string {
 		selector,
 		className,
 	)
+}
+
+func inactiveReaderBoundaryExpression() string {
+	return `(() => {
+		const root = document.querySelector('[data-reader-content="true"]');
+		if (!root || !root.hasAttribute("hx-disable")) {
+			return false;
+		}
+		const activeSelector = [
+			"[hx-get]", "[hx-post]", "[hx-put]", "[hx-delete]", "[hx-patch]", "[hx-trigger]",
+			"[data-hx-get]", "[data-hx-post]", "[data-hx-put]", "[data-hx-delete]", "[data-hx-patch]",
+			"[data-hx-trigger]", "form", "iframe", "script", "style", "svg", "math",
+		].join(",");
+		return root.textContent.includes("Inactive boundary smoke content") && !root.querySelector(activeSelector);
+	})()`
 }
 
 func pathnameExpression(path string) string {

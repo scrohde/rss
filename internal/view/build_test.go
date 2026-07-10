@@ -153,6 +153,24 @@ func TestBuildItemViewNoSummaryOrContent(t *testing.T) {
 	}
 }
 
+func TestBuildItemViewTreatsActiveOnlyMarkupAsNoReaderContent(t *testing.T) {
+	t.Parallel()
+
+	item := buildItem(
+		sql.NullString{String: `<script>attack()</script><iframe src="/attack"></iframe>`, Valid: true},
+		sql.NullString{String: `<style>body{display:none}</style><form action="/attack"></form>`, Valid: true},
+	)
+
+	if item.HasSummary || item.HasContent || item.HasReaderContent {
+		t.Fatalf("expected active-only markup to produce no reader content, got %+v", item)
+	}
+
+	if item.SummaryHTML != "" || item.ContentHTML != "" {
+		t.Fatalf("expected active-only markup to produce no template HTML, got summary=%q content=%q",
+			item.SummaryHTML, item.ContentHTML)
+	}
+}
+
 func TestBuildItemViewCompactPreviewSanitizesAndTruncatesSummaryHTML(t *testing.T) {
 	t.Parallel()
 

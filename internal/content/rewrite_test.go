@@ -25,11 +25,15 @@ func containsAll(text, first, second string) bool {
 	return strings.Contains(text, first) && strings.Contains(text, second)
 }
 
+func sanitizedSummaryString(input, baseURL string) string {
+	return string(RewriteSummaryHTML(input, baseURL))
+}
+
 func TestRewriteSummaryHTMLImages(t *testing.T) {
 	t.Parallel()
 
 	input := `<p>Hello</p><img src="https://example.com/image.jpg" alt="x">`
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 
 	expected := proxied("https://example.com/image.jpg")
 	if !strings.Contains(output, expected) {
@@ -42,7 +46,7 @@ func TestRewriteSummaryHTMLSrcset(t *testing.T) {
 
 	input := `<img srcset="https://example.com/a.jpg 1x, ` +
 		`https://example.com/b.jpg 2x" src="https://example.com/a.jpg">`
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 	expectedA := proxied("https://example.com/a.jpg")
 
 	expectedB := proxied("https://example.com/b.jpg")
@@ -55,7 +59,7 @@ func TestRewriteSummaryHTMLForBaseRootRelativeImage(t *testing.T) {
 	t.Parallel()
 
 	input := `<img src="/assets/content/some-data-should-be-code/graph.png">`
-	output := RewriteSummaryHTML(
+	output := sanitizedSummaryString(
 		input,
 		"https://borretti.me/article/some-data-should-be-code",
 	)
@@ -72,7 +76,7 @@ func TestRewriteSummaryHTMLForBaseRelativeSrcset(t *testing.T) {
 	t.Parallel()
 
 	input := `<img srcset="images/a.jpg 1x, /images/b.jpg 2x">`
-	output := RewriteSummaryHTML(input, "https://example.com/posts/1")
+	output := sanitizedSummaryString(input, "https://example.com/posts/1")
 	expectedA := proxied("https://example.com/posts/images/a.jpg")
 
 	expectedB := proxied("https://example.com/images/b.jpg")
@@ -96,7 +100,7 @@ func TestRewriteSummaryHTMLSrcsetWithCommasInURL(t *testing.T) {
 		substackURLSuffix +
 		`">`
 
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 	if strings.Contains(output, ", w_424, c_limit") ||
 		strings.Contains(output, ", w_848, c_limit") {
 		t.Fatalf(
@@ -119,7 +123,7 @@ func TestRewriteSummaryHTMLAnchorTargetAndRel(t *testing.T) {
 
 	input := `<a href="https://example.com">Example</a>`
 
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 	if !strings.Contains(output, `target="_blank"`) {
 		t.Fatalf("expected target _blank, got %q", output)
 	}
@@ -129,17 +133,14 @@ func TestRewriteSummaryHTMLAnchorTargetAndRel(t *testing.T) {
 	}
 }
 
-func TestRewriteSummaryHTMLAnchorRelPreservesExistingTokens(t *testing.T) {
+func TestRewriteSummaryHTMLAnchorRelDiscardsCallerTokens(t *testing.T) {
 	t.Parallel()
 
 	input := `<a href="https://example.com" rel="author">Example</a>`
 
-	output := RewriteSummaryHTML(input, "")
-	if !strings.Contains(output, `rel="author noopener noreferrer"`) {
-		t.Fatalf(
-			"expected existing rel token plus noopener noreferrer, got %q",
-			output,
-		)
+	output := sanitizedSummaryString(input, "")
+	if !strings.Contains(output, `rel="noopener noreferrer"`) || strings.Contains(output, "author") {
+		t.Fatalf("expected only enforced rel tokens, got %q", output)
 	}
 }
 
@@ -148,7 +149,7 @@ func TestRewriteSummaryHTMLAnchorTargetOverwritesNonBlank(t *testing.T) {
 
 	input := `<a href="https://example.com" target="_self">Example</a>`
 
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 	if !strings.Contains(output, `target="_blank"`) {
 		t.Fatalf("expected target _blank, got %q", output)
 	}
@@ -160,7 +161,7 @@ func TestRewriteSummaryHTMLAnchorHrefResolvesAgainstBase(t *testing.T) {
 	input := `<a href="/r/u_hackrepair/comments/1r60b1p/` +
 		`weve_built_this_before/">[link]</a>`
 
-	output := RewriteSummaryHTML(
+	output := sanitizedSummaryString(
 		input,
 		"https://www.reddit.com/r/accelerate/comments/1r60h2p/"+
 			"discussion_weve_built_this_before/",
@@ -174,18 +175,14 @@ func TestRewriteSummaryHTMLAnchorHrefResolvesAgainstBase(t *testing.T) {
 	}
 }
 
-func TestRewriteSummaryHTMLStripsInlineEventAttrs(t *testing.T) {
+func TestRewriteSummaryHTMLStripsActiveAndPresentationAttrs(t *testing.T) {
 	t.Parallel()
 
 	input := `<p style="color:red" onclick="alert(1)">Hello <span style="display:none">world</span></p>`
 
-	output := RewriteSummaryHTML(input, "")
-	if !strings.Contains(output, `style="color:red"`) {
-		t.Fatalf("expected style attributes preserved, got %q", output)
-	}
-
-	if strings.Contains(output, "onclick=") {
-		t.Fatalf("expected inline event handlers stripped, got %q", output)
+	output := sanitizedSummaryString(input, "")
+	if strings.Contains(output, "style=") || strings.Contains(output, "onclick=") {
+		t.Fatalf("expected active and presentation attributes stripped, got %q", output)
 	}
 }
 
@@ -198,7 +195,7 @@ func TestRewriteSummaryHTMLDropsSubstackImageOverlayControls(t *testing.T) {
 		`<button class="view-image">View image</button></div></a><figcaption>Caption with ` +
 		`<a href="https://example.com/more">source</a></figcaption></figure>`
 
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 
 	if strings.Contains(output, "image-link-expand") ||
 		strings.Contains(output, "restack-image") ||
@@ -223,7 +220,7 @@ func TestRewriteSummaryHTMLDropsSubstackImageOverlayWithoutImages(t *testing.T) 
 	t.Parallel()
 
 	input := `<div class="image-link-expand"><button class="view-image">View image</button></div><p>after</p>`
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 
 	if strings.Contains(output, "image-link-expand") || strings.Contains(output, "view-image") {
 		t.Fatalf("expected Substack overlay controls removed, got %q", output)
@@ -234,31 +231,15 @@ func TestRewriteSummaryHTMLDropsSubstackImageOverlayWithoutImages(t *testing.T) 
 	}
 }
 
-func TestRewriteSummaryHTMLKeepsVideoEmbedsAndDropsScripts(t *testing.T) {
+func TestRewriteSummaryHTMLDropsActiveEmbeddedContent(t *testing.T) {
 	t.Parallel()
 
 	input := `<p>before</p><iframe src="https://tube.tchncs.de/" style="border:0" onclick="x()"></iframe>` +
 		`<script>alert(1)</script><style>p{color:red;}</style><p>after</p>`
 
-	output := RewriteSummaryHTML(input, "")
-	if !strings.Contains(output, `<iframe src="https://tube.tchncs.de/"`) {
-		t.Fatalf("expected iframe preserved, got %q", output)
-	}
-
-	if !strings.Contains(output, `style="border:0"`) {
-		t.Fatalf("expected iframe style preserved, got %q", output)
-	}
-
-	if strings.Contains(output, "onclick=") {
-		t.Fatalf("expected inline event handlers stripped, got %q", output)
-	}
-
-	if strings.Contains(output, "<script") {
-		t.Fatalf("expected script removed, got %q", output)
-	}
-
-	if !strings.Contains(output, "<style>") {
-		t.Fatalf("expected style tag preserved, got %q", output)
+	output := sanitizedSummaryString(input, "")
+	if strings.Contains(output, "iframe") || strings.Contains(output, "script") || strings.Contains(output, "style") {
+		t.Fatalf("expected active embedded content removed, got %q", output)
 	}
 
 	if !containsAll(output, "<p>before</p>", "<p>after</p>") {
@@ -270,7 +251,7 @@ func TestRewriteSummaryHTMLDropsUnsafeIframeSrc(t *testing.T) {
 	t.Parallel()
 
 	input := `<iframe src="javascript:alert(1)"></iframe><p>after</p>`
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 
 	if strings.Contains(output, "<iframe") {
 		t.Fatalf("expected unsafe iframe dropped, got %q", output)
@@ -281,25 +262,105 @@ func TestRewriteSummaryHTMLDropsUnsafeIframeSrc(t *testing.T) {
 	}
 }
 
-func TestRewriteSummaryHTMLRewritesYouTubeEmbedToNoCookie(t *testing.T) {
+func TestRewriteSummaryHTMLDropsYouTubeEmbed(t *testing.T) {
 	t.Parallel()
 
 	input := `<iframe src="https://www.youtube.com/embed/0YhJxJZOWBw?feature=oembed"></iframe>`
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 
-	if !strings.Contains(output, `src="https://www.youtube-nocookie.com/embed/0YhJxJZOWBw?feature=oembed"`) {
-		t.Fatalf("expected youtube-nocookie embed src, got %q", output)
+	if output != "" {
+		t.Fatalf("expected iframe removed, got %q", output)
 	}
 }
 
-func TestRewriteSummaryHTMLRewritesShortYouTubeURLToNoCookieEmbed(t *testing.T) {
+func TestRewriteSummaryHTMLDropsShortYouTubeEmbed(t *testing.T) {
 	t.Parallel()
 
 	input := `<iframe src="https://youtu.be/Jr2auYrBDA4"></iframe>`
-	output := RewriteSummaryHTML(input, "")
+	output := sanitizedSummaryString(input, "")
 
-	if !strings.Contains(output, `src="https://www.youtube-nocookie.com/embed/Jr2auYrBDA4"`) {
-		t.Fatalf("expected youtube-nocookie embed src, got %q", output)
+	if output != "" {
+		t.Fatalf("expected iframe removed, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLStrictInactiveAllowlist(t *testing.T) {
+	t.Parallel()
+
+	input := `<div id="app" class="item-entry" style="position:fixed" ` +
+		`HX-POST = "/feeds/1/delete" DATA-HX-TRIGGER="every 1ms" onclick="attack()">` +
+		`<p title="kept">Safe <strong data-hx-post="/attack">formatting</strong></p>` +
+		`<form action="/feeds/1/delete"><label>Visible text<input autofocus></label>` +
+		`<button formaction="/feeds/1/delete">Dangerous control</button></form>` +
+		`<link rel="stylesheet" href="https://example.com/attack.css">` +
+		`<meta http-equiv="refresh" content="0;url=/feeds/1/delete">` +
+		`<script>script payload</script><style>style payload</style>` +
+		`<object data="/attack">object payload</object><embed src="/attack">` +
+		`<iframe src="/attack">iframe payload</iframe>` +
+		`<svg><foreignObject><div hx-post="/attack">svg payload</div></foreignObject></svg>` +
+		`<math><mtext>math payload</mtext></math><video src="/attack">video payload</video>` +
+		`<template><div hx-post="/attack">template payload</div></template></div>`
+
+	output := sanitizedSummaryString(input, "https://example.com/posts/1")
+	if !strings.Contains(output, `<p title="kept">Safe <strong>formatting</strong></p>`) ||
+		!strings.Contains(output, "Visible text") {
+		t.Fatalf("expected safe formatting and form text preserved, got %q", output)
+	}
+
+	blocked := []string{
+		"hx-", "data-hx", "style=", "onclick", "id=", "class=", "<form", "<input", "<button",
+		"<link", "<meta", "<script", "<style", "<object", "<embed", "<iframe", "<svg", "<math",
+		"<video", "<template", "Dangerous control", "script payload", "style payload", "object payload",
+		"iframe payload", "svg payload", "math payload", "video payload", "template payload",
+	}
+	for _, value := range blocked {
+		if strings.Contains(strings.ToLower(output), strings.ToLower(value)) {
+			t.Fatalf("expected %q removed from sanitized output %q", value, output)
+		}
+	}
+}
+
+func TestRewriteSummaryHTMLHandlesDuplicateAndMalformedAttrs(t *testing.T) {
+	t.Parallel()
+
+	input := "<DIV\n HX-POST \t ='/feeds/1/delete' data-HX-post='/attack' " +
+		"title='first' title='second'><p><x:thing x:hx-post='/attack'>safe"
+	output := sanitizedSummaryString(input, "https://example.com/posts/1")
+
+	if strings.Contains(strings.ToLower(output), "hx-") {
+		t.Fatalf("expected malformed active attributes removed, got %q", output)
+	}
+
+	if strings.Count(output, "title=") != 1 || !strings.Contains(output, `title="first"`) {
+		t.Fatalf("expected duplicate attributes collapsed to the first value, got %q", output)
+	}
+
+	if !strings.Contains(output, "safe") {
+		t.Fatalf("expected safe malformed-fragment text preserved, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLDropsUnsafeImageCandidates(t *testing.T) {
+	t.Parallel()
+
+	input := `<picture>` +
+		`<source srcset="javascript:alert(1) 1x, https://example.com/source.jpg 2x">` +
+		`<img src="javascript:alert(1)" ` +
+		`srcset="https://example.com/image.jpg 1x, data:image/png;base64,AAAA 2x" alt="safe">` +
+		`</picture>`
+	output := sanitizedSummaryString(input, "https://example.com/posts/1")
+
+	if strings.Contains(strings.ToLower(output), "javascript:") || strings.Contains(output, "data:image") {
+		t.Fatalf("expected unsafe image candidates removed, got %q", output)
+	}
+
+	if !strings.Contains(output, proxied("https://example.com/source.jpg")) ||
+		!strings.Contains(output, proxied("https://example.com/image.jpg")) {
+		t.Fatalf("expected safe image candidates proxied, got %q", output)
+	}
+
+	if !strings.Contains(output, `loading="lazy"`) || !strings.Contains(output, `referrerpolicy="no-referrer"`) {
+		t.Fatalf("expected enforced image attributes, got %q", output)
 	}
 }
 

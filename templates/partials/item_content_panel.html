@@ -69,6 +69,7 @@
       aria-label="Close article panel"
       title="Close article panel"
       data-content-panel-close="true"
+      data-app-htmx="true"
       hx-get="/items/{{.ID}}/compact"
       hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
@@ -93,7 +94,7 @@
         <a class="content-panel-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
         <p class="content-panel-meta">{{.PublishedDisplay}}</p>
       </header>
-      <div class="content-panel-body">
+      <div class="content-panel-body" data-reader-content="true" hx-disable>
         {{if .HasContent}}
           {{.ContentHTML}}
         {{else}}
@@ -112,7 +113,7 @@
         <a class="content-panel-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
         <p class="content-panel-meta">{{.PublishedDisplay}}</p>
       </header>
-      <div class="content-panel-body">
+      <div class="content-panel-body" data-reader-content="true" hx-disable>
         {{if .HasContent}}
           {{.ContentHTML}}
         {{else}}

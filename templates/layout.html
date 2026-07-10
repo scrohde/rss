@@ -126,6 +126,7 @@
                   <form
                     class="topbar-shortcuts-subscribe-form"
                     data-subscribe-form="true"
+                    data-app-htmx="true"
                     hx-post="/feeds"
                     hx-target="#subscribe-message"
                     hx-swap="outerHTML"
@@ -154,6 +155,7 @@
                 <span class="topbar-shortcuts-keys">
                   <form
                     class="topbar-shortcuts-import-form"
+                    data-app-htmx="true"
                     hx-post="/opml/import"
                     hx-target="#subscribe-message"
                     hx-swap="outerHTML"
@@ -200,7 +202,7 @@
       ></div>
 
       <section class="main-panel">
-        <main class="content" id="main-content">
+        <main class="content" id="main-content" data-app-htmx="true">
           {{template "main" .}}
         </main>
       </section>

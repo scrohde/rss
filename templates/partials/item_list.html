@@ -11,6 +11,7 @@
               type="button"
               aria-label="Refresh feed {{.Feed.Title}}"
               title="Refresh feed"
+              data-app-htmx="true"
               hx-post="/feeds/{{.Feed.ID}}/refresh"
               hx-target="closest section"
               hx-swap="outerHTML"
@@ -33,6 +34,7 @@
             class="chip ghost"
             type="button"
             data-mark-all-read-button
+            data-app-htmx="true"
             {{if .MarkAllReadUndoToken}}hidden{{end}}
             hx-post="/feeds/{{.Feed.ID}}/items/read"
             hx-target="closest section"
@@ -44,6 +46,7 @@
             class="chip ghost mark-all-read-undo"
             type="button"
             data-mark-all-read-undo-button
+            data-app-htmx="true"
             {{if not .MarkAllReadUndoToken}}hidden{{end}}
             hx-post="/feeds/{{.Feed.ID}}/items/read/undo"
             hx-target="closest section"
@@ -60,6 +63,7 @@
           type="button"
           aria-label="Clear read items"
           title="Clear read items"
+          data-app-htmx="true"
           hx-post="/feeds/{{.Feed.ID}}/items/sweep"
           hx-target="closest section"
           hx-swap="outerHTML"
@@ -78,7 +82,15 @@
     </div>
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
-    <div class="poller" hx-get="/feeds/{{.Feed.ID}}/items/poll" hx-trigger="every 60s" hx-target="#new-items-banner" hx-swap="outerHTML" hx-include="#cursor"></div>
+    <div
+      class="poller"
+      data-app-htmx="true"
+      hx-get="/feeds/{{.Feed.ID}}/items/poll"
+      hx-trigger="every 60s"
+      hx-target="#new-items-banner"
+      hx-swap="outerHTML"
+      hx-include="#cursor"
+    ></div>
     <div class="item-list" id="item-list" tabindex="-1" data-feed-id="{{.Feed.ID}}">
       {{range .Items}}
         {{template "item_compact" .}}

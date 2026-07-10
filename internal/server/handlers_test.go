@@ -1987,6 +1987,60 @@ func TestItemExpandedSummaryOnlyRendersSummaryFallbackInContentPanel(t *testing.
 	)
 }
 
+func TestReaderViewsRenderOnlyInactiveFeedContent(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Inactive Content Feed")
+	malicious := `<p>Reader safe content <strong>stays formatted</strong></p>` +
+		`<div hx-post="/attack-from-feed" data-hx-trigger="load"></div>` +
+		`<form action="/attack-from-feed"><button>attack control</button></form>` +
+		`<style>@import "/attack-from-feed"</style>` +
+		`<svg><a href="/attack-from-feed">foreign attack</a></svg>` +
+		`<math><mtext>math attack</mtext></math>` +
+		`<iframe src="/attack-from-feed"></iframe>`
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Inactive Content Item",
+		Link:            "http://example.com/inactive-content",
+		GUID:            "inactive-content",
+		Content:         malicious,
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, expectedSingleItem)
+	itemID := items[firstItemIndex].ID
+
+	desktopPath := fmt.Sprintf("/items/%d?selected_item_id=item-%d", itemID, itemID)
+	desktop := getHTMXRequest(app, desktopPath)
+	assertResponseCode(t, desktop, "inactive desktop reader status")
+	assertInactiveReaderResponse(t, desktop.Body.String(), "desktop")
+
+	mobile := getHTMXRequest(app, fmt.Sprintf("/mobile/items/%d/reader", itemID))
+	assertResponseCode(t, mobile, "inactive mobile reader status")
+	assertInactiveReaderResponse(t, mobile.Body.String(), "mobile")
+}
+
+func assertInactiveReaderResponse(t *testing.T, body, viewName string) {
+	t.Helper()
+
+	assertContains(
+		t,
+		body,
+		`data-reader-content="true" hx-disable`,
+		"expected "+viewName+" reader htmx boundary",
+	)
+	assertContains(
+		t,
+		body,
+		`<p>Reader safe content <strong>stays formatted</strong></p>`,
+		"expected "+viewName+" reader safe formatting",
+	)
+	assertNotContains(t, body, "/attack-from-feed", "expected "+viewName+" active URLs removed")
+	assertNotContains(t, body, "attack control", "expected "+viewName+" form controls removed")
+	assertNotContains(t, body, "foreign attack", "expected "+viewName+" SVG content removed")
+	assertNotContains(t, body, "math attack", "expected "+viewName+" MathML content removed")
+}
+
 func TestItemExpandedRendersPanelActionButtons(t *testing.T) {
 	t.Parallel()
 
