@@ -61,6 +61,7 @@ linters:
             - github.com/go-webauthn/webauthn
             - golang.org/x/net/html
             - golang.org/x/net/html/atom
+            - golang.org/x/net/idna
             - modernc.org/sqlite
 
     govet:

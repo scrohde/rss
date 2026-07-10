@@ -3,36 +3,25 @@ package content
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"rss/internal/outbound"
 )
 
-const maxProxyRedirects = 10
-
-var (
-	errMaxProxyRedirects = errors.New("stopped after 10 redirects")
-	errProxyRedirect     = errors.New("redirect blocked")
-)
+const maxProxyRedirects = 5
 
 // NewHTTPClient returns the HTTP client used for image proxy fetches.
 func NewHTTPClient() *http.Client {
-	client := new(http.Client)
-	client.Timeout = ImageProxyTimeout
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= maxProxyRedirects {
-			return errMaxProxyRedirects
-		}
-
-		if !IsAllowedProxyURL(req.URL) {
-			return errProxyRedirect
-		}
-
-		return nil
-	}
-
-	return client
+	return outbound.NewClient(outbound.ClientOptions{
+		Resolver:         nil,
+		BaseTransport:    nil,
+		DialContext:      nil,
+		Timeout:          ImageProxyTimeout,
+		MaxResponseBytes: ImageProxyMaxBodyBytes,
+		MaxRedirects:     maxProxyRedirects,
+	})
 }
 
 // BuildImageProxyRequest builds an image-proxy request for a target URL.

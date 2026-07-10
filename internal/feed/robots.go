@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"rss/internal/outbound"
 )
 
 const (
@@ -263,7 +265,7 @@ func fetchRobotsResponse(ctx context.Context, robotsURL string) (*http.Response,
 
 	req.Header.Set("User-Agent", feedUserAgent)
 
-	resp, err := newFeedHTTPClient().Do(req)
+	resp, err := newRobotsHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch robots.txt: %w", err)
 	}
@@ -283,9 +285,16 @@ func evaluateRobotsResponse(
 		return allowRobotsResult(), newRobotsCacheEntry(resp.StatusCode, "", now), nil
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRobotsBodyBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRobotsBodyBytes+1))
 	if err != nil {
 		return allowRobotsResult(), newRobotsCacheEntry(0, "", time.Time{}), fmt.Errorf("read robots.txt: %w", err)
+	}
+
+	if len(body) > maxRobotsBodyBytes {
+		return allowRobotsResult(), newRobotsCacheEntry(0, "", time.Time{}), fmt.Errorf(
+			"read robots.txt: %w",
+			outbound.ErrResponseTooLarge,
+		)
 	}
 
 	bodyText := string(body)
@@ -298,6 +307,17 @@ func evaluateRobotsResponse(
 	return blockedRobotsResult(feedURL, robotsURL, disallowRule),
 		newRobotsCacheEntry(resp.StatusCode, bodyText, now),
 		nil
+}
+
+func newRobotsHTTPClient() *http.Client {
+	return outbound.NewClient(outbound.ClientOptions{
+		Resolver:         nil,
+		BaseTransport:    nil,
+		DialContext:      nil,
+		Timeout:          feedFetchTimeout,
+		MaxResponseBytes: maxRobotsBodyBytes,
+		MaxRedirects:     maxFeedRedirects,
+	})
 }
 
 func blockedRobotsResult(feedURL, robotsURL, disallowRule string) robotsCheckResult {

@@ -15,6 +15,7 @@ import (
 	"rss/internal/auth"
 	"rss/internal/content"
 	"rss/internal/feed"
+	"rss/internal/outbound"
 	"rss/internal/store"
 )
 
@@ -39,6 +40,7 @@ type App struct {
 	tmpl                       *template.Template
 	imageProxyClient           *http.Client
 	imageProxyLookup           content.LookupIPAddrFunc
+	outboundResolver           outbound.Resolver
 	authRateLimiter            *authRateLimiter
 	markAllReadUndoTokenByFeed map[int64]string
 	pulseStatuses              map[int64]pulseFeedStatusEntry
@@ -64,6 +66,7 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	app.imageProxyLookup = func(ctx context.Context, host string) ([]net.IPAddr, error) {
 		return net.DefaultResolver.LookupIPAddr(ctx, host)
 	}
+	app.outboundResolver = net.DefaultResolver
 	app.authManager = nil
 	app.authRateLimiter = nil
 	app.authCookieName = ""

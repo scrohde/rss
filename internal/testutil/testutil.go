@@ -20,6 +20,8 @@ import (
 
 var errUnexpectedFeedURL = errors.New("unexpected feed url")
 
+const syntheticFeedIPBase = 20
+
 // FeedServer serves mutable feed XML for HTTP-based tests.
 type FeedServer struct {
 	headers        http.Header
@@ -74,7 +76,7 @@ func NewFeedServer(t *testing.T, feedXML string) (server *FeedServer, feedURL st
 	server.headers = http.Header{
 		"Content-Type": []string{"application/rss+xml"},
 	}
-	host := fmt.Sprintf("feed-%d.feed.test", feedServerCounter.Add(1))
+	host := fmt.Sprintf("93.184.216.%d", syntheticFeedIPBase+feedServerCounter.Add(1))
 	feedURL = "https://" + host + "/" + url.PathEscape(t.Name())
 
 	feedRegistryMu.Lock()
@@ -265,11 +267,8 @@ func buildRobotsResponse(req *http.Request, robotsTxt string) *http.Response {
 
 func isSyntheticFeedHost(host string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(host))
-	if normalized == "feed.test" {
-		return true
-	}
 
-	return strings.HasSuffix(normalized, ".feed.test")
+	return strings.HasPrefix(normalized, "93.184.216.")
 }
 
 func normalizeFeedResponse(statusCode int, headers http.Header) (int, http.Header) {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/mmcdole/gofeed"
 
+	"rss/internal/outbound"
 	"rss/internal/store"
 )
 
@@ -31,6 +32,8 @@ const (
 	refreshJitterMin             = 0.01
 	refreshJitterMax             = 0.20
 	feedFetchTimeout             = 15 * time.Second
+	maxFeedBodyBytes       int64 = 10 << 20
+	maxFeedRedirects             = 5
 	maxErrorLength               = 300
 	randomFallback               = 0.5
 	countReset                   = 0
@@ -112,7 +115,7 @@ func NormalizeURL(raw string) (string, error) {
 	}
 
 	u, err := url.ParseRequestURI(trimmed)
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	if err != nil || outbound.ValidateURL(u) != nil {
 		return "", errFeedURLInvalid
 	}
 
@@ -714,10 +717,14 @@ func saveRefreshMetaBestEffort(ctx context.Context, db *sql.DB, feedID int64, me
 }
 
 func newFeedHTTPClient() *http.Client {
-	client := new(http.Client)
-	client.Timeout = feedFetchTimeout
-
-	return client
+	return outbound.NewClient(outbound.ClientOptions{
+		Resolver:         nil,
+		BaseTransport:    nil,
+		DialContext:      nil,
+		Timeout:          feedFetchTimeout,
+		MaxResponseBytes: maxFeedBodyBytes,
+		MaxRedirects:     maxFeedRedirects,
+	})
 }
 
 func randomFloat64() float64 {

@@ -26,6 +26,7 @@ import (
 	"rss/internal/content"
 	feedpkg "rss/internal/feed"
 	"rss/internal/opml"
+	"rss/internal/outbound"
 	"rss/internal/store"
 	"rss/internal/testutil"
 	"rss/internal/view"
@@ -185,8 +186,14 @@ func newTestApp(t *testing.T) *App {
 	t.Helper()
 	db := testutil.OpenTestDB(t)
 	tmpl := templateMust()
+	app := New(db, tmpl)
+	app.outboundResolver = outbound.LookupIPAddrFunc(
+		func(_ context.Context, _ string) ([]net.IPAddr, error) {
+			return []net.IPAddr{testIPAddr(examplePublicIP)}, nil
+		},
+	)
 
-	return New(db, tmpl)
+	return app
 }
 
 func templateMust() *template.Template {
@@ -3926,6 +3933,44 @@ func TestImportOPML(t *testing.T) {
 	}
 }
 
+func TestImportOPMLSkipsNonPublicDestinations(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	app.outboundResolver = outbound.LookupIPAddrFunc(opmlDestinationLookup)
+	subscriptions := []opml.Subscription{
+		{Title: "Public", URL: "https://public.example/feed.xml"},
+		{Title: "Direct loopback", URL: "http://127.0.0.1/feed.xml"},
+		{Title: "Private DNS", URL: "https://internal.example/feed.xml"},
+		{Title: "Mixed DNS", URL: "https://mixed.example/feed.xml"},
+	}
+
+	counts := app.importOPMLSubscriptions(context.Background(), subscriptions)
+	if counts.imported != 1 || counts.skipped != 3 {
+		t.Fatalf("import counts = %+v, want 1 imported and 3 skipped", counts)
+	}
+
+	feeds, err := store.ListFeeds(context.Background(), app.db)
+	if err != nil {
+		t.Fatalf(errStoreListFeeds, err)
+	}
+
+	if len(feeds) != 1 || feeds[0].URL != "https://public.example/feed.xml" {
+		t.Fatalf("persisted feeds = %+v, want only public feed", feeds)
+	}
+}
+
+func opmlDestinationLookup(_ context.Context, host string) ([]net.IPAddr, error) {
+	switch host {
+	case "public.example":
+		return []net.IPAddr{testIPAddr(examplePublicIP)}, nil
+	case "mixed.example":
+		return []net.IPAddr{testIPAddr(examplePublicIP), testIPAddr("127.0.0.1")}, nil
+	default:
+		return []net.IPAddr{testIPAddr("192.168.1.10")}, nil
+	}
+}
+
 func TestRoutesMethodMismatchReturns405(t *testing.T) {
 	t.Parallel()
 
@@ -4249,12 +4294,12 @@ func TestImageProxyNon2xxLogsAtDebugLevel(t *testing.T) {
 
 	app.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusTemporaryRedirect {
-		t.Fatalf("expected 307, got %d", rec.Code)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
 	}
 
-	if got := rec.Header().Get("Location"); got != targetImageURL {
-		t.Fatalf("expected redirect to original image, got %q", got)
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("expected no redirect location, got %q", got)
 	}
 
 	body := logs.String()
@@ -4264,6 +4309,37 @@ func TestImageProxyNon2xxLogsAtDebugLevel(t *testing.T) {
 
 	if !strings.Contains(body, "status=403") {
 		t.Fatalf("expected status in log entry, got %q", body)
+	}
+}
+
+func TestImageProxyFetchFailureDoesNotRedirect(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	app.imageProxyLookup = func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		return []net.IPAddr{testIPAddr(examplePublicIP)}, nil
+	}
+	app.imageProxyClient = newTestHTTPClient(roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
+		return nil, http.ErrServerClosed
+	}))
+
+	targetImageURL := "https://example.com/image.png"
+	proxyURL := content.ImageProxyPath + imageProxyURLQuery + url.QueryEscape(targetImageURL)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, proxyURL, http.NoBody)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+
+	if location := rec.Header().Get("Location"); location != "" {
+		t.Fatalf("expected no redirect location, got %q", location)
+	}
+
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", cacheControl)
 	}
 }
 
@@ -4299,12 +4375,12 @@ func TestImageProxyNon2xxDoesNotLogAtInfoLevel(t *testing.T) {
 
 	app.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusTemporaryRedirect {
-		t.Fatalf("expected 307, got %d", rec.Code)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
 	}
 
-	if got := rec.Header().Get("Location"); got != targetImageURL {
-		t.Fatalf("expected redirect to original image, got %q", got)
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("expected no redirect location, got %q", got)
 	}
 
 	if strings.Contains(logs.String(), "image proxy upstream non-2xx") {
@@ -4370,12 +4446,12 @@ func TestImageProxyRejectsOversizedImage(t *testing.T) {
 
 	app.Routes().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusTemporaryRedirect {
-		t.Fatalf("expected 307, got %d", rec.Code)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
 	}
 
-	if got := rec.Header().Get("Location"); got != "https://example.com/image.png" {
-		t.Fatalf("expected redirect to original image, got %q", got)
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("expected no redirect location, got %q", got)
 	}
 }
 

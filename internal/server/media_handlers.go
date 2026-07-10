@@ -16,6 +16,7 @@ import (
 	"rss/internal/content"
 	"rss/internal/feed"
 	"rss/internal/opml"
+	"rss/internal/outbound"
 	"rss/internal/store"
 )
 
@@ -112,8 +113,8 @@ func (a *App) importOPMLSubscriptions(ctx context.Context, subscriptions []opml.
 	var counts opmlImportCounts
 
 	for _, subscription := range subscriptions {
-		feedURL, err := feed.NormalizeURL(subscription.URL)
-		if err != nil {
+		feedURL, allowed := a.normalizeOPMLFeedURL(ctx, subscription.URL)
+		if !allowed {
 			counts.skipped++
 
 			continue
@@ -132,6 +133,20 @@ func (a *App) importOPMLSubscriptions(ctx context.Context, subscriptions []opml.
 	}
 
 	return counts
+}
+
+func (a *App) normalizeOPMLFeedURL(ctx context.Context, raw string) (string, bool) {
+	feedURL, err := feed.NormalizeURL(raw)
+	if err != nil {
+		return "", false
+	}
+
+	parsedFeedURL, err := url.Parse(feedURL)
+	if err != nil || outbound.ValidateResolvedURL(ctx, parsedFeedURL, a.outboundResolver) != nil {
+		return "", false
+	}
+
+	return feedURL, true
 }
 
 func (a *App) renderOPMLImportResponse(
@@ -191,14 +206,14 @@ func (a *App) handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	defer closeImageProxyBody(resp)
 
 	if !isSuccessfulImageProxyResponse(resp, target) {
-		redirectToOriginalImage(w, r, target)
+		writeImageProxyFailure(w)
 
 		return
 	}
 
 	result, ok := readImageProxyPayload(resp)
 	if !ok {
-		redirectToOriginalImage(w, r, target)
+		writeImageProxyFailure(w)
 
 		return
 	}
@@ -255,7 +270,7 @@ func (a *App) fetchImageProxyResponse(
 
 	resp, err := a.imageProxyClient.Do(req)
 	if err != nil {
-		redirectToOriginalImage(w, r, target)
+		writeImageProxyFailure(w)
 
 		return nil, false
 	}
@@ -360,13 +375,7 @@ func writeImageProxyHeaders(
 	w.Header().Set("Content-Length", strconv.Itoa(contentLength))
 }
 
-func redirectToOriginalImage(w http.ResponseWriter, r *http.Request, target *url.URL) {
-	if target == nil {
-		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
-
-		return
-	}
-
+func writeImageProxyFailure(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, target.String(), http.StatusTemporaryRedirect)
+	http.Error(w, "upstream fetch failed", http.StatusBadGateway)
 }
