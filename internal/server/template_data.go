@@ -104,7 +104,8 @@ type mobileReaderResponseData struct {
 
 type authLoginPageData struct {
 	Message        string
-	AutoStartLogin bool
+	Next           string
+	SessionExpired bool
 	ShowSetupLink  bool
 }
 

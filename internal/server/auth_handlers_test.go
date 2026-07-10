@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -294,19 +295,33 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 	}
 
 	body := rr.Body.String()
+	assertGenericAuthLoginPage(t, body)
+}
+
+func assertGenericAuthLoginPage(t *testing.T, body string) {
+	t.Helper()
+
 	if !strings.Contains(body, `data-passkey-login="true"`) {
 		t.Fatal("expected passkey login button")
 	}
 
-	if strings.Contains(body, `data-passkey-autostart="true"`) {
-		t.Fatal("did not expect passkey auto-start without a registered credential")
+	if !strings.Contains(body, `class="auth-primary-button"`) {
+		t.Fatal("expected prominent passkey login action")
 	}
 
-	if !strings.Contains(body, `data-auth-message`) {
+	if !strings.Contains(body, `data-auth-message`) || !strings.Contains(body, `aria-live="polite"`) {
 		t.Fatal("expected auth message placeholder")
 	}
 
-	if !strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
+	if !strings.Contains(body, "Use your saved passkey for a secure, password-free sign-in.") {
+		t.Fatal("expected generic sign-in guidance")
+	}
+
+	if strings.Contains(body, "Your session expired") {
+		t.Fatal("did not expect expiry copy on direct login")
+	}
+
+	if !strings.Contains(body, `href="/auth/setup"`) {
 		t.Fatal("expected setup link before any passkey is registered")
 	}
 }
@@ -330,7 +345,7 @@ func assertStrictContentCSP(t *testing.T, csp string) {
 	}
 }
 
-func TestAuthLoginPageAutoStartsWhenCredentialExists(t *testing.T) {
+func TestAuthLoginPageOffersConditionalPasskeySelector(t *testing.T) {
 	t.Parallel()
 
 	app := newAuthEnabledTestApp(t)
@@ -346,16 +361,94 @@ func TestAuthLoginPageAutoStartsWhenCredentialExists(t *testing.T) {
 	}
 
 	body := rr.Body.String()
-	if !strings.Contains(body, `data-passkey-autostart="true"`) {
-		t.Fatal("expected passkey auto-start when a credential exists")
+	if !strings.Contains(body, `autocomplete="username webauthn"`) {
+		t.Fatal("expected conditional passkey autocomplete hook")
 	}
 
-	if !strings.Contains(body, `data-auth-login-pending`) {
-		t.Fatal("expected pending login section")
+	if !strings.Contains(body, `data-passkey-login="true"`) {
+		t.Fatal("expected explicit passkey fallback button")
 	}
 
-	if strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
+	if strings.Contains(body, `href="/auth/setup"`) {
 		t.Fatal("did not expect setup link after initial setup is complete")
+	}
+}
+
+func TestAuthLoginPageExplainsExpiredSessionAndPreservesNext(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/auth/login?reason=session_expired&next=%2F%3Ffeed_id%3D7",
+		http.NoBody,
+	)
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "Your session expired. Sign in again to continue where you left off.") {
+		t.Fatal("expected expired-session explanation")
+	}
+
+	if !strings.Contains(body, `data-auth-next="/?feed_id=7"`) {
+		t.Fatal("expected validated post-login destination")
+	}
+}
+
+func TestAuthLoginPageFallsBackFromUnsafeNext(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/auth/login?reason=session_expired&next=https%3A%2F%2Fattacker.test",
+		http.NoBody,
+	)
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if !strings.Contains(rr.Body.String(), `data-auth-next="/"`) {
+		t.Fatal("expected unsafe post-login destination to fall back to root")
+	}
+}
+
+func TestAuthLoginOptionsEchoesSupportedMediation(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		"/auth/webauthn/login/options",
+		strings.NewReader(`{"mediation":"conditional"}`),
+	)
+	req.Header.Set(headerContentType, "application/json")
+
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected login options, got %d", rr.Code)
+	}
+
+	var response passkeyOptionsResponse
+
+	err := json.Unmarshal(rr.Body.Bytes(), &response)
+	if err != nil {
+		t.Fatalf("decode login options: %v", err)
+	}
+
+	if response.Mediation != "conditional" {
+		t.Fatalf("expected conditional mediation, got %q", response.Mediation)
 	}
 }
 
@@ -896,7 +989,7 @@ func TestAuthSessionExpiryRedirectsToLogin(t *testing.T) {
 
 	time.Sleep(80 * time.Millisecond)
 
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/?feed_id=7", http.NoBody)
 	req.AddCookie(cookie)
 
 	rr := httptest.NewRecorder()
@@ -907,7 +1000,51 @@ func TestAuthSessionExpiryRedirectsToLogin(t *testing.T) {
 		t.Fatalf("expected expired session redirect, got %d", rr.Code)
 	}
 
-	if rr.Header().Get("Location") != "/auth/login" {
-		t.Fatalf("expected redirect to login, got %q", rr.Header().Get("Location"))
+	location := rr.Header().Get("Location")
+
+	parsed, err := url.Parse(location)
+	if err != nil {
+		t.Fatalf("parse login redirect: %v", err)
+	}
+
+	if parsed.Path != "/auth/login" || parsed.Query().Get("reason") != "session_expired" ||
+		parsed.Query().Get("next") != "/?feed_id=7" {
+		t.Fatalf("expected expired-session redirect with destination, got %q", location)
+	}
+}
+
+func TestSafeAuthRedirect(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"":                           "/",
+		"/":                          "/",
+		"/items?feed_id=3":           "/items?feed_id=3",
+		"https://attacker.test/path": "/",
+		"//attacker.test/path":       "/",
+		"not-a-path":                 "/",
+		"/auth/login":                "/",
+		"/auth/recovery?next=/items": "/",
+		"/items#fragment":            "/",
+	}
+
+	for input, want := range tests {
+		if got := safeAuthRedirect(input); got != want {
+			t.Errorf("safeAuthRedirect(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestPasskeyVerifyResponsePreservesSafeNext(t *testing.T) {
+	t.Parallel()
+
+	response := newPasskeyVerifyResponse("/?feed_id=7")
+	if !response.OK || response.Redirect != "/?feed_id=7" {
+		t.Fatalf("unexpected successful verify response: %+v", response)
+	}
+
+	unsafeResponse := newPasskeyVerifyResponse("https://attacker.test")
+	if !unsafeResponse.OK || unsafeResponse.Redirect != "/" {
+		t.Fatalf("unexpected unsafe-next verify response: %+v", unsafeResponse)
 	}
 }

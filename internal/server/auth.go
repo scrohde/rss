@@ -52,6 +52,7 @@ const (
 	authPrincipalContextKey authContextKey = "authPrincipal"
 	authRealIPContextKey    authContextKey = "realIP"
 	authRequestIDContextKey authContextKey = "requestID"
+	authInvalidSessionKey   authContextKey = "invalidSession"
 )
 
 // AuthConfig controls optional passkey authentication features.
@@ -82,15 +83,31 @@ type authRateLimitEntry struct {
 }
 
 type passkeyVerifyRequest struct {
-	//nolint:tagliatelle // Frontend contract uses snake_case payload keys.
-	ChallengeID string          `json:"challenge_id"`
+	ChallengeID string          `json:"challenge_id"` //nolint:tagliatelle // Frontend contract uses snake_case.
+	Next        string          `json:"next"`
 	Credential  json.RawMessage `json:"credential"`
 }
 
+type authPrincipalLoad struct {
+	Principal      auth.SessionPrincipal
+	HasPrincipal   bool
+	InvalidSession bool
+}
+
+type passkeyOptionsRequest struct {
+	Mediation string `json:"mediation"`
+}
+
 type passkeyOptionsResponse struct {
-	Options any `json:"options"`
+	Options   any    `json:"options"`
+	Mediation string `json:"mediation"`
 	//nolint:tagliatelle // Frontend contract uses snake_case payload keys.
 	ChallengeID string `json:"challenge_id"`
+}
+
+type passkeyVerifyResponse struct {
+	Redirect string `json:"redirect"`
+	OK       bool   `json:"ok"`
 }
 
 func newAuthRateLimiter() *authRateLimiter {
@@ -376,12 +393,18 @@ func (a *App) withAuthSession(next http.Handler) http.Handler {
 }
 
 func (a *App) requestWithPrincipal(r *http.Request) *http.Request {
-	principal, hasPrincipal := a.loadPrincipalFromRequest(r)
-	if !hasPrincipal {
+	result := a.loadPrincipalFromRequest(r)
+	if !result.HasPrincipal {
+		if result.InvalidSession {
+			ctx := context.WithValue(r.Context(), authInvalidSessionKey, true)
+
+			return r.WithContext(ctx)
+		}
+
 		return r
 	}
 
-	ctx := context.WithValue(r.Context(), authPrincipalContextKey, principal)
+	ctx := context.WithValue(r.Context(), authPrincipalContextKey, result.Principal)
 
 	return r.WithContext(ctx)
 }
@@ -410,19 +433,30 @@ func (a *App) rejectIfAuthRequiredAndMissing(w http.ResponseWriter, r *http.Requ
 	}
 
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
-		redirectPath := "/auth/login"
-
-		credentials, err := a.authManager.CredentialCount(r.Context())
-		if err == nil && credentials == 0 && !a.setupUnlocked(r) {
-			redirectPath = "/auth/setup"
-		}
-
-		http.Redirect(w, r, redirectPath, http.StatusSeeOther)
+		http.Redirect(w, r, a.missingAuthRedirect(r), http.StatusSeeOther)
 	} else {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 
 	return true
+}
+
+func (a *App) missingAuthRedirect(r *http.Request) string {
+	credentials, err := a.authManager.CredentialCount(r.Context())
+	if err == nil && credentials == 0 && !a.setupUnlocked(r) {
+		return "/auth/setup"
+	}
+
+	if !invalidSessionFromRequest(r) {
+		return "/auth/login"
+	}
+
+	query := url.Values{
+		"next":   {r.URL.RequestURI()},
+		"reason": {"session_expired"},
+	}
+
+	return "/auth/login?" + query.Encode()
 }
 
 func (a *App) withCSRFMiddleware(next http.Handler) http.Handler {
@@ -619,18 +653,25 @@ func (a *App) recordAuthSuccess(r *http.Request) {
 	a.authRateLimiter.recordSuccess(requestRealIP(r))
 }
 
-func (a *App) loadPrincipalFromRequest(r *http.Request) (auth.SessionPrincipal, bool) {
+func (a *App) loadPrincipalFromRequest(r *http.Request) authPrincipalLoad {
 	cookie, err := r.Cookie(a.authCookieName)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
-		return emptySessionPrincipal(), false
+		return authPrincipalLoad{Principal: emptySessionPrincipal(), HasPrincipal: false, InvalidSession: false}
 	}
 
 	principal, err := a.authManager.ValidateSessionCookie(r.Context(), cookie.Value)
 	if err != nil {
-		return emptySessionPrincipal(), false
+		return authPrincipalLoad{Principal: emptySessionPrincipal(), HasPrincipal: false, InvalidSession: true}
 	}
 
-	return principal, true
+	return authPrincipalLoad{Principal: principal, HasPrincipal: true, InvalidSession: false}
+}
+
+func invalidSessionFromRequest(r *http.Request) bool {
+	raw := r.Context().Value(authInvalidSessionKey)
+	invalid, ok := raw.(bool)
+
+	return ok && invalid
 }
 
 func emptySessionPrincipal() auth.SessionPrincipal {
@@ -774,14 +815,31 @@ func (a *App) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	message := strings.TrimSpace(r.URL.Query().Get("message"))
+	next := safeAuthRedirect(r.URL.Query().Get("next"))
 	a.renderTemplate(w, "auth_login", authLoginPageData{
-		Message:        message,
-		AutoStartLogin: credentials > 0,
-		ShowSetupLink:  credentials == 0,
+		Message: message,
+		Next:    next,
+		SessionExpired: r.URL.Query().Get("reason") == "session_expired" &&
+			strings.TrimSpace(r.URL.Query().Get("next")) != "",
+		ShowSetupLink: credentials == 0,
 	})
 }
 
 func (a *App) handleAuthLoginOptions(w http.ResponseWriter, r *http.Request) {
+	request := passkeyOptionsRequest{Mediation: ""}
+
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPasskeyJSONBytes)).Decode(&request)
+	if err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid passkey options request", http.StatusBadRequest)
+
+		return
+	}
+
+	mediation := "required"
+	if request.Mediation == "conditional" {
+		mediation = request.Mediation
+	}
+
 	result, err := a.authManager.BeginDiscoverableLogin(r.Context(), a.realIPFromRequest(r))
 	if err != nil {
 		a.recordAuthFailure(r)
@@ -790,7 +848,11 @@ func (a *App) handleAuthLoginOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, passkeyOptionsResponse{ChallengeID: result.ChallengeID, Options: result.Assertion})
+	writeJSON(w, passkeyOptionsResponse{
+		ChallengeID: result.ChallengeID,
+		Options:     result.Assertion,
+		Mediation:   mediation,
+	})
 }
 
 func (a *App) handleAuthLoginVerify(w http.ResponseWriter, r *http.Request) {
@@ -823,7 +885,35 @@ func (a *App) handleAuthLoginVerify(w http.ResponseWriter, r *http.Request) {
 	a.recordAuthSuccess(r)
 	a.setAuthSessionCookie(w, issue.CookieValue)
 
-	writeJSON(w, map[string]any{"ok": true, "redirect": "/"})
+	writeJSON(w, newPasskeyVerifyResponse(request.Next))
+}
+
+func newPasskeyVerifyResponse(next string) passkeyVerifyResponse {
+	return passkeyVerifyResponse{Redirect: safeAuthRedirect(next), OK: true}
+}
+
+func safeAuthRedirect(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if invalidAuthRedirectRaw(raw) {
+		return "/"
+	}
+
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || invalidAuthRedirectURL(parsed) {
+		return "/"
+	}
+
+	return parsed.RequestURI()
+}
+
+func invalidAuthRedirectRaw(raw string) bool {
+	return raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") ||
+		strings.ContainsAny(raw, "#\r\n")
+}
+
+func invalidAuthRedirectURL(parsed *url.URL) bool {
+	return parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" || parsed.Path == "/auth" ||
+		strings.HasPrefix(parsed.Path, "/auth/")
 }
 
 func (a *App) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
@@ -917,7 +1007,7 @@ func (a *App) handleAuthRegisterOptions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, passkeyOptionsResponse{ChallengeID: result.ChallengeID, Options: result.Creation})
+	writeJSON(w, passkeyOptionsResponse{ChallengeID: result.ChallengeID, Options: result.Creation, Mediation: ""})
 }
 
 func (a *App) handleAuthRegisterVerify(w http.ResponseWriter, r *http.Request) {
