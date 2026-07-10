@@ -208,15 +208,16 @@ func resolveAuthConfig() (server.AuthConfig, error) {
 	enabled := envBool("AUTH_ENABLED")
 
 	cfg := server.AuthConfig{
-		Enabled:      enabled,
-		RPID:         strings.TrimSpace(os.Getenv("AUTH_RP_ID")),
-		RPOrigin:     strings.TrimSpace(os.Getenv("AUTH_RP_ORIGIN")),
-		RPName:       strings.TrimSpace(os.Getenv("AUTH_RP_NAME")),
-		SetupToken:   strings.TrimSpace(os.Getenv("AUTH_SETUP_TOKEN")),
-		SessionTTL:   envDuration("AUTH_SESSION_TTL", authSessionTTL),
-		ChallengeTTL: envDuration("AUTH_CHALLENGE_TTL", authChallengeTTL),
-		CookieName:   strings.TrimSpace(os.Getenv("AUTH_COOKIE_NAME")),
-		CookieSecure: true,
+		Enabled:           enabled,
+		RPID:              strings.TrimSpace(os.Getenv("AUTH_RP_ID")),
+		RPOrigin:          strings.TrimSpace(os.Getenv("AUTH_RP_ORIGIN")),
+		RPName:            strings.TrimSpace(os.Getenv("AUTH_RP_NAME")),
+		SetupToken:        strings.TrimSpace(os.Getenv("AUTH_SETUP_TOKEN")),
+		SessionTTL:        envDuration("AUTH_SESSION_TTL", authSessionTTL),
+		ChallengeTTL:      envDuration("AUTH_CHALLENGE_TTL", authChallengeTTL),
+		CookieName:        strings.TrimSpace(os.Getenv("AUTH_COOKIE_NAME")),
+		CookieSecure:      true,
+		TrustedProxyCIDRs: splitCommaSeparated(envString("AUTH_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")),
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("AUTH_COOKIE_SECURE")); raw != "" {
@@ -246,6 +247,27 @@ func resolveAuthConfig() (server.AuthConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+func splitCommaSeparated(raw string) []string {
+	var values []string
+
+	for value := range strings.SplitSeq(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+
+	return values
+}
+
+func envString(name, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+
+	return value
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {

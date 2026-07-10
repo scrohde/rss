@@ -42,6 +42,7 @@ type App struct {
 	imageProxyLookup           content.LookupIPAddrFunc
 	outboundResolver           outbound.Resolver
 	authRateLimiter            *authRateLimiter
+	authTrustedProxies         []*net.IPNet
 	markAllReadUndoTokenByFeed map[int64]string
 	pulseStatuses              map[int64]pulseFeedStatusEntry
 	authSetupCookieName        string
@@ -69,6 +70,7 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	app.outboundResolver = net.DefaultResolver
 	app.authManager = nil
 	app.authRateLimiter = nil
+	app.authTrustedProxies = nil
 	app.authCookieName = ""
 	app.authSetupToken = ""
 	app.authSetupCookieName = ""
@@ -163,8 +165,6 @@ func (a *App) registerAuthRoutes(mux *http.ServeMux) {
 }
 
 func (a *App) wrapRoutes(handler http.Handler) http.Handler {
-	handler = a.withRequestID(handler)
-	handler = a.withRealIP(handler)
 	handler = a.withSecurityHeaders(handler)
 
 	if a.authEnabled {
@@ -172,6 +172,9 @@ func (a *App) wrapRoutes(handler http.Handler) http.Handler {
 		handler = a.withCSRFMiddleware(handler)
 		handler = a.withAuthSession(handler)
 	}
+
+	handler = a.withRealIP(handler)
+	handler = a.withRequestID(handler)
 
 	return handler
 }

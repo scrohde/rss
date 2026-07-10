@@ -82,6 +82,8 @@ Useful overrides:
 - `CADDY_ALLOW_PLACEHOLDER=true` to bypass placeholder-domain safety check.
 
 Pulse RSS should remain bound to loopback (`127.0.0.1:8080`) behind Caddy.
+By default, authentication trusts forwarded client addresses only from loopback proxies. Set
+`AUTH_TRUSTED_PROXY_CIDRS` to a comma-separated CIDR list if Caddy connects from another network.
 
 ### Authentication (Passkeys)
 
