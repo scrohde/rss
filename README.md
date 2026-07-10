@@ -75,6 +75,7 @@ Useful overrides:
 - `VALIDATE_INSTANCE_PORTS=false` to skip duplicate-port safety checks.
 - `VALIDATE_INSTANCE_DB_PATH=false` to skip instance DB path safety checks.
 - `VALIDATE_RP_ID_PLACEHOLDER=false` to skip placeholder RP ID safety checks.
+- `VALIDATE_AUTH_SETUP_TOKEN=false` to skip setup-token safety checks.
 - `ALLOW_BASE_SERVICE_WITH_INSTANCES=true` to allow running base and instance units together.
 - `APPLY_CADDY=false` to skip installing/reloading Caddy.
 - `BIN_SRC=/path/to/rss` to deploy a different binary path.
@@ -92,11 +93,14 @@ Pulse RSS can run with passkey-only authentication for public hosting.
 Set these env vars before `go run .` in production:
 
 ```bash
+# Run this once, then paste its output into AUTH_SETUP_TOKEN below:
+openssl rand -base64 32
+
 AUTH_ENABLED=true
 AUTH_RP_ID=rss.example.com
 AUTH_RP_ORIGIN=https://rss.example.com
 AUTH_RP_NAME="Pulse RSS"
-AUTH_SETUP_TOKEN="<long-random-secret>"
+AUTH_SETUP_TOKEN="<paste-generated-value-here>"
 AUTH_SESSION_TTL=24h
 AUTH_CHALLENGE_TTL=5m
 AUTH_COOKIE_NAME=pulse_rss_session
@@ -104,7 +108,9 @@ AUTH_COOKIE_SECURE=true
 ```
 
 Notes:
-- `AUTH_SETUP_TOKEN` is required for initial enrollment.
+- `AUTH_SETUP_TOKEN` is required for initial enrollment. Generate it with `openssl rand -base64 32` and
+  store the output in the environment file. It must be at least 43 characters; length alone does not make a
+  human-chosen value safe.
 - `AUTH_RP_ORIGIN` must exactly match the public HTTPS origin.
 - Passkeys do not work reliably on raw public IP addresses.
 - If unset, secure defaults are applied: `AUTH_SESSION_TTL=24h`, `AUTH_CHALLENGE_TTL=5m`, and secure cookies.
