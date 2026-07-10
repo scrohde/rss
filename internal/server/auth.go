@@ -105,6 +105,11 @@ type passkeyOptionsResponse struct {
 	ChallengeID string `json:"challenge_id"`
 }
 
+type passkeyVerifyResponse struct {
+	Redirect string `json:"redirect"`
+	OK       bool   `json:"ok"`
+}
+
 func newAuthRateLimiter() *authRateLimiter {
 	return &authRateLimiter{
 		entries:     make(map[string]*authRateLimitEntry),
@@ -880,7 +885,11 @@ func (a *App) handleAuthLoginVerify(w http.ResponseWriter, r *http.Request) {
 	a.recordAuthSuccess(r)
 	a.setAuthSessionCookie(w, issue.CookieValue)
 
-	writeJSON(w, map[string]any{"ok": true, "redirect": safeAuthRedirect(request.Next)})
+	writeJSON(w, newPasskeyVerifyResponse(request.Next))
+}
+
+func newPasskeyVerifyResponse(next string) passkeyVerifyResponse {
+	return passkeyVerifyResponse{Redirect: safeAuthRedirect(next), OK: true}
 }
 
 func safeAuthRedirect(raw string) string {

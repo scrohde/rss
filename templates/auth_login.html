@@ -9,42 +9,53 @@
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/auth.js" defer></script>
 </head>
-<body>
-  <main class="empty-state auth-shell" data-auth-next="{{.Next}}">
-    <h2>Sign in with Passkey</h2>
-    {{if .SessionExpired}}
-      <p>Your session expired. Sign in again to continue.</p>
-    {{else}}
-      <p>This app uses passkey-only authentication.</p>
-    {{end}}
-    {{if .Message}}
-      <p class="message error">{{.Message}}</p>
-    {{end}}
-    <p class="message auth-message" data-auth-message role="status" aria-live="polite"></p>
-    <section data-auth-login-fallback>
-      <p data-auth-passkey-selector hidden>
-        <label for="passkey-account">Passkey account</label>
-        <input
-          id="passkey-account"
-          type="text"
-          autocomplete="username webauthn"
-          placeholder="Choose a saved passkey"
-        >
-      </p>
-      <p>
+<body class="auth-page">
+  <main class="auth-shell" data-auth-next="{{.Next}}">
+    <article class="auth-card" aria-labelledby="auth-title">
+      <div class="auth-brand" aria-label="Pulse RSS">
+        <img src="/static/favicon.svg" width="48" height="48" alt="">
+        <span>Pulse RSS</span>
+      </div>
+      <header class="auth-card-header">
+        <p class="auth-eyebrow">Welcome back</p>
+        <h1 id="auth-title">Sign in with your passkey</h1>
+        {{if .SessionExpired}}
+          <p>Your session expired. Sign in again to continue where you left off.</p>
+        {{else}}
+          <p>Use your saved passkey for a secure, password-free sign-in.</p>
+        {{end}}
+      </header>
+      {{if .Message}}
+        <p class="message error auth-server-message">{{.Message}}</p>
+      {{end}}
+      <div class="message auth-message" data-auth-message role="status" aria-live="polite"></div>
+      <section class="auth-actions" data-auth-login-fallback aria-label="Sign-in options">
+        <div class="auth-passkey-selector" data-auth-passkey-selector hidden>
+          <label for="passkey-account">Choose a saved passkey</label>
+          <input
+            id="passkey-account"
+            type="text"
+            inputmode="none"
+            autocomplete="username webauthn"
+            aria-describedby="passkey-account-hint"
+            placeholder="Tap to view saved passkeys"
+            spellcheck="false"
+          >
+          <p id="passkey-account-hint">Your browser will show passkeys available for Pulse RSS.</p>
+        </div>
         <button
           type="button"
-          class="chip"
+          class="auth-primary-button"
           data-passkey-login="true"
         >
-          Sign in with passkey
+          <span>Sign in with passkey</span>
         </button>
-      </p>
-      {{if .ShowSetupLink}}
-        <p><a href="/auth/setup">Initial setup</a></p>
-      {{end}}
-      <p><a href="/auth/recovery">Use emergency recovery code</a></p>
-    </section>
+        <a class="auth-recovery-link" href="/auth/recovery">Use emergency recovery code</a>
+        {{if .ShowSetupLink}}
+          <a class="auth-setup-link" href="/auth/setup">Initial setup</a>
+        {{end}}
+      </section>
+    </article>
   </main>
 </body>
 </html>

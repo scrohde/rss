@@ -259,6 +259,7 @@
         showMessage("", false);
         button.dataset.running = "true";
         button.disabled = true;
+        button.setAttribute("aria-busy", "true");
       }
 
       try {
@@ -279,6 +280,7 @@
         if (mode === "required") {
           button.dataset.running = "false";
           button.disabled = false;
+          button.removeAttribute("aria-busy");
         }
       }
     };

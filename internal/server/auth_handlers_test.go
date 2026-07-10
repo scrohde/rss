@@ -295,15 +295,33 @@ func TestAuthSecurityHeadersOnLoginPage(t *testing.T) {
 	}
 
 	body := rr.Body.String()
+	assertGenericAuthLoginPage(t, body)
+}
+
+func assertGenericAuthLoginPage(t *testing.T, body string) {
+	t.Helper()
+
 	if !strings.Contains(body, `data-passkey-login="true"`) {
 		t.Fatal("expected passkey login button")
 	}
 
-	if !strings.Contains(body, `data-auth-message`) {
+	if !strings.Contains(body, `class="auth-primary-button"`) {
+		t.Fatal("expected prominent passkey login action")
+	}
+
+	if !strings.Contains(body, `data-auth-message`) || !strings.Contains(body, `aria-live="polite"`) {
 		t.Fatal("expected auth message placeholder")
 	}
 
-	if !strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
+	if !strings.Contains(body, "Use your saved passkey for a secure, password-free sign-in.") {
+		t.Fatal("expected generic sign-in guidance")
+	}
+
+	if strings.Contains(body, "Your session expired") {
+		t.Fatal("did not expect expiry copy on direct login")
+	}
+
+	if !strings.Contains(body, `href="/auth/setup"`) {
 		t.Fatal("expected setup link before any passkey is registered")
 	}
 }
@@ -351,7 +369,7 @@ func TestAuthLoginPageOffersConditionalPasskeySelector(t *testing.T) {
 		t.Fatal("expected explicit passkey fallback button")
 	}
 
-	if strings.Contains(body, `<a href="/auth/setup">Initial setup</a>`) {
+	if strings.Contains(body, `href="/auth/setup"`) {
 		t.Fatal("did not expect setup link after initial setup is complete")
 	}
 }
@@ -372,12 +390,32 @@ func TestAuthLoginPageExplainsExpiredSessionAndPreservesNext(t *testing.T) {
 	app.Routes().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	if !strings.Contains(body, "Your session expired. Sign in again to continue.") {
+	if !strings.Contains(body, "Your session expired. Sign in again to continue where you left off.") {
 		t.Fatal("expected expired-session explanation")
 	}
 
 	if !strings.Contains(body, `data-auth-next="/?feed_id=7"`) {
 		t.Fatal("expected validated post-login destination")
+	}
+}
+
+func TestAuthLoginPageFallsBackFromUnsafeNext(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	seedAuthCredential(t, app)
+
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"/auth/login?reason=session_expired&next=https%3A%2F%2Fattacker.test",
+		http.NoBody,
+	)
+	rr := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rr, req)
+
+	if !strings.Contains(rr.Body.String(), `data-auth-next="/"`) {
+		t.Fatal("expected unsafe post-login destination to fall back to root")
 	}
 }
 
@@ -994,5 +1032,19 @@ func TestSafeAuthRedirect(t *testing.T) {
 		if got := safeAuthRedirect(input); got != want {
 			t.Errorf("safeAuthRedirect(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestPasskeyVerifyResponsePreservesSafeNext(t *testing.T) {
+	t.Parallel()
+
+	response := newPasskeyVerifyResponse("/?feed_id=7")
+	if !response.OK || response.Redirect != "/?feed_id=7" {
+		t.Fatalf("unexpected successful verify response: %+v", response)
+	}
+
+	unsafeResponse := newPasskeyVerifyResponse("https://attacker.test")
+	if !unsafeResponse.OK || unsafeResponse.Redirect != "/" {
+		t.Fatalf("unexpected unsafe-next verify response: %+v", unsafeResponse)
 	}
 }
