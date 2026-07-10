@@ -41,6 +41,7 @@ CADDY_ALLOW_PLACEHOLDER="${CADDY_ALLOW_PLACEHOLDER:-false}"
 VALIDATE_INSTANCE_PORTS="${VALIDATE_INSTANCE_PORTS:-true}"
 VALIDATE_INSTANCE_DB_PATH="${VALIDATE_INSTANCE_DB_PATH:-true}"
 VALIDATE_RP_ID_PLACEHOLDER="${VALIDATE_RP_ID_PLACEHOLDER:-true}"
+VALIDATE_AUTH_SETUP_TOKEN="${VALIDATE_AUTH_SETUP_TOKEN:-true}"
 ALLOW_BASE_SERVICE_WITH_INSTANCES="${ALLOW_BASE_SERVICE_WITH_INSTANCES:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -114,6 +115,7 @@ parse_bool "$CADDY_ALLOW_PLACEHOLDER"
 parse_bool "$VALIDATE_INSTANCE_PORTS"
 parse_bool "$VALIDATE_INSTANCE_DB_PATH"
 parse_bool "$VALIDATE_RP_ID_PLACEHOLDER"
+parse_bool "$VALIDATE_AUTH_SETUP_TOKEN"
 parse_bool "$ALLOW_BASE_SERVICE_WITH_INSTANCES"
 parse_bool "$DRY_RUN"
 
@@ -208,6 +210,9 @@ print_dry_run_plan() {
   fi
   if [[ "$VALIDATE_RP_ID_PLACEHOLDER" == "true" ]]; then
     echo "  - Validate AUTH_RP_ID does not use rss.example.com in env files."
+  fi
+  if [[ "$VALIDATE_AUTH_SETUP_TOKEN" == "true" ]]; then
+    echo "  - Validate AUTH_SETUP_TOKEN is a generated secret of at least 43 characters in env files."
   fi
 
   echo
@@ -602,6 +607,55 @@ if [[ "$VALIDATE_RP_ID_PLACEHOLDER" == "true" ]]; then
     done
     echo "hint: set AUTH_RP_ID to your real domain in /etc/pulse-rss/pulse-rss.env or /etc/pulse-rss/<instance>.env."
     echo "hint: use VALIDATE_RP_ID_PLACEHOLDER=false to bypass this guard if intentional."
+    exit 1
+  fi
+fi
+
+if [[ "$VALIDATE_AUTH_SETUP_TOKEN" == "true" ]]; then
+  shared_auth_enabled="$(read_env_key "$ENV_DST" "AUTH_ENABLED")"
+  shared_setup_token="$(read_env_key "$ENV_DST" "AUTH_SETUP_TOKEN")"
+  invalid_setup_token_units=()
+
+  for unit in "${SERVICE_UNITS[@]}"; do
+    effective_auth_enabled="$shared_auth_enabled"
+    effective_setup_token="$shared_setup_token"
+    if [[ "$unit" == *"@"* ]]; then
+      instance_name="${unit#*@}"
+      instance_name="${instance_name%.service}"
+      instance_env_dst="$(dirname "$ENV_DST")/$instance_name.env"
+      instance_auth_enabled="$(read_env_key "$instance_env_dst" "AUTH_ENABLED")"
+      instance_setup_token="$(read_env_key "$instance_env_dst" "AUTH_SETUP_TOKEN")"
+      if [[ -n "$instance_auth_enabled" ]]; then
+        effective_auth_enabled="$instance_auth_enabled"
+      fi
+      if [[ -n "$instance_setup_token" ]]; then
+        effective_setup_token="$instance_setup_token"
+      fi
+    fi
+
+    normalized_auth_enabled="$(printf '%s' "$effective_auth_enabled" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized_auth_enabled" in
+      0|false|no|off) continue ;;
+    esac
+
+    normalized_setup_token="$(printf '%s' "$effective_setup_token" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${#effective_setup_token}" -lt 43 ]] ||
+      [[ "$normalized_setup_token" == "replace-with-long-random-secret" ]] ||
+      [[ "$normalized_setup_token" == "<long-random-secret>" ]] ||
+      [[ "$normalized_setup_token" == "setup-token" ]] ||
+      [[ "$normalized_setup_token" == "changeme" ]]; then
+      invalid_setup_token_units+=("$unit")
+    fi
+  done
+
+  if [[ "${#invalid_setup_token_units[@]}" -gt 0 ]]; then
+    echo "error: missing, weak, or placeholder AUTH_SETUP_TOKEN detected for:"
+    for unit in "${invalid_setup_token_units[@]}"; do
+      echo "  - $unit"
+    done
+    echo "hint: generate a secret with: openssl rand -base64 32"
+    echo "hint: set it in the shared or instance env file before restarting."
+    echo "hint: use VALIDATE_AUTH_SETUP_TOKEN=false to bypass this guard if intentional."
     exit 1
   fi
 fi

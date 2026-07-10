@@ -184,7 +184,7 @@ func (m *Manager) EnsureOwner(ctx context.Context) (store.AuthUserRecord, error)
 }
 
 // BeginDiscoverableLogin starts a username-less passkey login ceremony.
-func (m *Manager) BeginDiscoverableLogin(ctx context.Context) (LoginBeginResult, error) {
+func (m *Manager) BeginDiscoverableLogin(ctx context.Context, clientKey string) (LoginBeginResult, error) {
 	assertion, sessionData, err := m.webauthn.BeginDiscoverableLogin(
 		webauthn.WithUserVerification(protocol.VerificationRequired),
 	)
@@ -196,6 +196,7 @@ func (m *Manager) BeginDiscoverableLogin(ctx context.Context) (LoginBeginResult,
 		ctx,
 		challengeFlowLogin,
 		sql.NullInt64{Int64: 0, Valid: false},
+		clientKey,
 		sessionData,
 	)
 	if err != nil {
@@ -265,7 +266,9 @@ func (m *Manager) FinishDiscoverableLogin(
 }
 
 // BeginRegistration starts a passkey registration ceremony for a known user.
-func (m *Manager) BeginRegistration(ctx context.Context, userID int64) (RegistrationBeginResult, error) {
+func (m *Manager) BeginRegistration(
+	ctx context.Context, userID int64, clientKey string,
+) (RegistrationBeginResult, error) {
 	user, err := m.loadUserByID(ctx, userID)
 	if err != nil {
 		return RegistrationBeginResult{}, err
@@ -292,6 +295,7 @@ func (m *Manager) BeginRegistration(ctx context.Context, userID int64) (Registra
 		ctx,
 		challengeFlowRegister,
 		sql.NullInt64{Int64: user.id, Valid: true},
+		clientKey,
 		sessionData,
 	)
 	if err != nil {
@@ -563,6 +567,7 @@ func (m *Manager) storeChallenge(
 	ctx context.Context,
 	flow string,
 	userID sql.NullInt64,
+	clientKey string,
 	session *webauthn.SessionData,
 ) (string, error) {
 	blob, err := json.Marshal(session)
@@ -581,6 +586,7 @@ func (m *Manager) storeChallenge(
 		UsedAt:        sql.NullTime{Time: time.Time{}, Valid: false},
 		ChallengeID:   challengeID,
 		Flow:          flow,
+		ClientKey:     clientKey,
 		ChallengeBlob: blob,
 		ExpiresAt:     now.Add(m.challengeTTL),
 		UserID:        userID,

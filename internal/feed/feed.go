@@ -2,12 +2,14 @@
 package feed
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -58,6 +60,7 @@ var (
 	errFeedReturnedNoContent = errors.New("feed returned no content")
 	errUnexpectedFeedStatus  = errors.New("unexpected status from feed")
 	errFeedBlockedByRobots   = errors.New("feed blocked by robots policy")
+	errFeedBodyTooLarge      = errors.New("feed response exceeds 10 MiB limit")
 	errRefreshMetaNil        = errors.New("refresh meta is nil")
 )
 
@@ -176,11 +179,25 @@ func parseFetchResponse(resp *http.Response) (*FetchResult, error) {
 		return nil, buildFetchStatusError(resp)
 	}
 
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedBodyBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read feed response: %w", err)
+	}
+
+	if int64(len(body)) > maxFeedBodyBytes {
+		return nil, errFeedBodyTooLarge
+	}
+
 	parser := gofeed.NewParser()
 
-	feed, err := parser.Parse(resp.Body)
+	feed, err := parser.Parse(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feed: %w", err)
+	}
+
+	err = store.ValidateItems(feed.Items)
+	if err != nil {
+		return nil, fmt.Errorf("feed exceeds resource limits: %w", err)
 	}
 
 	result.Feed = feed

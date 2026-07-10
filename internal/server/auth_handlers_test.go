@@ -4,6 +4,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,21 +22,136 @@ func newAuthEnabledTestApp(t *testing.T) *App {
 	app := newTestApp(t)
 
 	err := app.SetAuthConfig(&AuthConfig{
-		Enabled:      true,
-		RPID:         "example.com",
-		RPOrigin:     "https://example.com",
-		RPName:       "Pulse RSS",
-		SetupToken:   "setup-token",
-		CookieName:   "",
-		SessionTTL:   24 * time.Hour,
-		ChallengeTTL: 5 * time.Minute,
-		CookieSecure: false,
+		Enabled:           true,
+		RPID:              "example.com",
+		RPOrigin:          "https://example.com",
+		RPName:            "Pulse RSS",
+		SetupToken:        "setup-token",
+		CookieName:        "",
+		SessionTTL:        24 * time.Hour,
+		ChallengeTTL:      5 * time.Minute,
+		CookieSecure:      false,
+		TrustedProxyCIDRs: nil,
 	})
 	if err != nil {
 		t.Fatalf("SetAuthConfig: %v", err)
 	}
 
 	return app
+}
+
+func TestAuthRateLimitRejectsAtThreshold(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	handler := app.withRealIP(app.withAuthRateLimit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+
+	for requestNumber := 1; requestNumber <= int(authRateMaxTokens)+1; requestNumber++ {
+		req := httptest.NewRequestWithContext(
+			context.Background(), http.MethodPost, "/auth/webauthn/login/options", http.NoBody,
+		)
+		req.RemoteAddr = "192.0.2.10:1234"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", requestNumber))
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		want := http.StatusNoContent
+		if requestNumber > int(authRateMaxTokens) {
+			want = http.StatusTooManyRequests
+		}
+
+		if rr.Code != want {
+			t.Fatalf("request %d: expected status %d, got %d", requestNumber, want, rr.Code)
+		}
+	}
+
+	if got := len(app.authRateLimiter.entries); got != 1 {
+		t.Fatalf("expected forged forwarded headers to share one limiter entry, got %d", got)
+	}
+}
+
+func TestRealIPRejectsUntrustedForwardedHeader(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/login", http.NoBody)
+	req.RemoteAddr = "192.0.2.20:4321"
+	req.Header.Set("X-Forwarded-For", "198.51.100.99")
+
+	if got := app.realIPFromRequest(req); got != "192.0.2.20" {
+		t.Fatalf("expected immediate peer, got %q", got)
+	}
+}
+
+func TestRealIPUsesForwardedClientFromTrustedProxy(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+
+	_, trusted, err := net.ParseCIDR("127.0.0.0/8")
+	if err != nil {
+		t.Fatalf("ParseCIDR: %v", err)
+	}
+
+	app.authTrustedProxies = []*net.IPNet{trusted}
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/auth/login", http.NoBody)
+	req.RemoteAddr = "127.0.0.1:4321"
+	req.Header.Set("X-Forwarded-For", "198.51.100.7")
+
+	if got := app.realIPFromRequest(req); got != "198.51.100.7" {
+		t.Fatalf("expected forwarded client, got %q", got)
+	}
+}
+
+func TestAuthRateLimiterRemovesStaleEntries(t *testing.T) {
+	t.Parallel()
+
+	limiter := newAuthRateLimiter()
+	base := time.Now().UTC()
+
+	limiter.entries["stale"] = &authRateLimitEntry{
+		lastSeen:    base.Add(-authRateEntryTTL - time.Second),
+		lockedUntil: time.Time{},
+		tokens:      1,
+		failedCount: 0,
+	}
+	if !limiter.allow("fresh", base) {
+		t.Fatal("expected fresh client to be allowed")
+	}
+
+	if _, ok := limiter.entries["stale"]; ok {
+		t.Fatal("expected stale limiter entry to be removed")
+	}
+}
+
+func TestAuthRateLimiterLocksFailuresAndBoundsEntries(t *testing.T) {
+	t.Parallel()
+
+	limiter := newAuthRateLimiter()
+	base := time.Now().UTC()
+
+	clientIP := "192.0.2.30"
+	for range authFailureThreshold {
+		limiter.recordFailure(clientIP)
+	}
+
+	if limiter.allow(clientIP, time.Now().UTC()) {
+		t.Fatal("expected client to be locked after repeated failures")
+	}
+
+	for index := range authRateMaxEntries + 100 {
+		ip := fmt.Sprintf("client-%d", index)
+		if !limiter.allow(ip, base.Add(time.Duration(index)*time.Millisecond)) {
+			t.Fatalf("expected initial request for %q to be allowed", ip)
+		}
+	}
+
+	if got := len(limiter.entries); got > authRateMaxEntries {
+		t.Fatalf("expected at most %d entries, got %d", authRateMaxEntries, got)
+	}
 }
 
 type authSessionFixture struct {
@@ -585,6 +702,23 @@ func TestAuthLoginVerifyRejectsInvalidChallenge(t *testing.T) {
 	}
 }
 
+func TestAuthLoginVerifyRejectsOversizedJSON(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/auth/webauthn/login/verify",
+		strings.NewReader(strings.Repeat("x", int(maxPasskeyJSONBytes)+1)))
+	req.Header.Set(headerContentType, "application/json")
+
+	rr := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status 413, got %d", rr.Code)
+	}
+}
+
 func TestAuthRegisterOptionsRequiresSetupOrSession(t *testing.T) {
 	t.Parallel()
 
@@ -742,15 +876,16 @@ func TestAuthSessionExpiryRedirectsToLogin(t *testing.T) {
 	app := newTestApp(t)
 
 	err := app.SetAuthConfig(&AuthConfig{
-		Enabled:      true,
-		RPID:         "example.com",
-		RPOrigin:     "https://example.com",
-		RPName:       "Pulse RSS",
-		SetupToken:   "setup-token",
-		CookieName:   "",
-		SessionTTL:   40 * time.Millisecond,
-		ChallengeTTL: 5 * time.Minute,
-		CookieSecure: false,
+		Enabled:           true,
+		RPID:              "example.com",
+		RPOrigin:          "https://example.com",
+		RPName:            "Pulse RSS",
+		SetupToken:        "setup-token",
+		CookieName:        "",
+		SessionTTL:        40 * time.Millisecond,
+		ChallengeTTL:      5 * time.Minute,
+		CookieSecure:      false,
+		TrustedProxyCIDRs: nil,
 	})
 	if err != nil {
 		t.Fatalf("SetAuthConfig: %v", err)

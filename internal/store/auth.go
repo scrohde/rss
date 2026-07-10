@@ -53,6 +53,7 @@ type AuthChallengeRecord struct {
 	UsedAt        sql.NullTime
 	ChallengeID   string
 	Flow          string
+	ClientKey     string
 	ChallengeBlob []byte
 	UserID        sql.NullInt64
 }
@@ -67,6 +68,9 @@ var (
 )
 
 const (
+	maxAuthChallengesGlobal    = 256
+	maxAuthChallengesPerFlow   = 128
+	maxAuthChallengesPerClient = 4
 	// AuthAppearanceThemeSystem follows the active OS/browser theme preference.
 	AuthAppearanceThemeSystem = "system"
 	// AuthAppearanceThemeLight forces the light theme.
@@ -115,6 +119,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 CREATE TABLE IF NOT EXISTS auth_webauthn_challenges (
 	challenge_id TEXT PRIMARY KEY,
 	flow TEXT NOT NULL,
+	client_key TEXT NOT NULL DEFAULT '',
 	challenge_blob BLOB NOT NULL,
 	expires_at DATETIME NOT NULL,
 	used_at DATETIME,
@@ -156,6 +161,30 @@ func ensureAuthSchema(db *sql.DB) error {
 	err = ensureAuthCredentialFlagColumn(db, "backup_state")
 	if err != nil {
 		return err
+	}
+
+	err = ensureAuthChallengeClientKeyColumn(db)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureAuthChallengeClientKeyColumn(db *sql.DB) error {
+	hasColumn, err := authTableHasColumn(db, "auth_webauthn_challenges", "client_key")
+	if err != nil {
+		return fmt.Errorf("check auth challenge client key column: %w", err)
+	}
+
+	if hasColumn {
+		return nil
+	}
+
+	_, err = db.ExecContext(context.Background(),
+		`ALTER TABLE auth_webauthn_challenges ADD COLUMN client_key TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return fmt.Errorf("add auth challenge client key column: %w", err)
 	}
 
 	return nil
@@ -744,13 +773,47 @@ func DeleteExpiredAuthSessions(ctx context.Context, db *sql.DB, now time.Time) e
 func CreateAuthChallenge(ctx context.Context, db *sql.DB, challenge *AuthChallengeRecord) error {
 	ctx = contextOrBackground(ctx)
 
-	_, err := db.ExecContext(ctx, `
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin create auth challenge transaction: %w", err)
+	}
+	defer rollbackTx(tx)
+
+	_, err = tx.ExecContext(ctx, `DELETE FROM auth_webauthn_challenges WHERE expires_at <= ? OR used_at IS NOT NULL`,
+		challenge.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("clean auth challenges: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `DELETE FROM auth_webauthn_challenges WHERE challenge_id IN (
+		SELECT challenge_id FROM auth_webauthn_challenges WHERE flow = ? AND client_key = ?
+		ORDER BY created_at DESC LIMIT -1 OFFSET ?)`, challenge.Flow, challenge.ClientKey, maxAuthChallengesPerClient-1)
+	if err != nil {
+		return fmt.Errorf("bound client auth challenges: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `DELETE FROM auth_webauthn_challenges WHERE challenge_id IN (
+		SELECT challenge_id FROM auth_webauthn_challenges WHERE flow = ?
+		ORDER BY created_at DESC LIMIT -1 OFFSET ?)`, challenge.Flow, maxAuthChallengesPerFlow-1)
+	if err != nil {
+		return fmt.Errorf("bound flow auth challenges: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `DELETE FROM auth_webauthn_challenges WHERE challenge_id IN (
+		SELECT challenge_id FROM auth_webauthn_challenges ORDER BY created_at DESC LIMIT -1 OFFSET ?)`,
+		maxAuthChallengesGlobal-1)
+	if err != nil {
+		return fmt.Errorf("bound global auth challenges: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO auth_webauthn_challenges
-(challenge_id, flow, challenge_blob, expires_at, used_at, user_id, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+(challenge_id, flow, client_key, challenge_blob, expires_at, used_at, user_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		challenge.ChallengeID,
 		challenge.Flow,
+		challenge.ClientKey,
 		challenge.ChallengeBlob,
 		challenge.ExpiresAt,
 		nullTimeToValue(challenge.UsedAt),
@@ -759,6 +822,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 	)
 	if err != nil {
 		return fmt.Errorf("create auth challenge: %w", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("commit create auth challenge: %w", err)
 	}
 
 	return nil

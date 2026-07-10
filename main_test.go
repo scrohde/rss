@@ -3,15 +3,20 @@ package main
 import (
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
+
+func testAuthSetupToken() string {
+	return strings.Repeat("a", authSetupTokenMinLength)
+}
 
 func TestResolveAuthConfigDefaultsToSecureAuthSettings(t *testing.T) {
 	t.Setenv("AUTH_ENABLED", "true")
 	t.Setenv("AUTH_RP_ID", "example.com")
 	t.Setenv("AUTH_RP_ORIGIN", "https://example.com")
-	t.Setenv("AUTH_SETUP_TOKEN", "setup-token")
+	t.Setenv("AUTH_SETUP_TOKEN", testAuthSetupToken())
 	t.Setenv("AUTH_RP_NAME", "")
 	t.Setenv("AUTH_SESSION_TTL", "")
 	t.Setenv("AUTH_CHALLENGE_TTL", "")
@@ -39,7 +44,7 @@ func TestResolveAuthConfigAllowsExplicitInsecureCookieOverride(t *testing.T) {
 	t.Setenv("AUTH_ENABLED", "true")
 	t.Setenv("AUTH_RP_ID", "example.com")
 	t.Setenv("AUTH_RP_ORIGIN", "https://example.com")
-	t.Setenv("AUTH_SETUP_TOKEN", "setup-token")
+	t.Setenv("AUTH_SETUP_TOKEN", testAuthSetupToken())
 	t.Setenv("AUTH_COOKIE_SECURE", "false")
 
 	cfg, err := resolveAuthConfig()
@@ -64,14 +69,14 @@ func TestResolveAuthConfigRequiresFieldsWhenEnabled(t *testing.T) {
 			name:       "rp id",
 			rpID:       "",
 			rpOrigin:   "https://example.com",
-			setupToken: "setup-token",
+			setupToken: testAuthSetupToken(),
 			wantErr:    errAuthRPIDRequired,
 		},
 		{
 			name:       "rp origin",
 			rpID:       "example.com",
 			rpOrigin:   "",
-			setupToken: "setup-token",
+			setupToken: testAuthSetupToken(),
 			wantErr:    errAuthRPOriginRequired,
 		},
 		{
@@ -95,6 +100,47 @@ func TestResolveAuthConfigRequiresFieldsWhenEnabled(t *testing.T) {
 				t.Fatalf("expected error %v, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestResolveAuthConfigRejectsWeakSetupTokens(t *testing.T) {
+	testCases := []struct {
+		name  string
+		token string
+	}{
+		{name: "short", token: "human-chosen-secret"},
+		{name: "documented placeholder", token: "replace-with-long-random-secret"},
+		{name: "readme placeholder", token: "<long-random-secret>"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AUTH_ENABLED", "true")
+			t.Setenv("AUTH_RP_ID", "example.com")
+			t.Setenv("AUTH_RP_ORIGIN", "https://example.com")
+			t.Setenv("AUTH_SETUP_TOKEN", tc.token)
+
+			_, err := resolveAuthConfig()
+			if !errors.Is(err, errAuthSetupTokenWeak) {
+				t.Fatalf("expected weak setup token error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveAuthConfigAcceptsLongGeneratedSetupToken(t *testing.T) {
+	t.Setenv("AUTH_ENABLED", "true")
+	t.Setenv("AUTH_RP_ID", "example.com")
+	t.Setenv("AUTH_RP_ORIGIN", "https://example.com")
+	t.Setenv("AUTH_SETUP_TOKEN", testAuthSetupToken())
+
+	cfg, err := resolveAuthConfig()
+	if err != nil {
+		t.Fatalf("resolveAuthConfig: %v", err)
+	}
+
+	if cfg.SetupToken != testAuthSetupToken() {
+		t.Fatal("expected generated setup token to be preserved")
 	}
 }
 

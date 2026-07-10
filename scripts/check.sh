@@ -26,6 +26,8 @@ fi
 if [[ "${SKIP_TESTS:-false}" != "true" ]]; then
 	echo "==> go test ./..."
 	go test ./...
+	echo "==> scripts/deploy-linux_test.sh"
+	bash ./scripts/deploy-linux_test.sh
 fi
 
 echo "check.sh complete"

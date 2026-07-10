@@ -21,17 +21,19 @@ import (
 )
 
 const (
-	serverReadTimeout  = 10 * time.Second
-	serverWriteTimeout = 10 * time.Second
-	serverIdleTimeout  = 60 * time.Second
-	authSessionTTL     = 24 * time.Hour
-	authChallengeTTL   = 5 * time.Minute
+	serverReadTimeout       = 10 * time.Second
+	serverWriteTimeout      = 10 * time.Second
+	serverIdleTimeout       = 60 * time.Second
+	authSessionTTL          = 24 * time.Hour
+	authChallengeTTL        = 5 * time.Minute
+	authSetupTokenMinLength = 43
 )
 
 var (
 	errAuthRPIDRequired      = errors.New("AUTH_RP_ID is required when AUTH_ENABLED=true")
 	errAuthRPOriginRequired  = errors.New("AUTH_RP_ORIGIN is required when AUTH_ENABLED=true")
 	errAuthSetupTokenMissing = errors.New("AUTH_SETUP_TOKEN is required when AUTH_ENABLED=true")
+	errAuthSetupTokenWeak    = errors.New("AUTH_SETUP_TOKEN must be a random secret of at least 43 characters")
 )
 
 //go:embed templates/*.html templates/partials/*.html
@@ -208,15 +210,16 @@ func resolveAuthConfig() (server.AuthConfig, error) {
 	enabled := envBool("AUTH_ENABLED")
 
 	cfg := server.AuthConfig{
-		Enabled:      enabled,
-		RPID:         strings.TrimSpace(os.Getenv("AUTH_RP_ID")),
-		RPOrigin:     strings.TrimSpace(os.Getenv("AUTH_RP_ORIGIN")),
-		RPName:       strings.TrimSpace(os.Getenv("AUTH_RP_NAME")),
-		SetupToken:   strings.TrimSpace(os.Getenv("AUTH_SETUP_TOKEN")),
-		SessionTTL:   envDuration("AUTH_SESSION_TTL", authSessionTTL),
-		ChallengeTTL: envDuration("AUTH_CHALLENGE_TTL", authChallengeTTL),
-		CookieName:   strings.TrimSpace(os.Getenv("AUTH_COOKIE_NAME")),
-		CookieSecure: true,
+		Enabled:           enabled,
+		RPID:              strings.TrimSpace(os.Getenv("AUTH_RP_ID")),
+		RPOrigin:          strings.TrimSpace(os.Getenv("AUTH_RP_ORIGIN")),
+		RPName:            strings.TrimSpace(os.Getenv("AUTH_RP_NAME")),
+		SetupToken:        strings.TrimSpace(os.Getenv("AUTH_SETUP_TOKEN")),
+		SessionTTL:        envDuration("AUTH_SESSION_TTL", authSessionTTL),
+		ChallengeTTL:      envDuration("AUTH_CHALLENGE_TTL", authChallengeTTL),
+		CookieName:        strings.TrimSpace(os.Getenv("AUTH_COOKIE_NAME")),
+		CookieSecure:      true,
+		TrustedProxyCIDRs: splitCommaSeparated(envString("AUTH_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")),
 	}
 
 	if raw := strings.TrimSpace(os.Getenv("AUTH_COOKIE_SECURE")); raw != "" {
@@ -241,11 +244,50 @@ func resolveAuthConfig() (server.AuthConfig, error) {
 		return server.AuthConfig{}, errAuthRPOriginRequired
 	}
 
-	if cfg.SetupToken == "" {
-		return server.AuthConfig{}, errAuthSetupTokenMissing
+	err := validateAuthSetupToken(cfg.SetupToken)
+	if err != nil {
+		return server.AuthConfig{}, err
 	}
 
 	return cfg, nil
+}
+
+func validateAuthSetupToken(token string) error {
+	if token == "" {
+		return errAuthSetupTokenMissing
+	}
+
+	if len(token) < authSetupTokenMinLength {
+		return errAuthSetupTokenWeak
+	}
+
+	switch strings.ToLower(token) {
+	case "replace-with-long-random-secret", "<long-random-secret>", "setup-token", "changeme":
+		return errAuthSetupTokenWeak
+	default:
+		return nil
+	}
+}
+
+func splitCommaSeparated(raw string) []string {
+	var values []string
+
+	for value := range strings.SplitSeq(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+
+	return values
+}
+
+func envString(name, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+
+	return value
 }
 
 func envDuration(name string, fallback time.Duration) time.Duration {
