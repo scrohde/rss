@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -660,6 +661,52 @@ func openTestDB(t *testing.T) *sql.DB {
 	})
 
 	return db
+}
+
+func TestUpsertItemsRejectsPathologicalInputBeforeWrites(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "https://example.com/limited", "Limited")
+	items := []*gofeed.Item{
+		{GUID: "valid", Title: "valid"},
+		{GUID: "large", Content: strings.Repeat("x", maxItemContentBytes+1)},
+	}
+
+	inserted, err := UpsertItems(context.Background(), db, feedID, items)
+	if err == nil {
+		t.Fatal("expected oversized item to fail")
+	}
+
+	if inserted != 0 {
+		t.Fatalf("expected no inserts, got %d", inserted)
+	}
+
+	var count int
+
+	err = db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM items WHERE feed_id = ?`, feedID).Scan(&count)
+	if err != nil {
+		t.Fatalf("count items: %v", err)
+	}
+
+	if count != 0 {
+		t.Fatalf("expected no partial writes, got %d items", count)
+	}
+}
+
+func TestValidateItemsRejectsExcessiveItemCount(t *testing.T) {
+	t.Parallel()
+
+	items := make([]*gofeed.Item, maxFeedItems+1)
+	for index := range items {
+		items[index] = new(gofeed.Item)
+		items[index].GUID = fmt.Sprintf("item-%d", index)
+	}
+
+	err := ValidateItems(items)
+	if err == nil {
+		t.Fatal("expected excessive item count to fail")
+	}
 }
 
 func sequentialItems(count int) []*gofeed.Item {

@@ -702,6 +702,23 @@ func TestAuthLoginVerifyRejectsInvalidChallenge(t *testing.T) {
 	}
 }
 
+func TestAuthLoginVerifyRejectsOversizedJSON(t *testing.T) {
+	t.Parallel()
+
+	app := newAuthEnabledTestApp(t)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/auth/webauthn/login/verify",
+		strings.NewReader(strings.Repeat("x", int(maxPasskeyJSONBytes)+1)))
+	req.Header.Set(headerContentType, "application/json")
+
+	rr := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status 413, got %d", rr.Code)
+	}
+}
+
 func TestAuthRegisterOptionsRequiresSetupOrSession(t *testing.T) {
 	t.Parallel()
 

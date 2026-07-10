@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func TestAuthChallengeConsumeSingleUse(t *testing.T) {
 		UsedAt:        sql.NullTime{Time: time.Time{}, Valid: false},
 		ChallengeID:   "challenge-1",
 		Flow:          "login",
+		ClientKey:     "client-1",
 		ChallengeBlob: []byte("{}"),
 		ExpiresAt:     time.Now().UTC().Add(5 * time.Minute),
 		UserID:        sql.NullInt64{Int64: 0, Valid: false},
@@ -38,6 +40,79 @@ func TestAuthChallengeConsumeSingleUse(t *testing.T) {
 	_, err = ConsumeAuthChallenge(context.Background(), db, "challenge-1", "login", time.Now().UTC())
 	if err == nil {
 		t.Fatal("expected second challenge consume to fail")
+	}
+}
+
+func TestCreateAuthChallengeBoundsOutstandingRowsPerClient(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	now := time.Now().UTC()
+	for index := range maxAuthChallengesPerClient + 20 {
+		record := AuthChallengeRecord{
+			UsedAt:      sql.NullTime{Time: time.Time{}, Valid: false},
+			UserID:      sql.NullInt64{Int64: 0, Valid: false},
+			ChallengeID: fmt.Sprintf("challenge-%03d", index), Flow: "login", ClientKey: "192.0.2.1",
+			ChallengeBlob: []byte("{}"), ExpiresAt: now.Add(time.Minute), CreatedAt: now.Add(time.Duration(index)),
+		}
+
+		err := CreateAuthChallenge(context.Background(), db, &record)
+		if err != nil {
+			t.Fatalf("CreateAuthChallenge %d: %v", index, err)
+		}
+	}
+
+	var count int
+
+	err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM auth_webauthn_challenges`).Scan(&count)
+	if err != nil {
+		t.Fatalf("count challenges: %v", err)
+	}
+
+	if count != maxAuthChallengesPerClient {
+		t.Fatalf("expected %d challenges, got %d", maxAuthChallengesPerClient, count)
+	}
+}
+
+func TestCreateAuthChallengeBoundsConcurrentClientRequests(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	now := time.Now().UTC()
+
+	const requests = 24
+
+	results := make(chan error, requests)
+
+	for index := range requests {
+		go func() {
+			record := AuthChallengeRecord{
+				UsedAt:      sql.NullTime{Time: time.Time{}, Valid: false},
+				ChallengeID: fmt.Sprintf("concurrent-%03d", index), Flow: "login", ClientKey: "198.51.100.1",
+				ChallengeBlob: []byte("{}"), ExpiresAt: now.Add(time.Minute),
+				UserID: sql.NullInt64{Int64: 0, Valid: false}, CreatedAt: now.Add(time.Duration(index)),
+			}
+			results <- CreateAuthChallenge(context.Background(), db, &record)
+		}()
+	}
+
+	for range requests {
+		err := <-results
+		if err != nil {
+			t.Fatalf("CreateAuthChallenge concurrently: %v", err)
+		}
+	}
+
+	var count int
+
+	err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM auth_webauthn_challenges`).Scan(&count)
+	if err != nil {
+		t.Fatalf("count challenges: %v", err)
+	}
+
+	if count != maxAuthChallengesPerClient {
+		t.Fatalf("expected %d challenges, got %d", maxAuthChallengesPerClient, count)
 	}
 }
 

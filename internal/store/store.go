@@ -316,6 +316,11 @@ func applyFeedOrder(ctx context.Context, tx *sql.Tx, finalOrder []int64) error {
 func UpsertItems(ctx context.Context, db *sql.DB, feedID int64, items []*gofeed.Item) (int, error) {
 	ctx = contextOrBackground(ctx)
 
+	err := ValidateItems(items)
+	if err != nil {
+		return 0, err
+	}
+
 	now := time.Now().UTC()
 
 	stmt, err := db.PrepareContext(ctx, `
@@ -324,7 +329,7 @@ INSERT OR IGNORE INTO items
 SELECT ?, ?, ?, ?, ?, ?, ?, ?
 WHERE NOT EXISTS (
 	SELECT 1 FROM tombstones WHERE feed_id = ? AND guid = ?
-)
+	)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("prepare item upsert statement: %w", err)
@@ -349,6 +354,60 @@ WHERE NOT EXISTS (
 	}
 
 	return inserted, nil
+}
+
+const (
+	maxFeedItems        = 1000
+	maxItemTitleBytes   = 16 << 10
+	maxItemURLBytes     = 16 << 10
+	maxItemGUIDBytes    = 16 << 10
+	maxItemSummaryBytes = 1 << 20
+	maxItemContentBytes = 4 << 20
+)
+
+var errInvalidFeedItems = errors.New("feed items exceed resource limits")
+
+// ValidateItems rejects feed data that exceeds persistence resource limits.
+func ValidateItems(items []*gofeed.Item) error {
+	if len(items) > maxFeedItems {
+		return fmt.Errorf("%w: contains %d items; limit is %d", errInvalidFeedItems, len(items), maxFeedItems)
+	}
+
+	for index, item := range items {
+		err := validateItem(item, index)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateItem(item *gofeed.Item, index int) error {
+	if item == nil {
+		return fmt.Errorf("%w: item %d is nil", errInvalidFeedItems, index)
+	}
+
+	fields := []struct {
+		name  string
+		value string
+		limit int
+	}{
+		{"title", item.Title, maxItemTitleBytes},
+		{"URL", item.Link, maxItemURLBytes},
+		{"GUID", item.GUID, maxItemGUIDBytes},
+		{"summary", item.Description, maxItemSummaryBytes},
+		{"content", item.Content, maxItemContentBytes},
+	}
+	for _, field := range fields {
+		if len(field.value) > field.limit {
+			return fmt.Errorf(
+				"%w: item %d %s exceeds %d-byte limit", errInvalidFeedItems, index, field.name, field.limit,
+			)
+		}
+	}
+
+	return nil
 }
 
 func upsertItemWithStmt(

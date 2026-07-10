@@ -22,6 +22,7 @@ import (
 const (
 	feedEditModeCookie             = "pulse_rss_feed_edit_mode"
 	maxFormBytes             int64 = 1 << 20
+	maxPasskeyJSONBytes      int64 = 256 << 10
 	maxOPMLUploadBytes       int64 = 2 << 20
 	imageProxySniffBytes           = 512
 	cleanupInterval                = 10 * time.Minute

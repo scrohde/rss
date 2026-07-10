@@ -782,7 +782,7 @@ func (a *App) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAuthLoginOptions(w http.ResponseWriter, r *http.Request) {
-	result, err := a.authManager.BeginDiscoverableLogin(r.Context())
+	result, err := a.authManager.BeginDiscoverableLogin(r.Context(), a.realIPFromRequest(r))
 	if err != nil {
 		a.recordAuthFailure(r)
 		http.Error(w, authFailureMessage, http.StatusUnauthorized)
@@ -794,8 +794,14 @@ func (a *App) handleAuthLoginOptions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAuthLoginVerify(w http.ResponseWriter, r *http.Request) {
-	request, body, err := decodePasskeyVerifyRequest(r)
+	request, body, err := decodePasskeyVerifyRequest(w, r)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			http.Error(w, "passkey payload too large", http.StatusRequestEntityTooLarge)
+
+			return
+		}
+
 		slog.Warn("decode passkey login verify request failed")
 		a.recordAuthFailure(r)
 		http.Error(w, authFailureMessage, http.StatusUnauthorized)
@@ -904,7 +910,7 @@ func (a *App) handleAuthRegisterOptions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	result, err := a.authManager.BeginRegistration(r.Context(), userID)
+	result, err := a.authManager.BeginRegistration(r.Context(), userID, a.realIPFromRequest(r))
 	if err != nil {
 		http.Error(w, "failed to start registration", http.StatusBadRequest)
 
@@ -922,8 +928,14 @@ func (a *App) handleAuthRegisterVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request, body, err := decodePasskeyVerifyRequest(r)
+	request, body, err := decodePasskeyVerifyRequest(w, r)
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			http.Error(w, "passkey payload too large", http.StatusRequestEntityTooLarge)
+
+			return
+		}
+
 		http.Error(w, "invalid registration payload", http.StatusBadRequest)
 
 		return
@@ -1170,8 +1182,10 @@ func (a *App) handleAuthRecoveryUse(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/auth/setup?recovery=1", http.StatusSeeOther)
 }
 
-func decodePasskeyVerifyRequest(r *http.Request) (passkeyVerifyRequest, []byte, error) {
+func decodePasskeyVerifyRequest(w http.ResponseWriter, r *http.Request) (passkeyVerifyRequest, []byte, error) {
 	var request passkeyVerifyRequest
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxPasskeyJSONBytes)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -1188,6 +1202,12 @@ func decodePasskeyVerifyRequest(r *http.Request) (passkeyVerifyRequest, []byte, 
 	}
 
 	return request, request.Credential, nil
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	maxBytesErr := new(http.MaxBytesError)
+
+	return errors.As(err, &maxBytesErr)
 }
 
 func requestWithJSONBody(r *http.Request, body []byte) *http.Request {
