@@ -42,7 +42,7 @@ type smokeFixture struct {
 	secondarySummaryItemID int64
 }
 
-func TestBrowserSmokeAuthLoginRetriesCanceledAutoStart(t *testing.T) {
+func TestBrowserSmokeAuthLoginSwitchesFromConditionalToExplicit(t *testing.T) {
 	app := newAuthEnabledTestApp(t)
 	staticRoot := filepath.Join(pathParentDir, pathParentDir, "static")
 	app.SetStaticFS(os.DirFS(staticRoot))
@@ -53,19 +53,29 @@ func TestBrowserSmokeAuthLoginRetriesCanceledAutoStart(t *testing.T) {
 
 	ctx := newSmokeBrowserContext(t)
 	passkeyStub := `(() => {
-		window.__passkeyAttempts = 0;
+		window.__conditionalAttempts = 0;
+		window.__requiredAttempts = 0;
+		window.__conditionalAborts = 0;
 		Object.defineProperty(window, "PublicKeyCredential", {
 			configurable: true,
-			value: function PublicKeyCredential() {},
+			value: Object.assign(function PublicKeyCredential() {}, {
+				isConditionalMediationAvailable: () => Promise.resolve(true),
+			}),
 		});
 		Object.defineProperty(navigator, "credentials", {
 			configurable: true,
 			value: {
-				get: () => {
-					window.__passkeyAttempts += 1;
-					if (window.__passkeyAttempts === 1) {
-						return Promise.reject(new DOMException("prompt dismissed", "NotAllowedError"));
+				get: (options) => {
+					if (options.mediation === "conditional") {
+						window.__conditionalAttempts += 1;
+						return new Promise((resolve, reject) => {
+							options.signal.addEventListener("abort", () => {
+								window.__conditionalAborts += 1;
+								reject(new DOMException("aborted", "AbortError"));
+							}, { once: true });
+						});
 					}
+					window.__requiredAttempts += 1;
 					return new Promise(() => {});
 				},
 			},
@@ -83,19 +93,20 @@ func TestBrowserSmokeAuthLoginRetriesCanceledAutoStart(t *testing.T) {
 		chromedp.EmulateViewport(390, 844),
 		chromedp.Navigate(server.URL+"/auth/login"),
 	)
-	waitForJS(t, ctx, `(() => window.__passkeyAttempts === 2)()`, "automatic passkey retry")
+	waitForJS(t, ctx, `(() => window.__conditionalAttempts === 1)()`, "conditional passkey request")
 	waitForJS(
 		t,
 		ctx,
-		elementHiddenExpression(`[data-auth-login-fallback]`),
-		"login fallback hidden during retry",
+		elementVisibleExpression(`[data-auth-passkey-selector]`),
+		"conditional passkey selector",
 	)
-	waitForJS(
+	runActions(
 		t,
 		ctx,
-		elementVisibleExpression(`[data-auth-login-pending]`),
-		"login pending state visible during retry",
+		chromedp.Click(`[data-passkey-login="true"]`, chromedp.ByQuery),
 	)
+	waitForJS(t, ctx, `(() => window.__conditionalAborts === 1)()`, "conditional request abort")
+	waitForJS(t, ctx, `(() => window.__requiredAttempts === 1)()`, "explicit passkey request")
 }
 
 func TestBrowserSmokeReaderFlows(t *testing.T) {

@@ -1,9 +1,6 @@
 (() => {
   "use strict";
 
-  const autoLoginMaxAttempts = 2;
-  const autoLoginRetryDelayMS = 750;
-
   const base64ToBytes = (value) => {
     const padded = value.replace(/-/g, "+").replace(/_/g, "/");
     const padLength = (4 - (padded.length % 4)) % 4;
@@ -101,7 +98,7 @@
     return (meta.getAttribute("content") || "").trim();
   };
 
-  const postJSON = async (url, payload) => {
+  const postJSON = async (url, payload, signal) => {
     const headers = {
       "Content-Type": "application/json",
     };
@@ -116,6 +113,7 @@
       headers,
       credentials: "same-origin",
       body: JSON.stringify(payload),
+      signal,
     });
 
     if (!response.ok) {
@@ -159,7 +157,7 @@
     }
 
     if (error.name === "NotAllowedError") {
-      return "Passkey request was canceled or blocked. In private mode, approve the browser passkey prompt.";
+      return "Passkey sign-in was canceled. Try again when you are ready.";
     }
 
     if (error.name === "SecurityError") {
@@ -173,29 +171,19 @@
     return fallback;
   };
 
-  const setLoginFallbackVisible = (visible) => {
-    const fallback = document.querySelector("[data-auth-login-fallback]");
-    if (fallback) {
-      fallback.hidden = !visible;
-    }
-
-    const pending = document.querySelector("[data-auth-login-pending]");
-    if (pending) {
-      pending.hidden = visible;
-    }
+  const loginNext = () => {
+    const shell = document.querySelector("[data-auth-next]");
+    return shell ? shell.dataset.authNext || "/" : "/";
   };
 
-  const shouldRetryAutoLogin = (error, attempt) =>
-    error && error.name === "NotAllowedError" && attempt < autoLoginMaxAttempts;
-
-  const startLogin = async () => {
-    const optionsData = await postJSON("/auth/webauthn/login/options", {});
+  const startLogin = async (mediation, signal) => {
+    const optionsData = await postJSON("/auth/webauthn/login/options", { mediation }, signal);
     const assertion = optionsData.options || {};
     const publicKey = decodePublicKeyRequest(assertion.publicKey || {});
 
-    const requestOptions = { publicKey };
-    if (assertion.mediation && assertion.mediation !== "conditional") {
-      requestOptions.mediation = assertion.mediation;
+    const requestOptions = { publicKey, signal };
+    if (optionsData.mediation) {
+      requestOptions.mediation = optionsData.mediation;
     }
 
     const credential = await navigator.credentials.get(requestOptions);
@@ -207,7 +195,8 @@
     const verify = await postJSON("/auth/webauthn/login/verify", {
       challenge_id: optionsData.challenge_id,
       credential: credentialToJSON(credential),
-    });
+      next: loginNext(),
+    }, signal);
 
     if (verify.redirect) {
       window.location.assign(verify.redirect);
@@ -248,64 +237,77 @@
     }
 
     button.dataset.bound = "true";
-    const runLogin = async (autoStart) => {
-      if (button.dataset.running === "true") {
+    let activeController = null;
+    let activeMode = "";
+    let conditionalTask = null;
+
+    const runLogin = async (mode) => {
+      if (activeController) {
         return;
       }
 
       if (!window.PublicKeyCredential || !navigator.credentials) {
-        setLoginFallbackVisible(true);
         showMessage("Passkeys are not supported in this browser.", true);
         return;
       }
 
-      if (autoStart) {
-        const attempts = Number.parseInt(button.dataset.passkeyAutoAttempts || "0", 10);
-        button.dataset.passkeyAutoAttempts = String(attempts + 1);
-        setLoginFallbackVisible(false);
-        showMessage("Approve the passkey prompt to continue.", false);
-      } else {
-        setLoginFallbackVisible(true);
+      const controller = new AbortController();
+      activeController = controller;
+      activeMode = mode;
+
+      if (mode === "required") {
         showMessage("", false);
+        button.dataset.running = "true";
+        button.disabled = true;
       }
 
-      button.dataset.running = "true";
-      button.disabled = true;
-
       try {
-        await startLogin();
+        await startLogin(mode, controller.signal);
       } catch (error) {
-        console.warn("passkey login failed", error);
-        const autoAttempts = Number.parseInt(button.dataset.passkeyAutoAttempts || "0", 10);
-        if (autoStart && shouldRetryAutoLogin(error, autoAttempts)) {
-          setLoginFallbackVisible(false);
-          showMessage("Passkey prompt was dismissed. Trying again...", false);
-          window.setTimeout(() => {
-            void runLogin(true);
-          }, autoLoginRetryDelayMS);
-          return;
+        const canceled = error && (error.name === "AbortError" || error.name === "NotAllowedError");
+        if (mode !== "conditional" || !canceled) {
+          console.warn("passkey login failed", error);
         }
-
-        setLoginFallbackVisible(true);
-        showMessage(authErrorMessage(error, "login"), true);
+        if (mode !== "conditional") {
+          showMessage(authErrorMessage(error, "login"), true);
+        }
       } finally {
-        button.dataset.running = "false";
-        button.disabled = false;
+        if (activeController === controller) {
+          activeController = null;
+          activeMode = "";
+        }
+        if (mode === "required") {
+          button.dataset.running = "false";
+          button.disabled = false;
+        }
       }
     };
 
     button.addEventListener("click", async () => {
-      await runLogin(false);
+      if (activeController && activeMode === "conditional") {
+        activeController.abort();
+        await conditionalTask;
+      }
+      await runLogin("required");
     });
 
-    if (button.dataset.passkeyAutostartBound === "true" || button.dataset.passkeyAutostart !== "true") {
+    if (typeof window.PublicKeyCredential.isConditionalMediationAvailable !== "function") {
       return;
     }
 
-    button.dataset.passkeyAutostartBound = "true";
-    window.setTimeout(() => {
-      void runLogin(true);
-    }, 0);
+    void window.PublicKeyCredential.isConditionalMediationAvailable().then((available) => {
+      if (!available || activeController) {
+        return;
+      }
+      const selector = document.querySelector("[data-auth-passkey-selector]");
+      if (selector) {
+        selector.hidden = false;
+      }
+      conditionalTask = runLogin("conditional");
+      void conditionalTask.finally(() => {
+        conditionalTask = null;
+      });
+    }).catch(() => {});
   };
 
   const bindPasskeyRegister = () => {

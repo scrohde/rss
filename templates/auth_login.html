@@ -10,25 +10,34 @@
   <script src="/static/auth.js" defer></script>
 </head>
 <body>
-  <main class="empty-state auth-shell">
+  <main class="empty-state auth-shell" data-auth-next="{{.Next}}">
     <h2>Sign in with Passkey</h2>
-    <p>This app uses passkey-only authentication.</p>
+    {{if .SessionExpired}}
+      <p>Your session expired. Sign in again to continue.</p>
+    {{else}}
+      <p>This app uses passkey-only authentication.</p>
+    {{end}}
     {{if .Message}}
       <p class="message error">{{.Message}}</p>
     {{end}}
     <p class="message auth-message" data-auth-message role="status" aria-live="polite"></p>
-    <section data-auth-login-pending {{if not .AutoStartLogin}}hidden{{end}}>
-      <p>Trying your saved passkey now.</p>
-    </section>
-    <section data-auth-login-fallback {{if .AutoStartLogin}}hidden{{end}}>
+    <section data-auth-login-fallback>
+      <p data-auth-passkey-selector hidden>
+        <label for="passkey-account">Passkey account</label>
+        <input
+          id="passkey-account"
+          type="text"
+          autocomplete="username webauthn"
+          placeholder="Choose a saved passkey"
+        >
+      </p>
       <p>
         <button
           type="button"
           class="chip"
           data-passkey-login="true"
-          {{if .AutoStartLogin}}data-passkey-autostart="true"{{end}}
         >
-          Continue with passkey
+          Sign in with passkey
         </button>
       </p>
       {{if .ShowSetupLink}}
