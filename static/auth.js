@@ -176,16 +176,22 @@
     return shell ? shell.dataset.authNext || "/" : "/";
   };
 
-  const startLogin = async (mediation, signal) => {
-    const optionsData = await postJSON("/auth/webauthn/login/options", { mediation }, signal);
+  const prepareLogin = async (mediation) => {
+    const optionsData = await postJSON("/auth/webauthn/login/options", { mediation });
     const assertion = optionsData.options || {};
     const publicKey = decodePublicKeyRequest(assertion.publicKey || {});
 
-    const requestOptions = { publicKey, signal };
-    if (optionsData.mediation) {
-      requestOptions.mediation = optionsData.mediation;
-    }
+    return { optionsData, publicKey };
+  };
 
+  const startLogin = async (prepared, mediation, signal) => {
+    const { optionsData, publicKey } = prepared;
+
+    const requestOptions = { publicKey, signal };
+    requestOptions.mediation = mediation;
+
+    // Keep this call before the first await. Mobile Safari requires the standard
+    // ceremony to begin during the button's transient user activation.
     const credential = await navigator.credentials.get(requestOptions);
 
     if (!credential) {
@@ -240,8 +246,14 @@
     let activeController = null;
     let activeMode = "";
     let conditionalTask = null;
+    let preparedLogin = null;
+    const preparedTask = prepareLogin("conditional").then((prepared) => {
+      preparedLogin = prepared;
+      return prepared;
+    });
+    button.disabled = true;
 
-    const runLogin = async (mode) => {
+    const runLogin = async (mode, prepared) => {
       if (activeController) {
         return;
       }
@@ -263,7 +275,7 @@
       }
 
       try {
-        await startLogin(mode, controller.signal);
+        await startLogin(prepared, mode, controller.signal);
       } catch (error) {
         const canceled = error && (error.name === "AbortError" || error.name === "NotAllowedError");
         if (mode !== "conditional" || !canceled) {
@@ -285,19 +297,34 @@
       }
     };
 
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
+      if (!preparedLogin) {
+        return;
+      }
       if (activeController && activeMode === "conditional") {
         activeController.abort();
-        await conditionalTask;
+        activeController = null;
+        activeMode = "";
       }
-      await runLogin("required");
+      void runLogin("required", preparedLogin);
     });
 
     if (typeof window.PublicKeyCredential.isConditionalMediationAvailable !== "function") {
+      void preparedTask.then(() => {
+        button.disabled = false;
+      }).catch((error) => {
+        button.disabled = false;
+        console.warn("prepare passkey login failed", error);
+        showMessage(authErrorMessage(error, "login"), true);
+      });
       return;
     }
 
-    void window.PublicKeyCredential.isConditionalMediationAvailable().then((available) => {
+    void Promise.all([
+      preparedTask,
+      window.PublicKeyCredential.isConditionalMediationAvailable(),
+    ]).then(([prepared, available]) => {
+      button.disabled = false;
       if (!available || activeController) {
         return;
       }
@@ -305,11 +332,15 @@
       if (selector) {
         selector.hidden = false;
       }
-      conditionalTask = runLogin("conditional");
+      conditionalTask = runLogin("conditional", prepared);
       void conditionalTask.finally(() => {
         conditionalTask = null;
       });
-    }).catch(() => {});
+    }).catch((error) => {
+      button.disabled = false;
+      console.warn("prepare passkey login failed", error);
+      showMessage(authErrorMessage(error, "login"), true);
+    });
   };
 
   const bindPasskeyRegister = () => {

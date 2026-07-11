@@ -55,6 +55,7 @@ func TestBrowserSmokeAuthLoginSwitchesFromConditionalToExplicit(t *testing.T) {
 	passkeyStub := `(() => {
 		window.__conditionalAttempts = 0;
 		window.__requiredAttempts = 0;
+		window.__requiredHadActivation = false;
 		window.__conditionalAborts = 0;
 		Object.defineProperty(window, "PublicKeyCredential", {
 			configurable: true,
@@ -76,6 +77,7 @@ func TestBrowserSmokeAuthLoginSwitchesFromConditionalToExplicit(t *testing.T) {
 						});
 					}
 					window.__requiredAttempts += 1;
+					window.__requiredHadActivation = navigator.userActivation.isActive;
 					return new Promise((resolve, reject) => {
 						window.__rejectRequired = () => reject(
 							new DOMException("prompt dismissed", "NotAllowedError")
@@ -128,7 +130,12 @@ func TestBrowserSmokeAuthLoginSwitchesFromConditionalToExplicit(t *testing.T) {
 		chromedp.Click(`[data-passkey-login="true"]`, chromedp.ByQuery),
 	)
 	waitForJS(t, ctx, `(() => window.__conditionalAborts === 1)()`, "conditional request abort")
-	waitForJS(t, ctx, `(() => window.__requiredAttempts === 1)()`, "explicit passkey request")
+	waitForJS(
+		t,
+		ctx,
+		`(() => window.__requiredAttempts === 1 && window.__requiredHadActivation)()`,
+		"explicit passkey request with transient activation",
+	)
 	waitForJS(
 		t,
 		ctx,
