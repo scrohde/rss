@@ -29,7 +29,10 @@ const (
 	pulseRecentRefreshWindow       = time.Hour
 	feedEditModeCookieMaxAge       = 60 * 60 * 24 * 365
 	mobileStreamLimit              = 200
-	mobilePulseTimeout             = 20 * time.Second
+	// Aggregate pagination replaces the current feed batch or one section, capping the mobile DOM at 48 cards.
+	mobileAggregateFeedPageLimit = 4
+	mobileAggregateItemPageLimit = 12
+	mobilePulseTimeout           = 20 * time.Second
 )
 
 // App wires handlers, dependencies, and background loops for the HTTP server.
@@ -144,6 +147,8 @@ func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)
 	mux.HandleFunc("POST /items/{itemID}/toggle", a.handleToggleRead)
 	mux.HandleFunc("GET /mobile/stream", a.handleMobileStream)
+	mux.HandleFunc("GET /mobile/stream/sections", a.handleMobileStreamSections)
+	mux.HandleFunc("GET /mobile/feeds/{feedID}/items", a.handleMobileFeedItems)
 	mux.HandleFunc("POST /mobile/feeds/{feedID}/refresh", a.handleMobileRefreshFeed)
 	mux.HandleFunc("GET /mobile/items/{itemID}/reader", a.handleMobileReader)
 	mux.HandleFunc("POST /mobile/items/{itemID}/read", a.handleMobileMarkRead)

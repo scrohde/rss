@@ -46,9 +46,13 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	state := parseMobileAggregateState(r)
+
 	data := mobileReaderResponseData{
-		Item:   item,
-		TopBar: topBar,
+		BackPath:     mobileStreamStatePath(topBar.SelectedFeedID, state),
+		MarkReadPath: mobileMarkReadItemPath(item.ID, topBar.SelectedFeedID, state),
+		Item:         item,
+		TopBar:       topBar,
 	}
 	a.renderMobileReader(w, r, &data)
 }
@@ -61,15 +65,19 @@ func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	state := parseMobileAggregateState(r)
+	sectionFeedID := mobileSectionFeedID(r)
+	sectionOnly := sectionFeedID > 0 && mobileSectionOnlyRequest(r)
+
 	err := store.MarkItemRead(r.Context(), a.db, itemID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			a.renderMobileStream(w, r)
-
-			return
-		}
-
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "failed to mark item as read", http.StatusInternalServerError)
+
+		return
+	}
+
+	if sectionOnly {
+		a.renderMobileFeedSectionResponse(w, r, sectionFeedID, state)
 
 		return
 	}
@@ -217,18 +225,15 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, ok := a.mobileStreamItemsOrError(w, r, topBar.SelectedFeedID, "failed to load unread items")
+	state := parseMobileAggregateState(r)
+
+	data, ok := a.mobileStreamResponseDataOrError(w, r, &topBar, state)
 	if !ok {
 		return
 	}
 
-	data := mobileStreamResponseData{
-		Items:  items,
-		TopBar: topBar,
-	}
-
-	if isHTMXRequest(r) {
-		w.Header().Set("Hx-Replace-Url", mobileStreamPath(topBar.SelectedFeedID))
+	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
+		w.Header().Set("Hx-Replace-Url", mobileStreamStatePath(topBar.SelectedFeedID, state))
 
 		if isMobileStreamSelectorTrigger(r) {
 			a.renderTemplate(w, "mobile_stream_selector_response", data)
@@ -249,8 +254,35 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
 	a.renderTemplate(w, "index", page)
 }
 
+func (a *App) mobileStreamResponseDataOrError(
+	w http.ResponseWriter,
+	r *http.Request,
+	topBar *mobileTopBarData,
+	state mobileAggregateState,
+) (mobileStreamResponseData, bool) {
+	if topBar.SelectedFeedID > 0 {
+		items, ok := a.mobileStreamItemsOrError(w, r, topBar.SelectedFeedID, "failed to load unread items")
+		if !ok {
+			var zero mobileStreamResponseData
+
+			return zero, false
+		}
+
+		return mobileStreamResponseData{Aggregate: nil, Items: items, TopBar: *topBar}, true
+	}
+
+	aggregate, ok := a.mobileAggregateOrError(w, r, state, "failed to load unread items")
+	if !ok {
+		var zero mobileStreamResponseData
+
+		return zero, false
+	}
+
+	return mobileStreamResponseData{Aggregate: aggregate, Items: nil, TopBar: *topBar}, true
+}
+
 func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *mobileReaderResponseData) {
-	if isHTMXRequest(r) {
+	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
 		w.Header().Set("Hx-Push-Url", r.URL.RequestURI())
 		a.renderTemplate(w, "mobile_reader_response", data)
 
@@ -297,12 +329,23 @@ func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, e
 }
 
 func (a *App) mobileTopBarData(r *http.Request) (mobileTopBarData, error) {
+	return a.mobileTopBarDataForState(r, parseMobileAggregateState(r))
+}
+
+func (a *App) mobileTopBarDataForState(
+	r *http.Request,
+	state mobileAggregateState,
+) (mobileTopBarData, error) {
 	selection, err := a.mobileStreamFeedOptions(r)
 	if err != nil {
 		return mobileTopBarData{}, err
 	}
 
-	refreshAction := mobileStreamRefreshAction(selection.FeedID, selection.FeedTitle)
+	refreshAction := mobileStreamRefreshAction(
+		selection.FeedID,
+		selection.FeedTitle,
+		state,
+	)
 
 	return mobileTopBarData{
 		FeedOptions:              selection.Options,
@@ -323,11 +366,15 @@ func shouldShowCaughtUpSelectedFeed(selection mobileStreamSelection) bool {
 	return !feedOptionsContainID(selection.Options, selection.FeedID)
 }
 
-func mobileStreamRefreshAction(selectedFeedID int64, selectedFeedTitle string) mobileStreamRefreshActionData {
+func mobileStreamRefreshAction(
+	selectedFeedID int64,
+	selectedFeedTitle string,
+	state mobileAggregateState,
+) mobileStreamRefreshActionData {
 	if selectedFeedID <= 0 {
 		return mobileStreamRefreshActionData{
 			Label:        "Refresh all feeds",
-			Path:         mobilePulsePath(0),
+			Path:         mobilePulseStatePath(0, state),
 			PendingLabel: "Refreshing all feeds",
 		}
 	}
@@ -348,18 +395,9 @@ func mobileStreamRefreshAction(selectedFeedID int64, selectedFeedTitle string) m
 }
 
 func (a *App) mobileStreamItems(r *http.Request, selectedFeedID int64) ([]view.ItemView, error) {
-	if selectedFeedID > 0 {
-		items, err := store.ListUnreadItemsByFeed(r.Context(), a.db, selectedFeedID, mobileStreamLimit)
-		if err != nil {
-			return nil, fmt.Errorf("list unread items for feed %d: %w", selectedFeedID, err)
-		}
-
-		return items, nil
-	}
-
-	items, err := store.ListUnreadItemsAllFeeds(r.Context(), a.db, mobileStreamLimit)
+	items, err := store.ListUnreadItemsByFeed(r.Context(), a.db, selectedFeedID, mobileStreamLimit)
 	if err != nil {
-		return nil, fmt.Errorf("list unread items across feeds: %w", err)
+		return nil, fmt.Errorf("list unread items for feed %d: %w", selectedFeedID, err)
 	}
 
 	return items, nil

@@ -1,7 +1,9 @@
 {{define "mobile_stream"}}
   <section class="mobile-stream" data-mobile-stream="true">
     <div id="mobile-stream-content">
-      {{if .Items}}
+      {{if .Aggregate}}
+        {{template "mobile_stream_sections" .Aggregate}}
+      {{else if .Items}}
         <div class="mobile-stream-list">
           {{range .Items}}
             <article class="mobile-card">
@@ -50,6 +52,161 @@
       {{end}}
     </div>
   </section>
+{{end}}
+
+{{define "mobile_stream_sections"}}
+  <div
+    id="mobile-stream-sections"
+    class="mobile-stream-sections"
+    data-mobile-sections-page
+    role="region"
+    aria-label="Unread feed sections"
+    tabindex="-1"
+  >
+    {{range .Sections}}
+      {{template "mobile_feed_section" .}}
+    {{else}}
+      <section class="mobile-empty" data-mobile-empty="true">
+        <h3>Nothing is owed.</h3>
+        <p>Your stream is clear for now. Come back whenever you want to read again.</p>
+      </section>
+    {{end}}
+    {{if or .HasPrevious .HasNext}}
+      <nav class="mobile-sections-pagination" aria-label="Feed sections">
+        {{if .HasPrevious}}
+          <button
+            class="mobile-pagination-button"
+            type="button"
+            data-mobile-sections-reset
+            data-app-htmx="true"
+            hx-get="{{.ResetSectionsPath}}"
+            hx-target="#mobile-stream-sections"
+            hx-swap="outerHTML show:top"
+          >
+            First unread feeds
+          </button>
+        {{end}}
+        {{if .HasNext}}
+          <button
+            class="mobile-pagination-button"
+            type="button"
+            data-mobile-sections-next
+            data-app-htmx="true"
+            hx-get="{{.NextSectionsPath}}"
+            hx-target="#mobile-stream-sections"
+            hx-swap="outerHTML show:top"
+          >
+            Next feeds
+          </button>
+        {{end}}
+      </nav>
+    {{else if .Sections}}
+      <p class="mobile-sections-end">End of saved feed order.</p>
+    {{end}}
+  </div>
+{{end}}
+
+{{define "mobile_stream_sections_response"}}
+  {{template "mobile_stream_sections" .Aggregate}}
+  {{template "topbar_brand_slot_oob" .TopBar}}
+  {{template "mobile_topbar_slot_oob" .TopBar}}
+{{end}}
+
+{{define "mobile_feed_section"}}
+  <section
+    class="mobile-feed-section"
+    id="mobile-feed-section-{{.FeedID}}"
+    data-mobile-feed-section
+    data-feed-id="{{.FeedID}}"
+    aria-labelledby="mobile-feed-section-title-{{.FeedID}}"
+    tabindex="-1"
+  >
+    <header class="mobile-feed-section-header">
+      <p class="mobile-feed-section-kicker">Feed</p>
+      <h2 id="mobile-feed-section-title-{{.FeedID}}">{{.FeedTitle}}</h2>
+    </header>
+    <div class="mobile-feed-section-items" data-mobile-feed-page>
+      {{range .Items}}
+        <article class="mobile-card" id="mobile-card-{{.ID}}" data-mobile-item-id="{{.ID}}">
+          <div class="mobile-card-meta">
+            <span class="mobile-card-source">{{.FeedTitle}}</span>
+            <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>
+          </div>
+          <div class="mobile-card-title-row">
+            <button
+              class="mobile-card-open"
+              type="button"
+              data-app-htmx="true"
+              hx-get="/mobile/items/{{.ID}}/reader{{$.ReaderQuery}}"
+              hx-target="#main-content"
+              hx-swap="innerHTML"
+            >
+              <span class="mobile-card-title">{{.Title}}</span>
+            </button>
+            <button
+              class="mobile-card-mark-read"
+              type="button"
+              aria-label="Mark {{.Title}} read"
+              title="Mark read"
+              data-app-htmx="true"
+              hx-post="/mobile/items/{{.ID}}/read{{$.MarkReadQuery}}"
+              hx-target="closest section"
+              hx-swap="outerHTML"
+            >
+              <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span class="sr-only">Mark read</span>
+            </button>
+          </div>
+          {{if .CompactPreview}}
+            <div class="mobile-card-summary">
+              <p>{{.CompactPreview}}</p>
+            </div>
+          {{end}}
+        </article>
+      {{else}}
+        <p class="mobile-feed-page-empty">No unread items remain on this page.</p>
+      {{end}}
+      {{if or .IsOlderPage .HasOlder}}
+        <nav class="mobile-feed-pagination" aria-label="{{.FeedTitle}} item pages">
+          {{if .IsOlderPage}}
+            <button
+              class="mobile-pagination-button"
+              type="button"
+              data-mobile-feed-newest
+              data-app-htmx="true"
+              hx-get="{{.NewestItemsPath}}"
+              hx-target="closest section"
+              hx-swap="outerHTML show:top"
+            >
+              Newest from {{.FeedTitle}}
+            </button>
+          {{end}}
+          {{if .HasOlder}}
+            <button
+              class="mobile-pagination-button"
+              type="button"
+              data-mobile-feed-next
+              data-app-htmx="true"
+              hx-get="{{.OlderItemsPath}}"
+              hx-target="closest section"
+              hx-swap="outerHTML show:top"
+            >
+              Older from {{.FeedTitle}}
+            </button>
+          {{end}}
+        </nav>
+      {{end}}
+    </div>
+  </section>
+{{end}}
+
+{{define "mobile_feed_section_response"}}
+  {{template "mobile_feed_section" .Section}}
+  {{template "topbar_brand_slot_oob" .TopBar}}
+  {{template "mobile_topbar_slot_oob" .TopBar}}
 {{end}}
 
 {{define "mobile_empty"}}

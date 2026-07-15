@@ -397,6 +397,294 @@ func TestListUnreadItemsByFeed(t *testing.T) {
 	}
 }
 
+func TestListUnreadFeedSectionsUsesSavedOrderAndBoundedPages(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	firstID := mustUpsertFeed(t, db, "http://example.com/first-busy", "First Busy")
+	zeroUnreadID := mustUpsertFeed(t, db, "http://example.com/zero-unread", "Zero Unread")
+	secondID := mustUpsertFeed(t, db, "http://example.com/second-small", "Second Small")
+	thirdID := mustUpsertFeed(t, db, "http://example.com/third-small", "Third Small")
+
+	err := UpdateFeedOrder(context.Background(), db, []int64{firstID, zeroUnreadID, secondID, thirdID})
+	if err != nil {
+		t.Fatalf("UpdateFeedOrder: %v", err)
+	}
+
+	base := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	mustUpsertTestItems(t, db, firstID, []*gofeed.Item{
+		newGofeedItem("First Oldest", "http://example.com/first/oldest", "first-oldest", "", new(base)),
+		newGofeedItem(
+			"First Older", "http://example.com/first/older", "first-older", "", new(base.Add(time.Minute)),
+		),
+		newGofeedItem(
+			"First Newer", "http://example.com/first/newer", "first-newer", "", new(base.Add(2*time.Minute)),
+		),
+		newGofeedItem(
+			"First Newest", "http://example.com/first/newest", "first-newest", "", new(base.Add(3*time.Minute)),
+		),
+	})
+	mustUpsertTestItems(t, db, zeroUnreadID, []*gofeed.Item{
+		newGofeedItem(
+			"Already Read", "http://example.com/read", "already-read", "", new(base.Add(4*time.Minute)),
+		),
+	})
+	markTestItemRead(t, db, zeroUnreadID, "already-read", base.Add(5*time.Minute))
+	mustUpsertTestItems(t, db, secondID, []*gofeed.Item{
+		newGofeedItem(
+			"Second Globally Newest", "http://example.com/second", "second", "", new(base.Add(2*time.Hour)),
+		),
+	})
+	mustUpsertTestItems(t, db, thirdID, []*gofeed.Item{
+		newGofeedItem(
+			"Third Globally Newer", "http://example.com/third", "third", "", new(base.Add(time.Hour)),
+		),
+	})
+
+	page := mustListUnreadFeedSections(t, db, nil, 2, 2)
+	assertUnreadSectionCount(t, page, 2)
+	assertUnreadSection(t, page.Sections[0], firstID, "First Busy", "First Newest", "First Newer")
+	assertUnreadSection(t, page.Sections[1], secondID, "Second Small", "Second Globally Newest")
+	requireUnreadItemCursor(t, page.Sections[0].Next)
+	assertNoUnreadItemCursor(t, page.Sections[1].Next)
+
+	nextCursor := requireUnreadFeedCursor(t, page.Next)
+	assertUnreadFeedCursor(t, nextCursor, secondID)
+	nextPage := mustListUnreadFeedSections(t, db, nextCursor, 2, 2)
+	assertUnreadSectionCount(t, nextPage, 1)
+	assertUnreadSection(t, nextPage.Sections[0], thirdID, "Third Small", "Third Globally Newer")
+	assertNoUnreadFeedCursor(t, nextPage.Next)
+}
+
+func TestListUnreadItemsByFeedPageUsesStableKeysetAfterAnchorDeletion(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/keyset", "Keyset")
+	base := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+
+	items := make([]*gofeed.Item, 0, 5)
+
+	for index := 1; index <= 5; index++ {
+		published := base.Add(time.Duration(index) * time.Minute)
+		items = append(items, newGofeedItem(
+			fmt.Sprintf("Item %d", index),
+			fmt.Sprintf("http://example.com/keyset/%d", index),
+			fmt.Sprintf("keyset-%d", index),
+			"",
+			&published,
+		))
+	}
+
+	mustUpsertTestItems(t, db, feedID, items)
+
+	firstPage := mustListUnreadItemsByFeedPage(t, db, feedID, nil)
+	assertUnreadItemTitles(t, firstPage.Items, "Item 5", "Item 4")
+	firstCursor := requireUnreadItemCursor(t, firstPage.Next)
+	mustDeleteTestItem(t, db, firstCursor.ItemID)
+
+	newest := base.Add(10 * time.Minute)
+	mustUpsertTestItems(t, db, feedID, []*gofeed.Item{
+		newGofeedItem("New Arrival", "http://example.com/keyset/new", "keyset-new", "", &newest),
+	})
+
+	secondPage := mustListUnreadItemsByFeedPage(t, db, feedID, firstCursor)
+	assertUnreadItemTitles(t, secondPage.Items, "Item 3", "Item 2")
+	secondCursor := requireUnreadItemCursor(t, secondPage.Next)
+	finalPage := mustListUnreadItemsByFeedPage(t, db, feedID, secondCursor)
+	assertUnreadItemTitles(t, finalPage.Items, "Item 1")
+	assertNoUnreadItemCursor(t, finalPage.Next)
+}
+
+func TestListUnreadItemsByFeedPageBreaksTimestampTiesByID(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/ties", "Ties")
+	published := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	mustUpsertTestItems(t, db, feedID, []*gofeed.Item{
+		newGofeedItem("First Insert", "http://example.com/ties/first", "ties-first", "", &published),
+		newGofeedItem("Second Insert", "http://example.com/ties/second", "ties-second", "", &published),
+		newGofeedItem("Third Insert", "http://example.com/ties/third", "ties-third", "", &published),
+	})
+
+	page := mustListUnreadItemsByFeedPage(t, db, feedID, nil)
+	assertUnreadItemTitles(t, page.Items, "Third Insert", "Second Insert")
+	nextCursor := requireUnreadItemCursor(t, page.Next)
+	finalPage := mustListUnreadItemsByFeedPage(t, db, feedID, nextCursor)
+	assertUnreadItemTitles(t, finalPage.Items, "First Insert")
+	assertNoUnreadItemCursor(t, finalPage.Next)
+}
+
+func TestUnreadAggregatePageLimitsAreBounded(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	_, err := ListUnreadFeedSections(context.Background(), db, nil, maxUnreadFeedPageSize+1, 1)
+	if !errors.Is(err, errInvalidUnreadPageLimit) {
+		t.Fatalf("expected bounded feed limit error, got %v", err)
+	}
+
+	_, err = ListUnreadFeedSections(context.Background(), db, nil, 1, maxUnreadItemPageSize+1)
+	if !errors.Is(err, errInvalidUnreadPageLimit) {
+		t.Fatalf("expected bounded section item limit error, got %v", err)
+	}
+
+	_, err = ListUnreadItemsByFeedPage(context.Background(), db, 1, nil, maxUnreadItemPageSize+1)
+	if !errors.Is(err, errInvalidUnreadPageLimit) {
+		t.Fatalf("expected bounded item page limit error, got %v", err)
+	}
+}
+
+func assertUnreadSection(
+	t *testing.T,
+	section UnreadFeedSection,
+	wantFeedID int64,
+	wantFeedTitle string,
+	wantItemTitles ...string,
+) {
+	t.Helper()
+
+	if section.FeedID != wantFeedID || section.FeedTitle != wantFeedTitle {
+		t.Fatalf("unexpected unread section: %#v", section)
+	}
+
+	assertUnreadItemTitles(t, section.Items, wantItemTitles...)
+}
+
+func mustListUnreadFeedSections(
+	t *testing.T,
+	db *sql.DB,
+	after *UnreadFeedCursor,
+	feedLimit int,
+	itemLimit int,
+) UnreadFeedSectionsPage {
+	t.Helper()
+
+	page, err := ListUnreadFeedSections(context.Background(), db, after, feedLimit, itemLimit)
+	if err != nil {
+		t.Fatalf("ListUnreadFeedSections: %v", err)
+	}
+
+	return page
+}
+
+func mustListUnreadItemsByFeedPage(
+	t *testing.T,
+	db *sql.DB,
+	feedID int64,
+	after *UnreadItemCursor,
+) UnreadItemsPage {
+	t.Helper()
+
+	page, err := ListUnreadItemsByFeedPage(context.Background(), db, feedID, after, 2)
+	if err != nil {
+		t.Fatalf("ListUnreadItemsByFeedPage: %v", err)
+	}
+
+	return page
+}
+
+func assertUnreadSectionCount(t *testing.T, page UnreadFeedSectionsPage, want int) {
+	t.Helper()
+
+	if len(page.Sections) != want {
+		t.Fatalf("expected %d unread sections, got %d", want, len(page.Sections))
+	}
+}
+
+func requireUnreadFeedCursor(t *testing.T, cursor *UnreadFeedCursor) *UnreadFeedCursor {
+	t.Helper()
+
+	if cursor == nil {
+		t.Fatal("expected unread feed continuation cursor")
+	}
+
+	return cursor
+}
+
+func requireUnreadItemCursor(t *testing.T, cursor *UnreadItemCursor) *UnreadItemCursor {
+	t.Helper()
+
+	if cursor == nil {
+		t.Fatal("expected unread item continuation cursor")
+	}
+
+	return cursor
+}
+
+func assertUnreadFeedCursor(t *testing.T, cursor *UnreadFeedCursor, wantFeedID int64) {
+	t.Helper()
+
+	if cursor.FeedID != wantFeedID {
+		t.Fatalf("expected feed continuation after %d, got %#v", wantFeedID, cursor)
+	}
+}
+
+func assertNoUnreadFeedCursor(t *testing.T, cursor *UnreadFeedCursor) {
+	t.Helper()
+
+	if cursor != nil {
+		t.Fatalf("expected no unread feed continuation, got %#v", cursor)
+	}
+}
+
+func assertNoUnreadItemCursor(t *testing.T, cursor *UnreadItemCursor) {
+	t.Helper()
+
+	if cursor != nil {
+		t.Fatalf("expected no unread item continuation, got %#v", cursor)
+	}
+}
+
+func assertUnreadItemTitles(t *testing.T, items []view.ItemView, want ...string) {
+	t.Helper()
+
+	if len(items) != len(want) {
+		t.Fatalf("expected %d unread items, got %d: %#v", len(want), len(items), items)
+	}
+
+	for index, title := range want {
+		if items[index].Title != title {
+			t.Fatalf("expected unread item %d title %q, got %q", index, title, items[index].Title)
+		}
+	}
+}
+
+func mustUpsertTestItems(t *testing.T, db *sql.DB, feedID int64, items []*gofeed.Item) {
+	t.Helper()
+
+	_, err := UpsertItems(context.Background(), db, feedID, items)
+	if err != nil {
+		t.Fatalf("UpsertItems feed %d: %v", feedID, err)
+	}
+}
+
+func markTestItemRead(t *testing.T, db *sql.DB, feedID int64, guid string, readAt time.Time) {
+	t.Helper()
+
+	_, err := db.ExecContext(
+		context.Background(),
+		"UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = ?",
+		readAt,
+		feedID,
+		guid,
+	)
+	if err != nil {
+		t.Fatalf("mark test item read: %v", err)
+	}
+}
+
+func mustDeleteTestItem(t *testing.T, db *sql.DB, itemID int64) {
+	t.Helper()
+
+	_, err := db.ExecContext(context.Background(), "DELETE FROM items WHERE id = ?", itemID)
+	if err != nil {
+		t.Fatalf("delete test item %d: %v", itemID, err)
+	}
+}
+
 func TestGetUnreadStreamItem(t *testing.T) {
 	t.Parallel()
 
@@ -742,7 +1030,6 @@ func assertGUIDRangeDeletedAndTombstoned(t *testing.T, db *sql.DB, feedID int64,
 	}
 }
 
-//nolint:unparam // Test helper keeps explicit feed-like argument shape.
 func newGofeedItem(title, link, guid, description string, published *time.Time) *gofeed.Item {
 	item := new(gofeed.Item)
 	item.Title = title

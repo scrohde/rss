@@ -97,13 +97,46 @@ type mobileTopBarData struct {
 }
 
 type mobileStreamResponseData struct {
-	Items  []view.ItemView
-	TopBar mobileTopBarData
+	Aggregate *mobileAggregateResponseData
+	Items     []view.ItemView
+	TopBar    mobileTopBarData
 }
 
 type mobileReaderResponseData struct {
-	TopBar mobileTopBarData
-	Item   view.ItemView
+	BackPath     string
+	MarkReadPath string
+	TopBar       mobileTopBarData
+	Item         view.ItemView
+}
+
+type mobileAggregateResponseData struct {
+	NextSectionsPath  string
+	ResetSectionsPath string
+	Sections          []mobileFeedSectionData
+	HasNext           bool
+	HasPrevious       bool
+}
+
+type mobileStreamSectionsResponseData struct {
+	Aggregate *mobileAggregateResponseData
+	TopBar    mobileTopBarData
+}
+
+type mobileFeedSectionData struct {
+	FeedTitle       string
+	MarkReadQuery   string
+	NewestItemsPath string
+	OlderItemsPath  string
+	ReaderQuery     string
+	Items           []view.ItemView
+	FeedID          int64
+	HasOlder        bool
+	IsOlderPage     bool
+}
+
+type mobileFeedSectionResponseData struct {
+	Section mobileFeedSectionData
+	TopBar  mobileTopBarData
 }
 
 type authLoginPageData struct {

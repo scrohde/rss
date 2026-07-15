@@ -4867,6 +4867,655 @@ func TestMobileStreamUnreadOnly(t *testing.T) {
 	assertNotContains(t, body, "Alpha Read", "expected read item to be excluded from stream")
 }
 
+func TestMobileAggregateUsesSavedFeedOrderAndSkipsCaughtUpFeeds(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	priorityID := mustUpsertFeed(t, app, "http://example.com/mobile-priority", "Priority Feed")
+	quietID := mustUpsertFeed(t, app, "http://example.com/mobile-quiet", "Quiet Feed")
+	laterID := mustUpsertFeed(t, app, "http://example.com/mobile-later", "Later Feed")
+
+	err := store.UpdateFeedOrder(context.Background(), app.db, []int64{priorityID, quietID, laterID})
+	requireNoErr(t, err, "store.UpdateFeedOrder: %v")
+
+	base := time.Now().UTC().Add(-6 * time.Hour)
+	priorityItems := seedMobileAggregateItems(t, app, priorityID, "Priority", 2, base.Add(2*time.Hour))
+	quietItems := seedMobileAggregateItems(t, app, quietID, "Quiet", 1, base.Add(3*time.Hour))
+	laterItems := seedMobileAggregateItems(t, app, laterID, "Later", 1, base.Add(5*time.Hour))
+
+	err = store.MarkItemRead(context.Background(), app.db, quietItems[0].ID)
+	requireNoErr(t, err, "store.MarkItemRead quiet item: %v")
+
+	rec := getHTMXRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile aggregate saved-order status")
+
+	body := rec.Body.String()
+	assertMobileFeedSectionOrder(t, body, priorityID, laterID)
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, quietID),
+		"expected caught-up feed section to be skipped",
+	)
+	assertBodyTokenOrder(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-card-%d"`, priorityItems[0].ID),
+		fmt.Sprintf(`id="mobile-card-%d"`, priorityItems[1].ID),
+	)
+	assertBodyTokenOrder(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, priorityID),
+		fmt.Sprintf(`id="mobile-card-%d"`, laterItems[0].ID),
+	)
+}
+
+//nolint:funlen,revive // This integration scenario keeps initial and continuation bounds in one contract test.
+func TestMobileAggregateInitialBoundsAndFeedSectionContinuation(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedIDs := make([]int64, 0, mobileAggregateFeedPageLimit+1)
+	feedItems := make([][]view.ItemView, 0, mobileAggregateFeedPageLimit+1)
+	base := time.Now().UTC().Add(-24 * time.Hour)
+
+	for index := range mobileAggregateFeedPageLimit + 1 {
+		feedID := mustUpsertFeed(
+			t,
+			app,
+			fmt.Sprintf("http://example.com/mobile-bounded-%d", index),
+			fmt.Sprintf("Bounded Feed %d", index),
+		)
+
+		itemCount := 1
+		if index == 0 {
+			itemCount = mobileAggregateItemPageLimit + 1
+		}
+
+		feedIDs = append(feedIDs, feedID)
+		feedItems = append(
+			feedItems,
+			seedMobileAggregateItems(t, app, feedID, fmt.Sprintf("Bounded %d", index), itemCount, base),
+		)
+	}
+
+	rec := getHTMXRequest(app, pathMobileStream)
+	assertResponseCode(t, rec, "mobile aggregate bounded initial status")
+
+	body := rec.Body.String()
+	if got := strings.Count(body, `data-mobile-feed-section`); got != mobileAggregateFeedPageLimit {
+		t.Fatalf("expected %d initial feed sections, got %d", mobileAggregateFeedPageLimit, got)
+	}
+
+	firstSection := requireMobileFeedSectionBody(t, body, feedIDs[0])
+	if got := strings.Count(firstSection, `data-mobile-item-id=`); got != mobileAggregateItemPageLimit {
+		t.Fatalf("expected %d items in the first bounded section, got %d", mobileAggregateItemPageLimit, got)
+	}
+
+	assertNotContains(
+		t,
+		firstSection,
+		fmt.Sprintf(`id="mobile-card-%d"`, feedItems[0][mobileAggregateItemPageLimit].ID),
+		"expected first feed overflow item to stay lazy",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-card-%d"`, feedItems[1][0].ID),
+		"expected a later feed to remain reachable despite the first feed backlog",
+	)
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, feedIDs[mobileAggregateFeedPageLimit]),
+		"expected overflow feed section to stay lazy",
+	)
+	assertContains(t, firstSection, `data-mobile-feed-next`, "expected older-items continuation")
+	assertContains(t, body, `data-mobile-sections-next`, "expected next-feed continuation")
+
+	page, err := store.ListUnreadFeedSections(
+		context.Background(),
+		app.db,
+		nil,
+		mobileAggregateFeedPageLimit,
+		mobileAggregateItemPageLimit,
+	)
+	requireNoErr(t, err, "store.ListUnreadFeedSections initial: %v")
+
+	if page.Next == nil {
+		t.Fatal("expected initial aggregate page cursor")
+	}
+
+	nextPath := mobileFeedSectionsPagePath(page.Next)
+	nextRec := getHTMXRequest(app, nextPath)
+	assertResponseCode(t, nextRec, "mobile aggregate next-feed page status")
+
+	wantURL := mobileStreamStatePath(0, mobileAggregateState{
+		FeedCursor: page.Next,
+		ItemCursor: nil,
+		FeedID:     0,
+	})
+	if got := nextRec.Header().Get("Hx-Push-Url"); got != wantURL {
+		t.Fatalf("expected HX-Push-Url %q, got %q", wantURL, got)
+	}
+
+	nextBody := nextRec.Body.String()
+	assertNotContains(t, nextBody, "<!doctype html>", "expected feed continuation partial")
+	assertContains(t, nextBody, `id="mobile-stream-sections"`, "expected bounded sections replacement")
+	assertContains(
+		t,
+		nextBody,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, feedIDs[mobileAggregateFeedPageLimit]),
+		"expected overflow feed on the next section page",
+	)
+	assertNotContains(
+		t,
+		nextBody,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, feedIDs[0]),
+		"expected earlier feed sections to be replaced",
+	)
+	assertContains(t, nextBody, `data-mobile-sections-reset`, "expected a route back to the first feed batch")
+	assertNotContains(t, nextBody, `data-mobile-sections-next`, "expected terminal feed batch")
+	assertContains(
+		t,
+		nextBody,
+		`hx-post="`+template.HTMLEscapeString(mobilePulseStatePath(0, mobileAggregateState{
+			FeedCursor: page.Next,
+			ItemCursor: nil,
+			FeedID:     0,
+		}))+`"`,
+		"expected feed continuation to update the pulse aggregate cursor",
+	)
+}
+
+//nolint:funlen,revive // The bounded batch and canonical continuation contract are asserted together.
+func TestMobileAggregateItemContinuationReturnsBoundedBatch(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	firstID := mustUpsertFeed(t, app, "http://example.com/mobile-item-pages", "Paged Feed")
+	laterID := mustUpsertFeed(t, app, "http://example.com/mobile-item-later", "Later Feed")
+	items := seedMobileAggregateItems(
+		t,
+		app,
+		firstID,
+		"Paged",
+		mobileAggregateItemPageLimit*2+1,
+		time.Now().UTC(),
+	)
+	laterItems := seedMobileAggregateItems(t, app, laterID, "Later", 1, time.Now().UTC().Add(time.Hour))
+
+	page, err := store.ListUnreadFeedSections(
+		context.Background(),
+		app.db,
+		nil,
+		mobileAggregateFeedPageLimit,
+		mobileAggregateItemPageLimit,
+	)
+	requireNoErr(t, err, "store.ListUnreadFeedSections for item continuation: %v")
+
+	if len(page.Sections) == 0 || page.Sections[0].Next == nil {
+		t.Fatal("expected first feed to expose an older-items cursor")
+	}
+
+	state := mobileAggregateState{
+		FeedCursor: nil,
+		ItemCursor: page.Sections[0].Next,
+		FeedID:     firstID,
+	}
+	rec := getHTMXRequest(app, mobileFeedItemsPagePath(firstID, state))
+	assertResponseCode(t, rec, "mobile aggregate older-items status")
+
+	if got, want := rec.Header().Get("Hx-Replace-Url"), mobileStreamStatePath(0, state); got != want {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", want, got)
+	}
+
+	if got := rec.Header().Get("Hx-Retarget"); got != "#mobile-stream-sections" {
+		t.Fatalf("expected aggregate batch retarget, got %q", got)
+	}
+
+	wantReswap := fmt.Sprintf("outerHTML show:#mobile-feed-section-%d:top", firstID)
+	if got := rec.Header().Get("Hx-Reswap"); got != wantReswap {
+		t.Fatalf("expected aggregate batch reswap %q, got %q", wantReswap, got)
+	}
+
+	body := rec.Body.String()
+	assertNotContains(t, body, "<!doctype html>", "expected item continuation partial")
+	assertContains(t, body, `id="mobile-stream-sections"`, "expected bounded aggregate batch response")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, firstID),
+		"expected requested feed section",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, laterID),
+		"expected later feed section to remain reachable in the bounded batch",
+	)
+
+	firstSection := requireMobileFeedSectionBody(t, body, firstID)
+	if got := strings.Count(firstSection, `data-mobile-item-id=`); got != mobileAggregateItemPageLimit {
+		t.Fatalf("expected %d items in continuation response, got %d", mobileAggregateItemPageLimit, got)
+	}
+
+	assertNotContains(
+		t,
+		firstSection,
+		fmt.Sprintf(`id="mobile-card-%d"`, items[0].ID),
+		"expected newest page item to be replaced",
+	)
+	assertContains(
+		t,
+		firstSection,
+		fmt.Sprintf(`id="mobile-card-%d"`, items[mobileAggregateItemPageLimit].ID),
+		"expected first item from the older page",
+	)
+	assertNotContains(
+		t,
+		firstSection,
+		fmt.Sprintf(`id="mobile-card-%d"`, items[mobileAggregateItemPageLimit*2].ID),
+		"expected next overflow item to remain lazy",
+	)
+	assertContains(t, body, `data-mobile-feed-newest`, "expected newest-page action")
+	assertContains(t, body, `data-mobile-feed-next`, "expected another older-page action")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(
+			`hx-get="/mobile/items/%d/reader?aggregate_feed_id=%d&amp;before_item_id=%d&amp;before_item_sort=`,
+			laterItems[0].ID,
+			firstID,
+			state.ItemCursor.ItemID,
+		),
+		"expected sibling reader action to preserve the canonical older-page state",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`section_feed_id=%d&amp;section_only=1`, laterID),
+		"expected sibling mark-read action to target its own feed without replacing canonical state",
+	)
+
+	wantPulsePrefix := fmt.Sprintf(
+		`hx-post="/mobile/pulse?aggregate_feed_id=%d&amp;before_item_id=%d&amp;before_item_sort=`,
+		firstID,
+		state.ItemCursor.ItemID,
+	)
+	assertContains(t, body, wantPulsePrefix, "expected item continuation to update the pulse item cursor")
+}
+
+//nolint:funlen,revive // Reader and mark-read assertions share one persisted aggregate-window fixture.
+func TestMobileAggregateReaderAndMarkReadPreserveWindowState(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedIDs := make([]int64, 0, mobileAggregateFeedPageLimit+1)
+	feedItems := make([][]view.ItemView, 0, mobileAggregateFeedPageLimit+1)
+
+	for index := range mobileAggregateFeedPageLimit + 1 {
+		feedID := mustUpsertFeed(
+			t,
+			app,
+			fmt.Sprintf("http://example.com/mobile-window-%d", index),
+			fmt.Sprintf("Window Feed %d", index),
+		)
+		feedIDs = append(feedIDs, feedID)
+		feedItems = append(
+			feedItems,
+			seedMobileAggregateItems(t, app, feedID, fmt.Sprintf("Window %d", index), 1, time.Now().UTC()),
+		)
+	}
+
+	page, err := store.ListUnreadFeedSections(
+		context.Background(),
+		app.db,
+		nil,
+		mobileAggregateFeedPageLimit,
+		mobileAggregateItemPageLimit,
+	)
+	requireNoErr(t, err, "store.ListUnreadFeedSections for reader state: %v")
+
+	if page.Next == nil {
+		t.Fatal("expected reader fixture feed-window cursor")
+	}
+
+	lastIndex := mobileAggregateFeedPageLimit
+	itemID := feedItems[lastIndex][0].ID
+	state := mobileAggregateState{
+		FeedCursor: page.Next,
+		ItemCursor: nil,
+		FeedID:     feedIDs[lastIndex],
+	}
+	readerPath := mobileReaderItemPath(itemID, 0, state)
+	rec := getHTMXRequest(app, readerPath)
+	assertResponseCode(t, rec, "mobile aggregate reader state status")
+
+	if got := rec.Header().Get("Hx-Push-Url"); got != readerPath {
+		t.Fatalf("expected HX-Push-Url %q, got %q", readerPath, got)
+	}
+
+	backPath := mobileStreamStatePath(0, state)
+	markPath := mobileMarkReadItemPath(itemID, 0, state)
+	body := rec.Body.String()
+	assertContains(
+		t,
+		body,
+		`hx-get="`+template.HTMLEscapeString(backPath)+`"`,
+		"expected reader back action to preserve aggregate window state",
+	)
+	assertContains(
+		t,
+		body,
+		`hx-post="`+template.HTMLEscapeString(markPath)+`"`,
+		"expected reader mark-read action to preserve aggregate window state",
+	)
+
+	markRec := postHTMXRequest(app, markPath)
+	assertResponseCode(t, markRec, "mobile aggregate reader mark-read status")
+
+	if got := markRec.Header().Get("Hx-Replace-Url"); got != backPath {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", backPath, got)
+	}
+
+	markBody := markRec.Body.String()
+	assertContains(t, markBody, `data-mobile-stream="true"`, "expected aggregate stream after reader mark-read")
+	assertNotContains(t, markBody, fmt.Sprintf(`id="mobile-card-%d"`, itemID), "expected marked item removed")
+	assertNotContains(
+		t,
+		markBody,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, feedIDs[0]),
+		"expected reader mark-read to preserve the later feed window",
+	)
+}
+
+func TestMobileAggregateCardMarkReadUpdatesOnlyOwningSection(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	firstID := mustUpsertFeed(t, app, "http://example.com/mobile-local-first", "Local First")
+	laterID := mustUpsertFeed(t, app, "http://example.com/mobile-local-later", "Local Later")
+	firstItems := seedMobileAggregateItems(t, app, firstID, "Local First", 2, time.Now().UTC())
+	seedMobileAggregateItems(t, app, laterID, "Local Later", 1, time.Now().UTC().Add(time.Hour))
+
+	state := mobileAggregateState{
+		FeedCursor: nil,
+		ItemCursor: nil,
+		FeedID:     firstID,
+	}
+	markPath := mobileSectionMarkReadItemPath(firstItems[0].ID, firstID, state)
+	rec := postHTMXRequest(app, markPath)
+	assertResponseCode(t, rec, "mobile aggregate section-local mark-read status")
+
+	body := rec.Body.String()
+	assertNotContains(t, body, `data-mobile-stream="true"`, "expected section-local response")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, firstID),
+		"expected owning section to rerender",
+	)
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, laterID),
+		"expected unrelated section to stay mounted",
+	)
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-card-%d"`, firstItems[0].ID),
+		"expected marked card removed from owning section",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-card-%d"`, firstItems[1].ID),
+		"expected remaining card in owning section",
+	)
+	assertMobileTopBarOOBUpdate(t, body)
+
+	reloaded, err := store.GetItem(context.Background(), app.db, firstItems[0].ID)
+	requireNoErr(t, err, "store.GetItem marked aggregate card: %v")
+
+	if !reloaded.IsRead {
+		t.Fatal("expected aggregate card item to be marked read")
+	}
+}
+
+//nolint:funlen // Batch repair, URL reset, bounds, and OOB state form one response contract.
+func TestMobileAggregateCardMarkReadRecomputesBatchWhenFeedCatchesUp(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedIDs := make([]int64, 0, mobileAggregateFeedPageLimit+1)
+	feedItems := make([][]view.ItemView, 0, mobileAggregateFeedPageLimit+1)
+
+	for index := range mobileAggregateFeedPageLimit + 1 {
+		feedID := mustUpsertFeed(
+			t,
+			app,
+			fmt.Sprintf("http://example.com/mobile-retarget-%d", index),
+			fmt.Sprintf("Retarget Feed %d", index),
+		)
+
+		feedIDs = append(feedIDs, feedID)
+		feedItems = append(
+			feedItems,
+			seedMobileAggregateItems(t, app, feedID, fmt.Sprintf("Retarget %d", index), 1, time.Now().UTC()),
+		)
+	}
+
+	state := mobileAggregateState{
+		FeedCursor: nil,
+		ItemCursor: nil,
+		FeedID:     feedIDs[0],
+	}
+	rec := postHTMXRequest(app, mobileSectionMarkReadItemPath(feedItems[0][0].ID, feedIDs[0], state))
+	assertResponseCode(t, rec, "mobile aggregate caught-up section mark-read status")
+
+	if got := rec.Header().Get("Hx-Retarget"); got != "#mobile-stream-sections" {
+		t.Fatalf("expected aggregate batch retarget, got %q", got)
+	}
+
+	if got := rec.Header().Get("Hx-Reswap"); got != "outerHTML show:top" {
+		t.Fatalf("expected aggregate batch outerHTML show-top reswap, got %q", got)
+	}
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != pathMobileStream {
+		t.Fatalf("expected caught-up item cursor to reset to %q, got %q", pathMobileStream, got)
+	}
+
+	body := rec.Body.String()
+	assertNotContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, feedIDs[0]),
+		"expected newly caught-up section removed",
+	)
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="mobile-feed-section-%d"`, feedIDs[mobileAggregateFeedPageLimit]),
+		"expected next unread feed promoted into the recomputed batch",
+	)
+
+	if got := strings.Count(body, `data-mobile-feed-section`); got != mobileAggregateFeedPageLimit {
+		t.Fatalf(
+			"expected recomputed batch to remain bounded at %d sections, got %d",
+			mobileAggregateFeedPageLimit,
+			got,
+		)
+	}
+
+	assertMobileTopBarOOBUpdate(t, body)
+}
+
+func TestMobileAggregateSiblingCatchUpPreservesCanonicalItemPage(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	firstID := mustUpsertFeed(t, app, "http://example.com/mobile-canonical-first", "Canonical First")
+	siblingID := mustUpsertFeed(t, app, "http://example.com/mobile-canonical-sibling", "Canonical Sibling")
+	firstItems := seedMobileAggregateItems(
+		t,
+		app,
+		firstID,
+		"Canonical First",
+		mobileAggregateItemPageLimit+1,
+		time.Now().UTC(),
+	)
+	siblingItems := seedMobileAggregateItems(t, app, siblingID, "Canonical Sibling", 1, time.Now().UTC())
+
+	page, err := store.ListUnreadFeedSections(
+		context.Background(), app.db, nil, mobileAggregateFeedPageLimit, mobileAggregateItemPageLimit,
+	)
+	requireNoErr(t, err, "store.ListUnreadFeedSections canonical sibling: %v")
+
+	state := mobileAggregateState{FeedCursor: nil, ItemCursor: page.Sections[0].Next, FeedID: firstID}
+	target := mobileSectionMarkReadItemPath(siblingItems[0].ID, siblingID, state)
+	rec := postHTMXRequest(app, target)
+	assertResponseCode(t, rec, "mobile aggregate sibling caught-up mark-read status")
+
+	if got, want := rec.Header().Get("Hx-Replace-Url"), mobileStreamStatePath(0, state); got != want {
+		t.Fatalf("expected canonical item-page URL %q, got %q", want, got)
+	}
+
+	body := rec.Body.String()
+	assertNotContains(t, body, fmt.Sprintf(`id="mobile-feed-section-%d"`, siblingID), "expected sibling removed")
+	assertContains(t, body, fmt.Sprintf(`id="mobile-card-%d"`, firstItems[mobileAggregateItemPageLimit].ID),
+		"expected canonical older item page preserved")
+	assertNotContains(t, body, fmt.Sprintf(`id="mobile-card-%d"`, firstItems[0].ID),
+		"expected canonical page not reset to newest")
+}
+
+func TestMobileStreamHTMXHistoryRestoreReturnsFullPage(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "http://example.com/mobile-history-miss", "History Miss")
+	seedMobileAggregateItems(t, app, feedID, "History Miss", 1, time.Now().UTC())
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathMobileStream, http.NoBody)
+	req.Header.Set("Hx-Request", "true")
+	req.Header.Set("Hx-History-Restore-Request", "true")
+
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	assertResponseCode(t, rec, "mobile history restore status")
+	assertContains(t, rec.Body.String(), "<!doctype html>", "expected full page for mobile history cache miss")
+	assertContains(t, rec.Body.String(), `data-mobile-stream="true"`, "expected mobile stream on history cache miss")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != "" {
+		t.Fatalf("expected no HX-Replace-Url for mobile history restore, got %q", got)
+	}
+}
+
+func TestMobileReaderHTMXHistoryRestoreReturnsFullPage(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "http://example.com/mobile-reader-history", "Reader History")
+	items := seedMobileAggregateItems(t, app, feedID, "Reader History", 1, time.Now().UTC())
+	state := mobileAggregateState{FeedCursor: nil, ItemCursor: nil, FeedID: feedID}
+	target := mobileReaderItemPath(items[0].ID, 0, state)
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, http.NoBody)
+	req.Header.Set("Hx-Request", "true")
+	req.Header.Set("Hx-History-Restore-Request", "true")
+
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	assertResponseCode(t, rec, "mobile reader history restore status")
+	assertContains(t, rec.Body.String(), "<!doctype html>", "expected full page for reader history cache miss")
+	assertContains(t, rec.Body.String(), `data-mobile-reader="true"`, "expected reader on history cache miss")
+
+	if got := rec.Header().Get("Hx-Push-Url"); got != "" {
+		t.Fatalf("expected no HX-Push-Url for reader history restore, got %q", got)
+	}
+}
+
+func seedMobileAggregateItems(
+	t *testing.T,
+	app *App,
+	feedID int64,
+	prefix string,
+	count int,
+	newest time.Time,
+) []view.ItemView {
+	t.Helper()
+
+	items := make([]*gofeed.Item, 0, count)
+	for index := range count {
+		title := fmt.Sprintf("%s %02d", prefix, index)
+		published := newest.Add(-time.Duration(index) * time.Minute)
+		items = append(
+			items,
+			newGofeedItem(
+				title,
+				fmt.Sprintf("http://example.com/%d/%d", feedID, index),
+				fmt.Sprintf("mobile-aggregate-%d-%d", feedID, index),
+				"<p>Summary</p>",
+				&published,
+			),
+		)
+	}
+
+	mustUpsertItems(t, app, feedID, items)
+
+	stored := mustListItems(t, app, feedID)
+	if len(stored) != count {
+		t.Fatalf("expected %d mobile aggregate items, got %d", count, len(stored))
+	}
+
+	return stored
+}
+
+func assertMobileFeedSectionOrder(t *testing.T, body string, feedIDs ...int64) {
+	t.Helper()
+
+	markers := make([]string, 0, len(feedIDs))
+
+	for _, feedID := range feedIDs {
+		markers = append(markers, fmt.Sprintf(`id="mobile-feed-section-%d"`, feedID))
+	}
+
+	assertBodyTokenOrder(t, body, markers...)
+}
+
+func assertBodyTokenOrder(t *testing.T, body string, tokens ...string) {
+	t.Helper()
+
+	previous := -1
+
+	for _, token := range tokens {
+		index := requireBodyIndex(t, body, token, fmt.Sprintf("expected body token %q", token))
+		if index <= previous {
+			t.Fatalf("expected body token %q after the preceding token", token)
+		}
+
+		previous = index
+	}
+}
+
+func requireMobileFeedSectionBody(t *testing.T, body string, feedID int64) string {
+	t.Helper()
+
+	marker := fmt.Sprintf(`id="mobile-feed-section-%d"`, feedID)
+	start := requireBodyIndex(t, body, marker, fmt.Sprintf("expected mobile feed section %d", feedID))
+
+	endOffset := strings.Index(body[start:], "</section>")
+	if endOffset == -1 {
+		t.Fatalf("expected closing tag for mobile feed section %d", feedID)
+	}
+
+	return body[start : start+endOffset+len("</section>")]
+}
+
 func TestMobileStreamRendersCompactPreviewForSummaryOnlyItems(t *testing.T) {
 	t.Parallel()
 
@@ -5256,6 +5905,7 @@ func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
 	body := rec.Body.String()
 	assertContains(t, body, "Alpha Unread", "expected selected feed unread item in stream")
 	assertNotContains(t, body, "Bravo Unread", "expected other feed item excluded from filtered stream")
+	assertNotContains(t, body, `data-mobile-feed-section`, "expected specific-feed mode to remain a flat stream")
 	assertContains(
 		t,
 		body,

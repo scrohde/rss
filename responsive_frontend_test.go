@@ -30,8 +30,12 @@ func TestResponsiveMobileBootstrapContracts(t *testing.T) {
 		`layoutMedia.addEventListener("change", syncResponsiveLayout)`,
 		`pendingTransition`,
 		`abortRequest(pendingTransition.mainContent)`,
-		`document.body.addEventListener("htmx:beforeRequest", trackMainContentRequest)`,
+		`mainContent.contains(target)`,
+		`document.body.addEventListener("htmx:beforeRequest", trackContentRequest)`,
+		`document.body.addEventListener("htmx:afterSettle", focusMobilePaginationResult)`,
 		`document.body.addEventListener("htmx:historyRestore", syncResponsiveLayout)`,
+		`lastMobileStreamPath = streamPath`,
+		`option.defaultSelected = option.selected`,
 	}
 
 	assertSourceContracts(t, "DOM helpers", string(domSource), requiredDOMContracts)

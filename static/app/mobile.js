@@ -7,11 +7,15 @@ let layoutMedia = null;
 let pendingTransition = null;
 let lastDesktopFeedID = "";
 let lastMobileFeedID = "";
-const mainContentRequestSources = new Set();
+let lastMobileStreamPath = mobileStreamPath;
+const contentRequests = new Map();
+const focusedPaginationRequests = new WeakSet();
 
 const hasMainContentTarget = () => Boolean(document.getElementById("main-content"));
 const hasMobileContent = () =>
-  Boolean(document.querySelector("#main-content [data-mobile-stream='true'], #main-content [data-mobile-reader='true']"));
+  Boolean(
+    document.querySelector("#main-content [data-mobile-stream='true'], #main-content [data-mobile-reader='true']"),
+  );
 const hasCompleteMobileLayout = () =>
   hasMobileContent() && Boolean(document.getElementById("mobile-stream-feed-filter"));
 
@@ -28,6 +32,16 @@ const currentMobileFeedID = () => {
   return selector ? normalizeFeedID(selector.value) : "";
 };
 
+const currentMobileStreamPath = () => {
+  if (document.querySelector("[data-mobile-stream='true']") && window.location.pathname === mobileStreamPath) {
+    return `${window.location.pathname}${window.location.search}`;
+  }
+
+  const readerBack = document.querySelector("[data-mobile-reader='true'] .mobile-reader-back");
+  const backPath = readerBack ? readerBack.getAttribute("hx-get") : "";
+  return backPath && backPath.startsWith(mobileStreamPath) ? backPath : "";
+};
+
 const firstFeedID = () => {
   const feed = document.querySelector("#feed-list .feed-link[data-feed-id]");
   return feed ? normalizeFeedID(feed.dataset.feedId) : "";
@@ -42,6 +56,23 @@ const rememberDesktopFeed = () => {
 
 const rememberMobileFeed = () => {
   lastMobileFeedID = currentMobileFeedID();
+  const streamPath = currentMobileStreamPath();
+  if (streamPath) {
+    lastMobileStreamPath = streamPath;
+  }
+};
+
+const syncMobileFilterHistoryState = (event) => {
+  const selector = event.target;
+  if (!selector || selector.id !== "mobile-stream-feed-filter") {
+    return;
+  }
+
+  for (const option of selector.options) {
+    option.defaultSelected = option.selected;
+  }
+
+  rememberMobileFeed();
 };
 
 const pathWithSelectedFeed = (path, feedID) => {
@@ -58,32 +89,43 @@ const desiredLayout = () => {
   return layoutMedia.matches ? "mobile" : "desktop";
 };
 
-const isMainContentTarget = (target) =>
-  target === "#main-content" || Boolean(target && target.id === "main-content");
+const isContentTarget = (target) => {
+  const mainContent = document.getElementById("main-content");
+  if (!mainContent) {
+    return false;
+  }
 
-const mainContentRequestSource = (event) => {
-  if (!event || !event.detail || !isMainContentTarget(event.detail.target)) {
+  return (
+    target === "#main-content" ||
+    target === mainContent ||
+    Boolean(target && typeof target === "object" && mainContent.contains(target))
+  );
+};
+
+const contentRequestSource = (event) => {
+  if (!event || !event.detail || !isContentTarget(event.detail.target)) {
     return null;
   }
   return event.detail.elt || event.target || null;
 };
 
-const trackMainContentRequest = (event) => {
-  const source = mainContentRequestSource(event);
-  if (!source) {
+const trackContentRequest = (event) => {
+  const source = contentRequestSource(event);
+  const request = event && event.detail ? event.detail.xhr : null;
+  if (!source || !request) {
     return;
   }
   if (pendingTransition && source !== pendingTransition.mainContent) {
     event.preventDefault();
     return;
   }
-  mainContentRequestSources.add(source);
+  contentRequests.set(request, source);
 };
 
-const forgetMainContentRequest = (event) => {
-  const source = mainContentRequestSource(event);
-  if (source) {
-    mainContentRequestSources.delete(source);
+const forgetContentRequest = (event) => {
+  const request = event && event.detail ? event.detail.xhr : null;
+  if (request) {
+    contentRequests.delete(request);
   }
 };
 
@@ -95,11 +137,41 @@ const abortRequest = (source) => {
   source.dispatchEvent(new Event("htmx:abort", { bubbles: true }));
 };
 
-const abortMainContentRequests = () => {
-  for (const source of mainContentRequestSources) {
+const abortContentRequests = () => {
+  for (const source of new Set(contentRequests.values())) {
     abortRequest(source);
   }
-  mainContentRequestSources.clear();
+  contentRequests.clear();
+};
+
+const focusMobilePaginationResult = (event) => {
+  const detail = event ? event.detail : null;
+  const request = detail ? detail.xhr : null;
+  if (!request || focusedPaginationRequests.has(request)) {
+    return;
+  }
+
+  const requestPath = detail.pathInfo ? detail.pathInfo.requestPath : "";
+  const parsedPath = new URL(requestPath, window.location.origin).pathname;
+  const feedMatch = parsedPath.match(/^\/mobile\/feeds\/(\d+)\/items$/);
+  const isSectionPage = parsedPath === "/mobile/stream/sections";
+  if (!feedMatch && !isSectionPage) {
+    return;
+  }
+
+  focusedPaginationRequests.add(request);
+
+  let focusTarget = null;
+  if (isSectionPage) {
+    const sections = document.getElementById("mobile-stream-sections");
+    focusTarget = sections ? sections.querySelector("[data-mobile-feed-section]") || sections : null;
+  } else {
+    focusTarget = document.getElementById(`mobile-feed-section-${feedMatch[1]}`);
+  }
+
+  if (focusTarget) {
+    focusTarget.focus({ preventScroll: true });
+  }
 };
 
 const finishTransition = (transition, successful) => {
@@ -124,7 +196,7 @@ const startTransition = (layout, path) => {
     return;
   }
 
-  abortMainContentRequests();
+  abortContentRequests();
   const transition = {
     abortRequested: false,
     layout,
@@ -161,13 +233,17 @@ const abortPendingTransition = () => {
   }
 
   pendingTransition.abortRequested = true;
-  mainContentRequestSources.delete(pendingTransition.mainContent);
+  for (const [request, source] of contentRequests) {
+    if (source === pendingTransition.mainContent) {
+      contentRequests.delete(request);
+    }
+  }
   abortRequest(pendingTransition.mainContent);
 };
 
 const loadMobileStream = () => {
   rememberDesktopFeed();
-  startTransition("mobile", pathWithSelectedFeed(mobileStreamPath, lastMobileFeedID));
+  startTransition("mobile", lastMobileStreamPath);
 };
 
 const loadDesktopReader = () => {
@@ -218,8 +294,10 @@ export const bindMobileBootstrap = () => {
     } else if (typeof layoutMedia.addListener === "function") {
       layoutMedia.addListener(syncResponsiveLayout);
     }
-    document.body.addEventListener("htmx:beforeRequest", trackMainContentRequest);
-    document.body.addEventListener("htmx:afterRequest", forgetMainContentRequest);
+    document.body.addEventListener("change", syncMobileFilterHistoryState);
+    document.body.addEventListener("htmx:beforeRequest", trackContentRequest);
+    document.body.addEventListener("htmx:afterRequest", forgetContentRequest);
+    document.body.addEventListener("htmx:afterSettle", focusMobilePaginationResult);
     document.body.addEventListener("htmx:afterSwap", syncResponsiveLayout);
     document.body.addEventListener("htmx:historyRestore", syncResponsiveLayout);
     syncResponsiveLayout();

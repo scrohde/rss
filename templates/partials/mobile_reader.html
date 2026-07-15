@@ -7,7 +7,7 @@
         aria-label="Back to stream"
         title="Back to stream"
         data-app-htmx="true"
-        hx-get="/mobile/stream{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
+        hx-get="{{.BackPath}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >
@@ -23,7 +23,7 @@
         aria-label="Mark read"
         title="Mark read"
         data-app-htmx="true"
-        hx-post="/mobile/items/{{.Item.ID}}/read{{if gt .TopBar.SelectedFeedID 0}}?selected_feed_id={{.TopBar.SelectedFeedID}}{{end}}"
+        hx-post="{{.MarkReadPath}}"
         hx-target="#main-content"
         hx-swap="innerHTML"
       >

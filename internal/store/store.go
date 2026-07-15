@@ -101,6 +101,11 @@ func Init(db *sql.DB) error {
 		return err
 	}
 
+	err = ensureMobileAggregateIndexes(db)
+	if err != nil {
+		return err
+	}
+
 	err = ensureAuthSchema(db)
 	if err != nil {
 		return err
@@ -1662,6 +1667,26 @@ SET sort_order = (
 	`)
 	if err != nil {
 		return fmt.Errorf("backfill feeds.sort_order values: %w", err)
+	}
+
+	return nil
+}
+
+func ensureMobileAggregateIndexes(db *sql.DB) error {
+	_, err := db.ExecContext(context.Background(), `
+CREATE INDEX IF NOT EXISTS idx_feeds_sort_order_id
+ON feeds(sort_order, id);
+
+CREATE INDEX IF NOT EXISTS idx_items_unread_feed_order
+ON items(
+	feed_id,
+	CAST(COALESCE(published_at, created_at) AS TEXT) DESC,
+	id DESC
+)
+WHERE read_at IS NULL;
+	`)
+	if err != nil {
+		return fmt.Errorf("create mobile aggregate indexes: %w", err)
 	}
 
 	return nil

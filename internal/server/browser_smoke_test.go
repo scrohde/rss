@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +43,16 @@ type smokeFixture struct {
 	secondarySecondItemID  int64
 	secondaryNoReaderID    int64
 	secondarySummaryItemID int64
+}
+
+type mobileAggregateSmokeFixture struct {
+	olderState       mobileAggregateState
+	highFeedID       int64
+	quietFeedID      int64
+	laterFeedID      int64
+	highNewestItemID int64
+	highOldestItemID int64
+	laterItemID      int64
 }
 
 func TestBrowserSmokeAuthLoginSwitchesFromConditionalToExplicit(t *testing.T) {
@@ -684,31 +696,23 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		"secondary item present in mobile stream before reading",
 	)
 
-	requestHTMX(
-		t,
-		ctx,
-		"GET",
-		fmt.Sprintf("/mobile/items/%d/reader", fixture.secondaryFirstItemID),
-		"#main-content",
-		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
-	)
+	aggregateState := mobileAggregateState{
+		FeedCursor: nil,
+		ItemCursor: nil,
+		FeedID:     fixture.secondaryFeedID,
+	}
+	firstReaderSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", fixture.secondaryFirstItemID)
+	clickElement(t, ctx, firstReaderSelector, "open first mobile aggregate reader")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "mobile reader loaded")
 	waitForJS(
 		t,
 		ctx,
-		pathnameExpression(fmt.Sprintf("/mobile/items/%d/reader", fixture.secondaryFirstItemID)),
+		requestURIExpression(mobileReaderItemPath(fixture.secondaryFirstItemID, 0, aggregateState)),
 		"mobile reader URL",
 	)
 	waitForJS(t, ctx, textPresentExpression("Secondary One"), "reader title present")
 
-	requestHTMX(
-		t,
-		ctx,
-		"POST",
-		fmt.Sprintf("/mobile/items/%d/read", fixture.secondaryFirstItemID),
-		"#main-content",
-		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
-	)
+	clickElement(t, ctx, ".mobile-reader-mark-read", "mark first aggregate reader item read")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "stream returns after mark read")
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "stream URL after mark read")
 	waitForJS(
@@ -718,24 +722,191 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		"marked item removed from mobile unread stream",
 	)
 
-	requestHTMX(
-		t,
-		ctx,
-		"GET",
-		fmt.Sprintf("/mobile/items/%d/reader", fixture.secondarySecondItemID),
-		"#main-content",
-		fmt.Sprintf("item-%d", fixture.secondarySecondItemID),
-	)
+	secondReaderSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", fixture.secondarySecondItemID)
+	clickElement(t, ctx, secondReaderSelector, "open second mobile aggregate reader")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "reader can open another item")
 	waitForJS(
 		t,
 		ctx,
-		pathnameExpression(fmt.Sprintf("/mobile/items/%d/reader", fixture.secondarySecondItemID)),
+		requestURIExpression(mobileReaderItemPath(fixture.secondarySecondItemID, 0, aggregateState)),
 		"second reader URL",
 	)
 	runActions(t, ctx, chromedp.Evaluate(`history.back()`, nil))
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "back returns to stream")
 	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "stream URL after history back")
+}
+
+//nolint:funlen,revive // One browser journey verifies lazy paging, history, reader back, and local read updates.
+func TestBrowserSmokeMobileAggregateFlows(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedMobileAggregateSmokeFixture(t, app)
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
+	waitForJS(t, ctx, mobileLayoutExpression(), "mobile layout")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "mobile aggregate loaded")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "mobile aggregate URL")
+	waitForJS(
+		t,
+		ctx,
+		mobileAggregateSectionOrderExpression(fixture.highFeedID, fixture.laterFeedID),
+		"mobile aggregate saved feed order",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-feed-section-%d", fixture.quietFeedID)),
+		"caught-up mobile aggregate feed skipped",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highOldestItemID)),
+		"first feed overflow item initially lazy",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.laterItemID)),
+		"later feed reachable before loading first feed backlog",
+	)
+	waitForJS(
+		t,
+		ctx,
+		mobileAggregateBoundedExpression(mobileAggregateFeedPageLimit, mobileAggregateItemPageLimit),
+		"initial aggregate DOM bounds",
+	)
+
+	olderButton := fmt.Sprintf("#mobile-feed-section-%d [data-mobile-feed-next]", fixture.highFeedID)
+	clickElement(t, ctx, olderButton, "load older page from high-volume feed")
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highOldestItemID)),
+		"older high-volume item loaded",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highNewestItemID)),
+		"newest high-volume page replaced",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.laterItemID)),
+		"later feed remains mounted after first-feed continuation",
+	)
+	waitForJS(
+		t,
+		ctx,
+		mobileAggregateBoundedExpression(mobileAggregateFeedPageLimit, mobileAggregateItemPageLimit),
+		"continued aggregate DOM bounds",
+	)
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression(fmt.Sprintf("#mobile-feed-section-%d", fixture.highFeedID)),
+		"continued feed section receives focus",
+	)
+
+	readerSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", fixture.highOldestItemID)
+	readerPath := mobileReaderItemPath(fixture.highOldestItemID, 0, fixture.olderState)
+
+	clickElement(t, ctx, readerSelector, "open older aggregate item reader")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "aggregate reader loaded")
+	waitForJS(t, ctx, requestURIExpression(readerPath), "aggregate reader URL preserves page state")
+
+	runActions(t, ctx, chromedp.Evaluate(`history.back()`, nil))
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "history restores aggregate stream")
+	waitForJS(t, ctx, pathnameExpression("/mobile/stream"), "history restores aggregate stream URL")
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highOldestItemID)),
+		"history restores older first-feed page",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.laterItemID)),
+		"history restores later feed section",
+	)
+
+	clickElement(t, ctx, readerSelector, "reopen older aggregate item reader")
+	waitForJS(t, ctx, requestURIExpression(readerPath), "reopened aggregate reader URL")
+	clickElement(t, ctx, ".mobile-reader-back", "aggregate reader back button")
+
+	streamPath := mobileStreamStatePath(0, fixture.olderState)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(`[data-mobile-stream="true"]`),
+		"aggregate reader back returns to stream",
+	)
+	waitForJS(t, ctx, requestURIExpression(streamPath), "aggregate reader back preserves page state")
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highOldestItemID)),
+		"reader back preserves older first-feed page",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.laterItemID)),
+		"reader back preserves later feed reachability",
+	)
+
+	markReadSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-mark-read", fixture.highOldestItemID)
+	clickElement(t, ctx, markReadSelector, "mark older aggregate item read")
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highOldestItemID)),
+		"marked aggregate item removed",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-feed-section-%d", fixture.highFeedID)),
+		"owning section remains on its current page",
+	)
+	waitForJS(
+		t,
+		ctx,
+		textPresentExpression("No unread items remain on this page."),
+		"empty aggregate item page state",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", fixture.laterItemID)),
+		"section-local mark read leaves later feed mounted",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-card-%d", fixture.highNewestItemID)),
+		"section-local mark read does not reset to newest page",
+	)
+	waitForJS(t, ctx, mobileFilterValueExpression(0), "aggregate filter remains All feeds")
+	waitForJS(t, ctx, requestURIExpression(streamPath), "aggregate mark read retains stream URL")
+	waitForJS(
+		t,
+		ctx,
+		mobileAggregateBoundedExpression(mobileAggregateFeedPageLimit, mobileAggregateItemPageLimit),
+		"aggregate DOM stays bounded after mark read",
+	)
 }
 
 func TestBrowserSmokeMobileTopBarFlows(t *testing.T) {
@@ -916,6 +1087,65 @@ func seedSmokeFixture(t *testing.T, app *App) smokeFixture {
 		secondarySecondItemID:  secondaryItems[1].ID,
 		secondaryNoReaderID:    secondaryItems[2].ID,
 		secondarySummaryItemID: secondaryItems[3].ID,
+	}
+}
+
+func seedMobileAggregateSmokeFixture(t *testing.T, app *App) mobileAggregateSmokeFixture {
+	t.Helper()
+
+	base := time.Date(2026, time.January, 2, 12, 0, 0, 0, time.UTC)
+	highFeedID := mustUpsertFeed(t, app, "https://example.com/mobile-aggregate-high.xml", "Aggregate High")
+	quietFeedID := mustUpsertFeed(t, app, "https://example.com/mobile-aggregate-quiet.xml", "Aggregate Quiet")
+	laterFeedID := mustUpsertFeed(t, app, "https://example.com/mobile-aggregate-later.xml", "Aggregate Later")
+
+	err := store.UpdateFeedOrder(context.Background(), app.db, []int64{highFeedID, quietFeedID, laterFeedID})
+	if err != nil {
+		t.Fatalf("store.UpdateFeedOrder mobile aggregate: %v", err)
+	}
+
+	highItems := seedMobileAggregateItems(
+		t,
+		app,
+		highFeedID,
+		"Aggregate High",
+		mobileAggregateItemPageLimit+1,
+		base.Add(-time.Hour),
+	)
+	quietItems := seedMobileAggregateItems(t, app, quietFeedID, "Aggregate Quiet", 1, base)
+	laterItems := seedMobileAggregateItems(t, app, laterFeedID, "Aggregate Later", 1, base.Add(time.Hour))
+
+	err = store.MarkItemRead(context.Background(), app.db, quietItems[0].ID)
+	if err != nil {
+		t.Fatalf("store.MarkItemRead quiet aggregate item: %v", err)
+	}
+
+	sectionPage, err := store.ListUnreadFeedSections(
+		context.Background(),
+		app.db,
+		nil,
+		mobileAggregateFeedPageLimit,
+		mobileAggregateItemPageLimit,
+	)
+	if err != nil {
+		t.Fatalf("store.ListUnreadFeedSections mobile aggregate fixture: %v", err)
+	}
+
+	if len(sectionPage.Sections) == 0 || sectionPage.Sections[0].Next == nil {
+		t.Fatal("expected high-volume aggregate feed to expose an older page")
+	}
+
+	return mobileAggregateSmokeFixture{
+		olderState: mobileAggregateState{
+			FeedCursor: nil,
+			FeedID:     highFeedID,
+			ItemCursor: sectionPage.Sections[0].Next,
+		},
+		highFeedID:       highFeedID,
+		quietFeedID:      quietFeedID,
+		laterFeedID:      laterFeedID,
+		highNewestItemID: highItems[0].ID,
+		highOldestItemID: highItems[mobileAggregateItemPageLimit].ID,
+		laterItemID:      laterItems[0].ID,
 	}
 }
 
@@ -2416,6 +2646,34 @@ func htmxSettledExpression() string {
 
 func mobileLayoutExpression() string {
 	return `(() => window.matchMedia("(max-width: 960px)").matches)()`
+}
+
+func mobileAggregateSectionOrderExpression(feedIDs ...int64) string {
+	parts := make([]string, 0, len(feedIDs))
+
+	for _, feedID := range feedIDs {
+		parts = append(parts, strconv.FormatInt(feedID, 10))
+	}
+	expected := strings.Join(parts, ",")
+
+	return fmt.Sprintf(
+		`(() => Array.from(document.querySelectorAll("[data-mobile-feed-section][data-feed-id]"))
+			.map((section) => section.dataset.feedId).join(",") === %q)()`,
+		expected,
+	)
+}
+
+func mobileAggregateBoundedExpression(maxSections, maxItemsPerSection int) string {
+	return fmt.Sprintf(
+		`(() => {
+			const sections = Array.from(document.querySelectorAll("[data-mobile-feed-section]"));
+			return sections.length <= %d && sections.every((section) =>
+				section.querySelectorAll("[data-mobile-item-id]").length <= %d
+			);
+		})()`,
+		maxSections,
+		maxItemsPerSection,
+	)
 }
 
 func responsiveMobileLayoutExpression(feedID int64) string {
