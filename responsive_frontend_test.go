@@ -35,6 +35,8 @@ func TestResponsiveMobileBootstrapContracts(t *testing.T) {
 		`document.body.addEventListener("htmx:afterSettle", focusMobilePaginationResult)`,
 		`document.body.addEventListener("htmx:historyRestore", syncResponsiveLayout)`,
 		`lastMobileStreamPath = streamPath`,
+		`mobileFeedIDFromPath(streamPath) === feedID`,
+		`lastMobileStreamPath = pathWithSelectedFeed(mobileStreamPath, lastMobileFeedID)`,
 		`option.defaultSelected = option.selected`,
 	}
 

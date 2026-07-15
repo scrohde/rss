@@ -42,6 +42,11 @@ const currentMobileStreamPath = () => {
   return backPath && backPath.startsWith(mobileStreamPath) ? backPath : "";
 };
 
+const mobileFeedIDFromPath = (path) => {
+  const parsedPath = new URL(path, window.location.origin);
+  return normalizeFeedID(parsedPath.searchParams.get("selected_feed_id"));
+};
+
 const firstFeedID = () => {
   const feed = document.querySelector("#feed-list .feed-link[data-feed-id]");
   return feed ? normalizeFeedID(feed.dataset.feedId) : "";
@@ -55,9 +60,10 @@ const rememberDesktopFeed = () => {
 };
 
 const rememberMobileFeed = () => {
-  lastMobileFeedID = currentMobileFeedID();
+  const feedID = currentMobileFeedID();
+  lastMobileFeedID = feedID;
   const streamPath = currentMobileStreamPath();
-  if (streamPath) {
+  if (streamPath && mobileFeedIDFromPath(streamPath) === feedID) {
     lastMobileStreamPath = streamPath;
   }
 };
@@ -72,7 +78,8 @@ const syncMobileFilterHistoryState = (event) => {
     option.defaultSelected = option.selected;
   }
 
-  rememberMobileFeed();
+  lastMobileFeedID = currentMobileFeedID();
+  lastMobileStreamPath = pathWithSelectedFeed(mobileStreamPath, lastMobileFeedID);
 };
 
 const pathWithSelectedFeed = (path, feedID) => {
