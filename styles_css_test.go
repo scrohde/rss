@@ -46,6 +46,29 @@ func TestStylesTopbarMatchesFeedPanelBackground(t *testing.T) {
 	}
 }
 
+func TestStylesGeneralMenuContracts(t *testing.T) {
+	t.Parallel()
+
+	source := readStylesCSS(t)
+	requiredRules := []struct {
+		selector    string
+		declaration string
+	}{
+		{selector: ".topbar-shortcuts-panel", declaration: "overflow-y: auto;"},
+		{selector: ".topbar-shortcuts-panel", declaration: "overscroll-behavior: contain;"},
+		{selector: ".topbar-shortcuts-panel:focus-visible", declaration: "outline: 2px solid"},
+		{selector: ".topbar-shortcuts-section + .topbar-shortcuts-section", declaration: "border-top:"},
+		{selector: ".topbar-shortcuts-row-session", declaration: "border-top:"},
+		{selector: ".topbar-session-action", declaration: "color: var(--session-action-color);"},
+	}
+
+	for _, rule := range requiredRules {
+		if !cssRuleContains(source, rule.selector, rule.declaration) {
+			t.Fatalf("expected %s to include %s", rule.selector, rule.declaration)
+		}
+	}
+}
+
 func TestStylesContentPanelScrollbarSwitching(t *testing.T) {
 	t.Parallel()
 

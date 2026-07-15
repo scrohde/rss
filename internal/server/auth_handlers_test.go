@@ -472,6 +472,8 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 	body := rr.Body.String()
 
 	requiredSnippets := []string{
+		`aria-labelledby="topbar-menu-title"`,
+		`id="topbar-menu-title">Menu</h2>`,
 		`action="/auth/logout"`,
 		`href="/auth/security"`,
 		`action="/auth/theme"`,
@@ -479,12 +481,16 @@ func TestAuthenticatedIndexShowsLogoutInMenu(t *testing.T) {
 		`data-theme-status="true"`,
 		`name="return_to" value="/"`,
 		`name="csrf_token"`,
+		`class="topbar-shortcuts-control topbar-shortcuts-control-button topbar-session-action"`,
+		`data-menu-action="logout"`,
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(body, snippet) {
 			t.Fatalf("expected menu to include %q", snippet)
 		}
 	}
+
+	assertMenuSectionOrder(t, body, "account", "feeds", "shortcuts")
 
 	if strings.Contains(body, "Save appearance") {
 		t.Fatal("did not expect explicit save appearance button in menu")

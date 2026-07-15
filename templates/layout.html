@@ -36,149 +36,194 @@
             </span>
             <span class="sr-only">Menu</span>
           </button>
-          <section class="topbar-shortcuts-panel" id="topbar-shortcuts-panel" aria-label="Keyboard shortcuts" hidden>
-            <div class="topbar-shortcuts-title">Keyboard shortcuts</div>
-            <div class="topbar-shortcuts-subtitle">Browse and manage items without leaving the keyboard.</div>
+          <section
+            class="topbar-shortcuts-panel"
+            id="topbar-shortcuts-panel"
+            aria-labelledby="topbar-menu-title"
+            tabindex="0"
+            hidden
+          >
+            <h2 class="topbar-shortcuts-title" id="topbar-menu-title">Menu</h2>
+            <p class="topbar-shortcuts-subtitle">Manage your account, feeds, and reading shortcuts.</p>
             {{if .CSRFToken}}
-              <div class="topbar-shortcuts-divider"></div>
-              <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Account</div>
-              <form
-                class="topbar-shortcuts-theme-form"
-                method="post"
-                action="/auth/theme"
-                data-theme-form="true"
+              <section
+                class="topbar-shortcuts-section"
+                data-menu-section="account"
+                aria-labelledby="topbar-menu-account-title"
               >
-                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-                <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
-                <fieldset class="topbar-shortcuts-theme-fieldset">
-                  <legend class="topbar-shortcuts-action">Appearance</legend>
-                  <div class="topbar-shortcuts-theme-options">
-                    <label class="topbar-shortcuts-theme-option">
-                      <input type="radio" name="theme" value="system" {{if eq .AppearanceTheme "system"}}checked{{end}}>
-                      <span>System</span>
-                    </label>
-                    <label class="topbar-shortcuts-theme-option">
-                      <input type="radio" name="theme" value="light" {{if eq .AppearanceTheme "light"}}checked{{end}}>
-                      <span>Light</span>
-                    </label>
-                    <label class="topbar-shortcuts-theme-option">
-                      <input type="radio" name="theme" value="dark" {{if eq .AppearanceTheme "dark"}}checked{{end}}>
-                      <span>Dark</span>
-                    </label>
+                <h3
+                  class="topbar-shortcuts-title topbar-shortcuts-title-secondary"
+                  id="topbar-menu-account-title"
+                >Appearance and account</h3>
+                <form
+                  class="topbar-shortcuts-theme-form"
+                  method="post"
+                  action="/auth/theme"
+                  data-theme-form="true"
+                >
+                  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                  <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
+                  <fieldset class="topbar-shortcuts-theme-fieldset">
+                    <legend class="topbar-shortcuts-action">Appearance</legend>
+                    <div class="topbar-shortcuts-theme-options">
+                      <label class="topbar-shortcuts-theme-option">
+                        <input
+                          type="radio"
+                          name="theme"
+                          value="system" {{if eq .AppearanceTheme "system"}}checked{{end}}
+                        >
+                        <span>System</span>
+                      </label>
+                      <label class="topbar-shortcuts-theme-option">
+                        <input
+                          type="radio"
+                          name="theme"
+                          value="light" {{if eq .AppearanceTheme "light"}}checked{{end}}
+                        >
+                        <span>Light</span>
+                      </label>
+                      <label class="topbar-shortcuts-theme-option">
+                        <input
+                          type="radio"
+                          name="theme"
+                          value="dark" {{if eq .AppearanceTheme "dark"}}checked{{end}}
+                        >
+                        <span>Dark</span>
+                      </label>
+                    </div>
+                  </fieldset>
+                  <p class="topbar-shortcuts-theme-status" data-theme-status="true" aria-live="polite"></p>
+                </form>
+                <div class="topbar-shortcuts-grid">
+                  <div class="topbar-shortcuts-row">
+                    <span class="topbar-shortcuts-action">Security settings</span>
+                    <span class="topbar-shortcuts-keys">
+                      <a class="topbar-shortcuts-control" href="/auth/security">Manage</a>
+                    </span>
                   </div>
-                </fieldset>
-                <p class="topbar-shortcuts-theme-status" data-theme-status="true" aria-live="polite"></p>
-              </form>
-              <div class="topbar-shortcuts-grid">
-                <div class="topbar-shortcuts-row">
-                  <span class="topbar-shortcuts-action">Security settings</span>
-                  <span class="topbar-shortcuts-keys">
-                    <a class="topbar-shortcuts-control" href="/auth/security">Manage</a>
-                  </span>
+                  <div class="topbar-shortcuts-row topbar-shortcuts-row-session">
+                    <span class="topbar-shortcuts-action">Sign out</span>
+                    <span class="topbar-shortcuts-keys">
+                      <form class="topbar-shortcuts-inline-form" method="post" action="/auth/logout">
+                        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                        <button
+                          class="topbar-shortcuts-control topbar-shortcuts-control-button topbar-session-action"
+                          type="submit"
+                          data-menu-action="logout"
+                        >Logout</button>
+                      </form>
+                    </span>
+                  </div>
                 </div>
-                <div class="topbar-shortcuts-row">
-                  <span class="topbar-shortcuts-action">Sign out</span>
+              </section>
+            {{end}}
+            <section
+              class="topbar-shortcuts-section"
+              data-menu-section="feeds"
+              aria-labelledby="topbar-menu-feeds-title"
+            >
+              <h3
+                class="topbar-shortcuts-title topbar-shortcuts-title-secondary"
+                id="topbar-menu-feeds-title"
+              >Feed management</h3>
+              <div class="topbar-shortcuts-grid">
+                <div class="topbar-shortcuts-row topbar-shortcuts-row-subscribe">
+                  <label class="topbar-shortcuts-action" for="topbar-subscribe-url">Subscribe URL</label>
                   <span class="topbar-shortcuts-keys">
-                    <form class="topbar-shortcuts-inline-form" method="post" action="/auth/logout">
-                      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                    <form
+                      class="topbar-shortcuts-subscribe-form"
+                      data-subscribe-form="true"
+                      data-app-htmx="true"
+                      hx-post="/feeds"
+                      hx-target="#subscribe-message"
+                      hx-swap="outerHTML"
+                    >
+                      <input
+                        class="topbar-shortcuts-subscribe-input"
+                        id="topbar-subscribe-url"
+                        type="url"
+                        name="url"
+                        placeholder="https://example.com/rss"
+                        required
+                      >
                       <button class="topbar-shortcuts-control topbar-shortcuts-control-button" type="submit">
-                        Logout
+                        Subscribe
                       </button>
                     </form>
                   </span>
                 </div>
-              </div>
-            {{end}}
-            <div class="topbar-shortcuts-divider"></div>
-            <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Navigation</div>
-            <div class="topbar-shortcuts-grid">
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Move down in panel</span>
-                <span class="topbar-shortcuts-keys"><kbd>j</kbd><kbd>Down</kbd></span>
-              </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Move up in panel</span>
-                <span class="topbar-shortcuts-keys"><kbd>k</kbd><kbd>Up</kbd></span>
-              </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Move right / expand item</span>
-                <span class="topbar-shortcuts-keys"><kbd>l</kbd><kbd>Right</kbd></span>
-              </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Move left / collapse content</span>
-                <span class="topbar-shortcuts-keys"><kbd>h</kbd><kbd>Left</kbd></span>
-              </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Open article</span>
-                <span class="topbar-shortcuts-keys"><kbd>o</kbd><kbd>Enter</kbd></span>
-              </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Toggle read state</span>
-                <span class="topbar-shortcuts-keys"><kbd>r</kbd></span>
-              </div>
-            </div>
-            <div class="topbar-shortcuts-divider"></div>
-            <div class="topbar-shortcuts-title topbar-shortcuts-title-secondary">Subscriptions</div>
-            <div class="topbar-shortcuts-grid">
-              <div class="topbar-shortcuts-row topbar-shortcuts-row-subscribe">
-                <span class="topbar-shortcuts-action">Subscribe URL</span>
-                <span class="topbar-shortcuts-keys">
-                  <form
-                    class="topbar-shortcuts-subscribe-form"
-                    data-subscribe-form="true"
-                    data-app-htmx="true"
-                    hx-post="/feeds"
-                    hx-target="#subscribe-message"
-                    hx-swap="outerHTML"
-                  >
-                    <input
-                      class="topbar-shortcuts-subscribe-input"
-                      type="url"
-                      name="url"
-                      placeholder="https://example.com/rss"
-                      required
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Export feeds</span>
+                  <span class="topbar-shortcuts-keys">
+                    <a class="topbar-shortcuts-control" href="/opml/export">Export OPML</a>
+                  </span>
+                </div>
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Import feeds</span>
+                  <span class="topbar-shortcuts-keys">
+                    <form
+                      class="topbar-shortcuts-import-form"
+                      data-app-htmx="true"
+                      hx-post="/opml/import"
+                      hx-target="#subscribe-message"
+                      hx-swap="outerHTML"
+                      hx-encoding="multipart/form-data"
                     >
-                    <button class="topbar-shortcuts-control topbar-shortcuts-control-button" type="submit">
-                      Subscribe
-                    </button>
-                  </form>
-                </span>
+                      <button
+                        class="topbar-shortcuts-control topbar-shortcuts-control-button"
+                        type="button"
+                        data-import-button="true"
+                      >Import OPML</button>
+                      <input
+                        class="sr-only"
+                        type="file"
+                        name="file"
+                        accept=".opml,text/xml,application/xml"
+                        tabindex="-1"
+                        aria-hidden="true"
+                        data-import-file-input="true"
+                      >
+                    </form>
+                  </span>
+                </div>
               </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Export feeds</span>
-                <span class="topbar-shortcuts-keys">
-                  <a class="topbar-shortcuts-control" href="/opml/export">Export OPML</a>
-                </span>
+            </section>
+            <section
+              class="topbar-shortcuts-section"
+              data-menu-section="shortcuts"
+              aria-labelledby="topbar-menu-shortcuts-title"
+            >
+              <h3
+                class="topbar-shortcuts-title topbar-shortcuts-title-secondary"
+                id="topbar-menu-shortcuts-title"
+              >Keyboard shortcuts</h3>
+              <div class="topbar-shortcuts-grid">
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Move down in panel</span>
+                  <span class="topbar-shortcuts-keys"><kbd>j</kbd><kbd>Down</kbd></span>
+                </div>
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Move up in panel</span>
+                  <span class="topbar-shortcuts-keys"><kbd>k</kbd><kbd>Up</kbd></span>
+                </div>
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Move right / expand item</span>
+                  <span class="topbar-shortcuts-keys"><kbd>l</kbd><kbd>Right</kbd></span>
+                </div>
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Move left / collapse content</span>
+                  <span class="topbar-shortcuts-keys"><kbd>h</kbd><kbd>Left</kbd></span>
+                </div>
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Open article</span>
+                  <span class="topbar-shortcuts-keys"><kbd>o</kbd><kbd>Enter</kbd></span>
+                </div>
+                <div class="topbar-shortcuts-row">
+                  <span class="topbar-shortcuts-action">Toggle read state</span>
+                  <span class="topbar-shortcuts-keys"><kbd>r</kbd></span>
+                </div>
               </div>
-              <div class="topbar-shortcuts-row">
-                <span class="topbar-shortcuts-action">Import feeds</span>
-                <span class="topbar-shortcuts-keys">
-                  <form
-                    class="topbar-shortcuts-import-form"
-                    data-app-htmx="true"
-                    hx-post="/opml/import"
-                    hx-target="#subscribe-message"
-                    hx-swap="outerHTML"
-                    hx-encoding="multipart/form-data"
-                  >
-                    <button
-                      class="topbar-shortcuts-control topbar-shortcuts-control-button"
-                      type="button"
-                      data-import-button="true"
-                    >
-                      Import OPML
-                    </button>
-                    <input
-                      class="sr-only"
-                      type="file"
-                      name="file"
-                      accept=".opml,text/xml,application/xml"
-                      data-import-file-input="true"
-                    >
-                  </form>
-                </span>
-              </div>
-            </div>
+            </section>
           </section>
         </div>
         <div id="subscribe-message" class="message"></div>

@@ -9,7 +9,7 @@ export const isTopbarShortcutsOpen = () => {
   return Boolean(button && button.getAttribute("aria-expanded") === "true");
 };
 
-export const setTopbarShortcutsOpen = (isOpen) => {
+export const setTopbarShortcutsOpen = (isOpen, { restoreFocus = false } = {}) => {
   const button = getTopbarShortcutsButton();
   const panel = getTopbarShortcutsPanel();
   if (!button || !panel) {
@@ -18,6 +18,9 @@ export const setTopbarShortcutsOpen = (isOpen) => {
   button.setAttribute("aria-expanded", isOpen ? "true" : "false");
   button.setAttribute("aria-label", isOpen ? "Hide menu" : "Show menu");
   panel.hidden = !isOpen;
+  if (!isOpen && restoreFocus) {
+    button.focus({ preventScroll: true });
+  }
 };
 
 export const bindTopbarShortcuts = () => {

@@ -27,8 +27,11 @@ export const bindKeyboardShortcuts = ({
   };
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && topbar.isTopbarShortcutsOpen()) {
-      topbar.setTopbarShortcutsOpen(false);
+    if (topbar.isTopbarShortcutsOpen()) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        topbar.setTopbarShortcutsOpen(false, { restoreFocus: true });
+      }
       return;
     }
     if (

@@ -473,6 +473,28 @@ func TestBrowserSmokeReaderFlowsBreakpointTransitions(t *testing.T) {
 	)
 }
 
+func TestBrowserSmokeReaderFlowsMenuInteractions(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(1024, 360),
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#topbar-shortcuts-button", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for general menu interactions")
+	waitForJS(t, ctx, desktopLayoutExpression(), "compact desktop menu layout")
+	runFeedSelectionFlow(t, ctx, fixture)
+
+	runGeneralMenuKeyboardFlow(t, ctx)
+	runGeneralMenuOutsideClickFlow(t, ctx)
+}
+
 func TestBrowserSmokeReaderFlowsItemActionTypography(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
@@ -993,6 +1015,74 @@ func runFeedSelectionFlow(t *testing.T, ctx context.Context, fixture smokeFixtur
 		"secondary feed selection settled",
 	)
 	waitForJS(t, ctx, activeElementMatchesExpression(feedSelector), "secondary feed retains focus after swap")
+}
+
+func runGeneralMenuKeyboardFlow(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	runActions(
+		t,
+		ctx,
+		chromedp.Focus("#topbar-shortcuts-button", chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Enter),
+	)
+	waitForJS(t, ctx, generalMenuOpenExpression(), "general menu opens from keyboard")
+	waitForJS(t, ctx, generalMenuCompactExpression(), "general menu has compact scrolling")
+
+	runActions(t, ctx, chromedp.KeyEvent(kb.Tab))
+	waitForJS(t, ctx, activeElementMatchesExpression("#topbar-shortcuts-panel"), "focus enters general menu")
+	waitForJS(t, ctx, focusOutlineVisibleExpression("#topbar-shortcuts-panel"), "general menu focus outline")
+	runActions(
+		t,
+		ctx,
+		chromedp.Evaluate(`(() => {
+			const active = document.querySelector("#item-list .item-entry.is-active");
+			const panel = document.querySelector("#topbar-shortcuts-panel");
+			window.__menuReaderActiveID = active ? active.id : "";
+			panel.scrollTop = 0;
+			return window.__menuReaderActiveID !== "";
+		})()`, nil),
+		chromedp.KeyEvent(kb.ArrowDown),
+	)
+	waitForJS(t, ctx, generalMenuArrowScrollExpression(), "menu arrow scroll leaves reader selection unchanged")
+
+	runActions(t, ctx, chromedp.KeyEvent(kb.End))
+	waitForJS(t, ctx, generalMenuEndVisibleExpression(), "final shortcut remains reachable in compact menu")
+	runActions(t, ctx, chromedp.KeyEvent(kb.Escape))
+	waitForJS(t, ctx, generalMenuClosedExpression(), "Escape closes general menu")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression("#topbar-shortcuts-button"),
+		"Escape restores menu trigger focus",
+	)
+}
+
+func runGeneralMenuOutsideClickFlow(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	runActions(
+		t,
+		ctx,
+		chromedp.KeyEvent(kb.Enter),
+		chromedp.Evaluate(`(() => {
+			const button = document.createElement("button");
+			button.id = "menu-outside-target";
+			button.type = "button";
+			button.textContent = "Outside target";
+			document.querySelector("#main-content").prepend(button);
+			return true;
+		})()`, nil),
+	)
+	waitForJS(t, ctx, generalMenuOpenExpression(), "general menu reopens")
+	runActions(t, ctx, chromedp.Click("#menu-outside-target", chromedp.ByQuery))
+	waitForJS(t, ctx, generalMenuClosedExpression(), "outside click closes general menu")
+	waitForJS(
+		t,
+		ctx,
+		activeElementMatchesExpression("#menu-outside-target"),
+		"outside click focus is not stolen by menu trigger",
+	)
 }
 
 func runItemActionHierarchyFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
@@ -2001,6 +2091,54 @@ func elementVisibleExpression(selector string) string {
 		})()`,
 		selector,
 	)
+}
+
+func generalMenuOpenExpression() string {
+	return `(() => {
+		const button = document.querySelector("#topbar-shortcuts-button");
+		const panel = document.querySelector("#topbar-shortcuts-panel");
+		return !!button && !!panel && button.getAttribute("aria-expanded") === "true" &&
+			!panel.hidden && panel.getClientRects().length > 0;
+	})()`
+}
+
+func generalMenuClosedExpression() string {
+	return `(() => {
+		const button = document.querySelector("#topbar-shortcuts-button");
+		const panel = document.querySelector("#topbar-shortcuts-panel");
+		return !!button && !!panel && button.getAttribute("aria-expanded") === "false" &&
+			panel.hidden && panel.getClientRects().length === 0;
+	})()`
+}
+
+func generalMenuCompactExpression() string {
+	return `(() => {
+		const panel = document.querySelector("#topbar-shortcuts-panel");
+		if (!panel || panel.hidden) return false;
+		const rect = panel.getBoundingClientRect();
+		return getComputedStyle(panel).overflowY === "auto" && panel.scrollHeight > panel.clientHeight &&
+			rect.top >= 0 && rect.bottom <= innerHeight + 1;
+	})()`
+}
+
+func generalMenuArrowScrollExpression() string {
+	return `(() => {
+		const panel = document.querySelector("#topbar-shortcuts-panel");
+		const active = document.querySelector("#item-list .item-entry.is-active");
+		return !!panel && !!active && document.activeElement === panel && panel.scrollTop > 0 &&
+			active.id === window.__menuReaderActiveID;
+	})()`
+}
+
+func generalMenuEndVisibleExpression() string {
+	return `(() => {
+		const panel = document.querySelector("#topbar-shortcuts-panel");
+		const lastRow = panel && panel.querySelector('[data-menu-section="shortcuts"] .topbar-shortcuts-row:last-child');
+		if (!panel || !lastRow) return false;
+		const panelRect = panel.getBoundingClientRect();
+		const rowRect = lastRow.getBoundingClientRect();
+		return panel.scrollTop > 0 && rowRect.top >= panelRect.top && rowRect.bottom <= panelRect.bottom + 1;
+	})()`
 }
 
 func focusOutlineVisibleExpression(selector string) string {

@@ -31,6 +31,9 @@
   --icon-button-color: #3e4b5a;
   --icon-button-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
   --icon-button-shadow-hover: 0 10px 20px rgba(15, 23, 42, 0.14);
+  --session-action-color: #a12b24;
+  --session-action-bg: rgba(180, 35, 24, 0.08);
+  --session-action-border: rgba(180, 35, 24, 0.3);
   --text-secondary: #344050;
   --text-reading: #202833;
   --mobile-hero-start: rgba(255, 255, 255, 0.98);
@@ -100,6 +103,9 @@ html[data-theme="dark"] {
   --icon-button-color: #dce6ee;
   --icon-button-shadow: 0 10px 24px rgba(2, 6, 23, 0.22);
   --icon-button-shadow-hover: 0 14px 28px rgba(2, 6, 23, 0.32);
+  --session-action-color: #fda4af;
+  --session-action-bg: rgba(244, 63, 94, 0.12);
+  --session-action-border: rgba(251, 113, 133, 0.34);
   --text-secondary: #c4d2dc;
   --text-reading: #dce6ee;
   --mobile-hero-start: rgba(21, 35, 43, 0.96);
@@ -159,6 +165,9 @@ html[data-theme="dark"] {
     --icon-button-color: #dce6ee;
     --icon-button-shadow: 0 10px 24px rgba(2, 6, 23, 0.22);
     --icon-button-shadow-hover: 0 14px 28px rgba(2, 6, 23, 0.32);
+    --session-action-color: #fda4af;
+    --session-action-bg: rgba(244, 63, 94, 0.12);
+    --session-action-border: rgba(251, 113, 133, 0.34);
     --text-secondary: #c4d2dc;
     --text-reading: #dce6ee;
     --mobile-hero-start: rgba(21, 35, 43, 0.96);
@@ -354,6 +363,8 @@ body {
   max-width: min(520px, calc(100vw - 32px));
   max-height: min(75vh, 36rem);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid rgba(15, 118, 110, 0.24);
@@ -367,6 +378,11 @@ body {
   z-index: 20;
 }
 
+.topbar-shortcuts-panel:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: -4px;
+}
+
 .topbar-shortcuts-title {
   font-family: "Space Grotesk", "DM Sans", sans-serif;
   font-size: 13px;
@@ -374,7 +390,7 @@ body {
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 4px;
+  margin: 0 0 4px;
 }
 
 .topbar-shortcuts-subtitle {
@@ -386,6 +402,12 @@ body {
 .topbar-shortcuts-grid {
   display: grid;
   gap: 8px;
+}
+
+.topbar-shortcuts-section + .topbar-shortcuts-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-divider);
 }
 
 .topbar-shortcuts-divider {
@@ -431,7 +453,7 @@ body {
 }
 
 .topbar-shortcuts-title-secondary {
-  margin-bottom: 8px;
+  margin: 0 0 8px;
 }
 
 .topbar-shortcuts-import-form {
@@ -440,6 +462,12 @@ body {
 
 .topbar-shortcuts-inline-form {
   margin: 0;
+}
+
+.topbar-shortcuts-row-session {
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--session-action-border);
 }
 
 .topbar-shortcuts-theme-form {
@@ -593,6 +621,17 @@ body {
 
 .topbar-shortcuts-control:hover {
   background: rgba(15, 118, 110, 0.18);
+}
+
+.topbar-session-action {
+  border-color: var(--session-action-border);
+  background: var(--session-action-bg);
+  color: var(--session-action-color);
+}
+
+.topbar-session-action:hover {
+  border-color: var(--session-action-color);
+  background: var(--session-action-bg);
 }
 
 .topbar-shortcuts-control:focus-visible {

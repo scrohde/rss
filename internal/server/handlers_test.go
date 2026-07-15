@@ -311,6 +311,26 @@ func requireBodyIndex(t *testing.T, body, token, message string) int {
 	return index
 }
 
+func assertMenuSectionOrder(t *testing.T, body string, sections ...string) {
+	t.Helper()
+
+	previous := -1
+
+	for _, section := range sections {
+		index := requireBodyIndex(
+			t,
+			body,
+			fmt.Sprintf(`data-menu-section=%q`, section),
+			fmt.Sprintf("expected %s menu section", section),
+		)
+		if index <= previous {
+			t.Fatalf("expected %s menu section after the preceding section", section)
+		}
+
+		previous = index
+	}
+}
+
 func assertMobileTopBarOOBUpdate(t *testing.T, body string) {
 	t.Helper()
 
@@ -3944,16 +3964,27 @@ func TestIndexIncludesSubscriptionAndOPMLControls(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `hx-post="/feeds"`) {
-		t.Fatal("expected subscribe control")
+
+	requiredSnippets := []string{
+		`aria-labelledby="topbar-menu-title"`,
+		`id="topbar-menu-title">Menu</h2>`,
+		`for="topbar-subscribe-url"`,
+		`id="topbar-subscribe-url"`,
+		`hx-post="/feeds"`,
+		`href="/opml/export"`,
+		`hx-post="/opml/import"`,
+		`tabindex="-1"`,
+		`data-import-file-input="true"`,
+	}
+	for _, snippet := range requiredSnippets {
+		assertContains(t, body, snippet, "expected general feed-management menu control")
 	}
 
-	if !strings.Contains(body, `href="/opml/export"`) {
-		t.Fatal("expected OPML export control")
-	}
+	assertMenuSectionOrder(t, body, "feeds", "shortcuts")
+	assertNotContains(t, body, `data-menu-section="account"`, "expected no anonymous account menu section")
 
-	if !strings.Contains(body, `hx-post="/opml/import"`) {
-		t.Fatal("expected OPML import control")
+	if strings.Contains(body, `aria-label="Keyboard shortcuts"`) {
+		t.Fatal("expected the whole panel to use a general accessible name")
 	}
 }
 
