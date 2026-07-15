@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -2341,19 +2342,29 @@ func TestFeedItemsRenderNoPreviewCompactRowsWithPublishedMeta(t *testing.T) {
 	)
 }
 
-func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
+func TestFeedItemsRenderSemanticReadingActions(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
 
 	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Affordance Feed")
-	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
-		Title:           "Affordance Item",
-		Link:            "http://example.com/affordance-item",
-		GUID:            "affordance-item",
-		Description:     "<p>Summary</p>",
-		PublishedParsed: new(time.Now().Add(-time.Hour)),
-	}})
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{
+		{
+			Title:           "Affordance Item",
+			Link:            "http://example.com/affordance-item",
+			GUID:            "affordance-item",
+			Description:     "<p>Summary</p>",
+			PublishedParsed: new(time.Now().Add(-time.Hour)),
+		},
+		{
+			Title:           "Source Only Item",
+			Link:            "http://example.com/source-only-item",
+			GUID:            "source-only-item",
+			PublishedParsed: new(time.Now().Add(-2 * time.Hour)),
+		},
+	})
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, 2)
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, feedItemsPath(feedID), http.NoBody)
 	rec := httptest.NewRecorder()
@@ -2362,17 +2373,20 @@ func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
 	assertResponseCode(t, rec, msgFeedItemsStatus)
 
 	body := rec.Body.String()
+	readableItem := itemArticleHTML(t, body, items[0].ID)
+	sourceOnlyItem := itemArticleHTML(t, body, items[1].ID)
+	assertReadableItemActions(t, readableItem)
 	assertContains(
 		t,
-		body,
-		`<span class="item-title-open-indicator" aria-hidden="true"></span>`,
-		"expected item rows to label the title as the source-open target",
+		sourceOnlyItem,
+		`class="item-title item-source-primary"`,
+		"expected an item without reader content to keep its title as the primary source link",
 	)
-	assertContains(
+	assertNotContains(
 		t,
-		body,
-		`<span class="item-inline-open-hint">Read in app</span>`,
-		"expected content rows to render an in-app read hint",
+		sourceOnlyItem,
+		`item-read-in-app`,
+		"expected an item without reader content to omit the in-app reading control",
 	)
 	assertContains(
 		t,
@@ -2386,6 +2400,99 @@ func TestFeedItemsRenderSplitOpenAffordancesForReadableItems(t *testing.T) {
 		`<p>Select "Read in app" on any story with reader content to open it here.</p>`,
 		"expected empty reader panel to point at the in-app reader action",
 	)
+}
+
+func assertReadableItemActions(t *testing.T, body string) {
+	t.Helper()
+
+	expectations := []struct {
+		value   string
+		message string
+	}{
+		{`class="item-title item-read-in-app"`, "expected item title to be an in-app reading control"},
+		{`aria-label="Read Affordance Item in Pulse"`, "expected a useful in-app accessible name"},
+		{
+			`<span class="item-inline-open-hint" aria-hidden="true">Read in app</span>`,
+			"expected a visible primary reading label",
+		},
+		{`class="item-source-link"`, "expected a distinct source link"},
+		{`title="Open original article in a new tab"`, "expected source link external behavior text"},
+		{`target="_blank"`, "expected source link to open separately"},
+		{`rel="noopener"`, "expected source link new-tab safety"},
+	}
+
+	for _, expectation := range expectations {
+		assertContains(t, body, expectation.value, expectation.message)
+	}
+}
+
+func TestItemReadToggleRendersBothStates(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Read Toggle Feed")
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
+		Title:           "Read Toggle Item",
+		Link:            "http://example.com/read-toggle-item",
+		GUID:            "read-toggle-item",
+		Description:     "<p>Summary</p>",
+		PublishedParsed: new(time.Now().Add(-time.Hour)),
+	}})
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, expectedSingleItem)
+	itemID := items[firstItemIndex].ID
+
+	unreadRec := getRequest(app, feedItemsPath(feedID))
+	assertResponseCode(t, unreadRec, msgFeedItemsStatus)
+	unreadItem := itemArticleHTML(t, unreadRec.Body.String(), itemID)
+	assertItemReadToggleState(t, unreadItem, "unread", "Mark read")
+
+	form := url.Values{
+		"view":              {"compact"},
+		selectedItemIDParam: {fmt.Sprintf("item-%d", itemID)},
+	}
+	readRec := postFormRequest(app, fmt.Sprintf("/items/%d/toggle", itemID), form)
+	assertResponseCode(t, readRec, "toggle read status")
+	readItem := itemArticleHTML(t, readRec.Body.String(), itemID)
+	assertItemReadToggleState(t, readItem, "read", "Mark unread")
+}
+
+func assertItemReadToggleState(t *testing.T, body, state, action string) {
+	t.Helper()
+
+	assertContains(t, body, fmt.Sprintf(`class="item-read-toggle is-%s"`, state), "expected quiet toggle class")
+	assertContains(t, body, fmt.Sprintf("aria-label=%q", action), "expected read toggle accessible name")
+	assertContains(t, body, fmt.Sprintf("title=%q", action), "expected read toggle tooltip")
+	assertContains(t, body, fmt.Sprintf("data-read-state=%q", state), "expected explicit read state")
+	assertContains(t, body, `class="item-read-toggle-icon"`, "expected non-color state icon")
+	assertNotContains(t, body, `class="chip"`, "expected item toggle to avoid the prominent chip treatment")
+
+	if state == "read" {
+		assertContains(t, body, `class="item-read-toggle-check"`, "expected read state checkmark")
+	} else {
+		assertNotContains(t, body, `class="item-read-toggle-check"`, "expected unread state open ring")
+	}
+}
+
+func TestItemReadToggleStyles(t *testing.T) {
+	t.Parallel()
+
+	stylesheet, err := os.ReadFile("../../static/styles.css")
+	requireNoErr(t, err, "read styles.css: %v")
+
+	css := string(stylesheet)
+	for _, selector := range []string{
+		".item-read-toggle {",
+		".item-read-toggle:hover {",
+		".item-read-toggle:focus-visible {",
+		".item-read-toggle.is-read {",
+	} {
+		assertContains(t, css, selector, "expected read toggle CSS regression selector")
+	}
+
+	assertContains(t, css, "width: 32px;", "expected a sufficiently large read toggle target")
+	assertContains(t, css, "outline: 2px solid var(--accent);", "expected theme-aware keyboard focus treatment")
+	assertContains(t, css, "background: var(--icon-button-bg-hover);", "expected theme-aware hover treatment")
 }
 
 func TestToggleReadAndCleanup(t *testing.T) {

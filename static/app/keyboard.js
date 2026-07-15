@@ -120,9 +120,12 @@ export const bindKeyboardShortcuts = ({
         break;
       case "o":
         prevent();
-        content.openActiveLink();
+        content.openActiveSource();
         break;
       case "enter": {
+        if (event.target && event.target.closest && event.target.closest("a, button")) {
+          break;
+        }
         if (
           desktopPanelNavigationEnabled &&
           panel === "content" &&
@@ -143,7 +146,7 @@ export const bindKeyboardShortcuts = ({
           break;
         }
         prevent();
-        content.openActiveLink();
+        content.openActivePrimary();
         break;
       }
       case "r":

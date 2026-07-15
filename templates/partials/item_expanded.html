@@ -17,14 +17,7 @@
     >
       <div class="item-title-row">
         <div class="item-title-wrap">
-          <a class="item-title" href="{{.Link}}" target="_blank" rel="noopener">
-            <span class="item-title-text">{{.Title}}</span>
-            <span class="item-title-open-indicator" aria-hidden="true"></span>
-            <span class="sr-only">Open original article in a new tab.</span>
-          </a>
-          {{if .HasReaderContent}}
-            <span class="item-inline-open-hint">Read in app</span>
-          {{end}}
+          {{template "item_title_actions" .}}
         </div>
         <span class="item-time-badge" title="{{.PublishedDisplay}}">
           {{.PublishedCompact}}
@@ -32,16 +25,7 @@
         </span>
       </div>
       <div class="item-actions">
-        <button
-          class="chip"
-          data-app-htmx="true"
-          hx-post="/items/{{.ID}}/toggle"
-          hx-vals='{"view":"compact"}'
-          hx-target="#item-{{.ID}}"
-          hx-swap="outerHTML"
-        >
-          {{if .IsRead}}Mark unread{{else}}Mark read{{end}}
-        </button>
+        {{template "item_read_toggle" .}}
       </div>
     </div>
     <div class="item-meta">

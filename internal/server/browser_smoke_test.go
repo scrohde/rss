@@ -19,6 +19,7 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/kb"
 	"github.com/mmcdole/gofeed"
 
 	"rss/internal/store"
@@ -233,6 +234,7 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
 
 	runFeedSelectionFlow(t, ctx, fixture)
+	runItemActionHierarchyFlow(t, ctx, fixture)
 	runSummaryOnlyDesktopReaderFlow(t, ctx, fixture)
 	runMoreTogglePersistenceFlow(t, ctx, fixture)
 	runFeedToItemsOutlineEntryFlow(t, ctx, fixture)
@@ -242,6 +244,33 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	runKeyboardFlow(t, ctx, fixture)
 	runContentPanelMarkReadButtonFlow(t, ctx, fixture)
 	runFeedBoundaryKeyboardFlow(t, ctx, fixture)
+}
+
+func TestBrowserSmokeReaderFlowsItemActionTypography(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+		chromedp.WaitVisible("#main-content", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready")
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout")
+	runFeedSelectionFlow(t, ctx, fixture)
+
+	readableRow := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
+	waitForJS(
+		t,
+		ctx,
+		itemActionHierarchyExpression(readableRow+" .item-read-in-app", readableRow+" .item-source-link"),
+		"primary reader action typography hierarchy",
+	)
 }
 
 func TestBrowserSmokeInactiveFeedContentBoundary(t *testing.T) {
@@ -739,6 +768,119 @@ func runFeedSelectionFlow(t *testing.T, ctx context.Context, fixture smokeFixtur
 	waitForJS(t, ctx, activeElementMatchesExpression(feedSelector), "secondary feed retains focus after swap")
 }
 
+func runItemActionHierarchyFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
+	t.Helper()
+
+	readableRow := fmt.Sprintf("#item-%d", fixture.secondaryFirstItemID)
+	readButton := readableRow + " .item-read-in-app"
+	sourceLink := readableRow + " .item-source-link"
+	readToggle := readableRow + " .item-read-toggle"
+	noReaderRow := fmt.Sprintf("#item-%d", fixture.secondaryNoReaderID)
+	noReaderLink := noReaderRow + " .item-source-primary"
+
+	waitForJS(t, ctx, elementPresentExpression(readButton), "semantic in-app reading button")
+	waitForJS(t, ctx, elementPresentExpression(sourceLink), "separate external source link")
+	waitForJS(t, ctx, elementPresentExpression(noReaderLink), "no-reader primary source link")
+	waitForJS(
+		t,
+		ctx,
+		itemReadToggleStateExpression(readToggle, "unread", "Mark read", false),
+		"unread item toggle state",
+	)
+	for _, theme := range []string{"light", "dark", "system"} {
+		waitForJS(
+			t,
+			ctx,
+			itemReadToggleThemeExpression(readToggle, theme),
+			fmt.Sprintf("read toggle styling in %s theme", theme),
+		)
+	}
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(noReaderRow+" .item-read-in-app"),
+		"no-reader item omits in-app action",
+	)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.Focus(readButton, chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Tab),
+	)
+	waitForJS(t, ctx, activeElementMatchesExpression(sourceLink), "source link follows reader button in focus order")
+	waitForJS(t, ctx, focusOutlineVisibleExpression(sourceLink), "source link keyboard focus treatment")
+
+	runActions(t, ctx, chromedp.Focus(readButton, chromedp.ByQuery))
+	waitForJS(t, ctx, focusOutlineVisibleExpression(readButton), "reader button keyboard focus treatment")
+	runActions(t, ctx, chromedp.KeyEvent(kb.Tab), chromedp.KeyEvent(kb.Tab))
+	waitForJS(t, ctx, activeElementMatchesExpression(readToggle), "read-state action follows item open actions")
+
+	runActions(t, ctx, chromedp.KeyEvent(kb.Enter))
+	waitForJS(t, ctx, hasClassExpression(readableRow, "is-read"), "read-state action activated by keyboard")
+	waitForJS(
+		t,
+		ctx,
+		itemReadToggleStateExpression(readToggle, "read", "Mark unread", true),
+		"read item toggle state",
+	)
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "read-state action does not open reader")
+	waitForJS(t, ctx, htmxElementReadyExpression(readToggle), "read-state action ready after keyboard swap")
+	runActions(
+		t,
+		ctx,
+		chromedp.Focus(readToggle, chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Enter),
+	)
+	waitForJS(t, ctx, missingClassExpression(readableRow, "is-read"), "read-state action restored by keyboard")
+	waitForJS(
+		t,
+		ctx,
+		itemReadToggleStateExpression(readToggle, "unread", "Mark read", false),
+		"unread item toggle state restored",
+	)
+
+	runActions(
+		t,
+		ctx,
+		chromedp.Focus(readButton, chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Enter),
+	)
+	waitForJS(t, ctx, hasClassExpression(readableRow, "is-expanded"), "reader button opens item by keyboard")
+	waitForJS(t, ctx, contentPanelItemExpression(fixture.secondaryFirstItemID), "reader button opens content panel")
+
+	requestHTMX(
+		t,
+		ctx,
+		"GET",
+		fmt.Sprintf("/items/%d/compact", fixture.secondaryFirstItemID),
+		readableRow,
+		fmt.Sprintf("item-%d", fixture.secondaryFirstItemID),
+	)
+	waitForJS(t, ctx, missingClassExpression(readableRow, "is-expanded"), "reader action test row collapsed")
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "reader action test panel closed")
+
+	armSourceLinkCapture(t, ctx)
+	runActions(
+		t,
+		ctx,
+		chromedp.Focus(sourceLink, chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Enter),
+	)
+	waitForJS(t, ctx, sourceLinkCapturedExpression(sourceLink), "external source link keyboard activation")
+	waitForJS(t, ctx, missingClassExpression(readableRow, "is-expanded"), "source link does not open reader")
+
+	armSourceLinkCapture(t, ctx)
+	runActions(
+		t,
+		ctx,
+		chromedp.Focus(noReaderLink, chromedp.ByQuery),
+		chromedp.KeyEvent(kb.Enter),
+	)
+	waitForJS(t, ctx, sourceLinkCapturedExpression(noReaderLink), "no-reader primary link keyboard activation")
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "no-reader link does not open reader")
+}
+
 func runMoreTogglePersistenceFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	t.Helper()
 
@@ -1210,6 +1352,18 @@ func runContentToItemsOutlineEntryFlow(t *testing.T, ctx context.Context, fixtur
 	waitForJS(
 		t,
 		ctx,
+		hasClassExpression(firstRowSelector, "is-expanded"),
+		"title opens first row before content entry",
+	)
+	waitForJS(
+		t,
+		ctx,
+		hasClassExpression("#content-panel", "is-open"),
+		"title opens content panel before content entry",
+	)
+	waitForJS(
+		t,
+		ctx,
 		missingClassExpression("#item-list", "is-keyboard-nav"),
 		"keyboard nav marker absent before items-to-content step",
 	)
@@ -1248,13 +1402,17 @@ func runToggleReadFlow(t *testing.T, ctx context.Context, fixture smokeFixture) 
 	t.Helper()
 
 	rowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
-	toggleSelector := fmt.Sprintf(`#item-%d button[hx-post*="/toggle"]`, fixture.secondaryFirstItemID)
+	toggleSelector := fmt.Sprintf(`#item-%d .item-read-toggle`, fixture.secondaryFirstItemID)
 
+	waitForJS(t, ctx, htmxElementReadyExpression(toggleSelector), "mouse read toggle ready")
 	runActions(t, ctx, chromedp.Click(toggleSelector, chromedp.ByQuery))
 	waitForJS(t, ctx, hasClassExpression(rowSelector, "is-read"), "row marked read")
+	waitForJS(t, ctx, htmxElementReadyExpression(toggleSelector), "mouse unread toggle ready")
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "mouse read toggle keeps reader closed")
 
 	runActions(t, ctx, chromedp.Click(toggleSelector, chromedp.ByQuery))
 	waitForJS(t, ctx, missingClassExpression(rowSelector, "is-read"), "row marked unread")
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "mouse unread toggle keeps reader closed")
 }
 
 func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
@@ -1262,7 +1420,7 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 
 	firstRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 	secondRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondarySecondItemID)
-	firstRowToggleSelector := fmt.Sprintf(`#item-%d button[hx-post*="/toggle"]`, fixture.secondaryFirstItemID)
+	firstRowToggleSelector := fmt.Sprintf(`#item-%d .item-read-toggle`, fixture.secondaryFirstItemID)
 
 	runActions(
 		t,
@@ -1281,6 +1439,7 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	pressKey(t, ctx, "k")
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active after up")
 
+	waitForJS(t, ctx, htmxElementReadyExpression(firstRowToggleSelector), "pointer read toggle ready")
 	runActions(t, ctx, chromedp.Click(firstRowToggleSelector, chromedp.ByQuery))
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-read"), "row marked read after pointer interaction")
 	waitForJS(
@@ -1587,6 +1746,99 @@ func elementVisibleExpression(selector string) string {
 		`(() => {
 			const el = document.querySelector(%q);
 			return !!el && el.getClientRects().length > 0;
+		})()`,
+		selector,
+	)
+}
+
+func focusOutlineVisibleExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const el = document.querySelector(%q);
+			if (!el || document.activeElement !== el) return false;
+			const style = getComputedStyle(el);
+			return style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2;
+		})()`,
+		selector,
+	)
+}
+
+func itemActionHierarchyExpression(primarySelector, secondarySelector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const primary = document.querySelector(%q);
+			const secondary = document.querySelector(%q);
+			if (!primary || !secondary) return false;
+			const primaryStyle = getComputedStyle(primary);
+			const secondaryStyle = getComputedStyle(secondary);
+			return parseInt(primaryStyle.fontWeight, 10) >= 600 &&
+				parseFloat(primaryStyle.fontSize) > parseFloat(secondaryStyle.fontSize);
+		})()`,
+		primarySelector,
+		secondarySelector,
+	)
+}
+
+func itemReadToggleStateExpression(selector, state, action string, checked bool) string {
+	return fmt.Sprintf(
+		`(() => {
+			const button = document.querySelector(%q);
+			if (!button) return false;
+			const hasCheck = !!button.querySelector(".item-read-toggle-check");
+			return button.dataset.readState === %q &&
+				button.getAttribute("aria-label") === %q &&
+				button.title === %q && hasCheck === %t;
+		})()`,
+		selector,
+		state,
+		action,
+		action,
+		checked,
+	)
+}
+
+func itemReadToggleThemeExpression(selector, theme string) string {
+	return fmt.Sprintf(
+		`(() => {
+			document.documentElement.setAttribute("data-theme", %q);
+			const button = document.querySelector(%q);
+			if (!button) return false;
+			const rect = button.getBoundingClientRect();
+			const style = getComputedStyle(button);
+			return rect.width >= 32 && rect.height >= 32 &&
+				style.display.endsWith("flex") && style.borderStyle === "solid" &&
+				parseFloat(style.borderWidth) >= 1 && style.color !== "rgba(0, 0, 0, 0)";
+		})()`,
+		theme,
+		selector,
+	)
+}
+
+func armSourceLinkCapture(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	runActions(t, ctx, chromedp.Evaluate(`(() => {
+		window.__pulseCapturedSourceHref = "";
+		if (window.__pulseSourceCaptureBound) return true;
+		window.__pulseSourceCaptureBound = true;
+		document.addEventListener("click", (event) => {
+			const target = event.target;
+			const link = target && target.closest
+				? target.closest("a[data-item-source-link='true']")
+				: null;
+			if (!link) return;
+			event.preventDefault();
+			window.__pulseCapturedSourceHref = link.href;
+		}, true);
+		return true;
+	})()`, nil))
+}
+
+func sourceLinkCapturedExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const link = document.querySelector(%q);
+			return !!link && window.__pulseCapturedSourceHref === link.href;
 		})()`,
 		selector,
 	)

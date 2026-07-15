@@ -376,15 +376,28 @@ export const isPendingReadSwap = (event, pending) => {
   return Boolean(elt && elt.id === pending.sourceId);
 };
 
-export const openActiveLink = () => {
+export const openActiveSource = () => {
   const current = ensureActive();
   if (!current) {
-    return;
+    return false;
   }
-  const link = current.querySelector("a.item-title");
+  const link = current.querySelector("a[data-item-source-link='true']");
   if (link && link.href) {
     window.open(link.href, "_blank", "noopener");
+    return true;
   }
+  return false;
+};
+
+export const openActivePrimary = () => {
+  const current = ensureActive();
+  if (!current) {
+    return false;
+  }
+  if (itemHasContent(current)) {
+    return openRowInReadingModal(current, { focusPanel: "content" });
+  }
+  return openActiveSource();
 };
 
 export const markContentPanelArticleReadAndAdvance = () => {
@@ -448,7 +461,7 @@ export const toggleRead = () => {
     }
   }
 
-  const button = current.querySelector('button[hx-post*="/toggle"]');
+  const button = current.querySelector("button.item-read-toggle");
   if (button) {
     button.click();
   }

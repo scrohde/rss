@@ -1,0 +1,71 @@
+{{define "item_title_actions"}}
+  {{if .HasReaderContent}}
+    <button
+      class="item-title item-read-in-app"
+      type="button"
+      aria-label="Read {{.Title}} in Pulse"
+      data-app-htmx="true"
+      hx-get="/items/{{.ID}}"
+      hx-vals='{"selected_item_id":"item-{{.ID}}"}'
+      hx-target="#item-{{.ID}}"
+      hx-swap="outerHTML"
+    >
+      <span class="item-title-text">{{.Title}}</span>
+      <span class="item-inline-open-hint" aria-hidden="true">Read in app</span>
+    </button>
+    <a
+      class="item-source-link"
+      data-item-source-link="true"
+      href="{{.Link}}"
+      target="_blank"
+      rel="noopener"
+      title="Open original article in a new tab"
+    >
+      <span>Open source</span>
+      <span class="item-title-open-indicator" aria-hidden="true"></span>
+      <span class="sr-only"> in a new tab</span>
+    </a>
+  {{else}}
+    <a
+      class="item-title item-source-primary"
+      data-item-source-link="true"
+      href="{{.Link}}"
+      target="_blank"
+      rel="noopener"
+    >
+      <span class="item-title-text">{{.Title}}</span>
+      <span class="item-title-open-indicator" aria-hidden="true"></span>
+      <span class="sr-only">Open original article in a new tab.</span>
+    </a>
+  {{end}}
+{{end}}
+
+{{define "item_read_toggle"}}
+  <button
+    class="item-read-toggle {{if .IsRead}}is-read{{else}}is-unread{{end}}"
+    type="button"
+    aria-label="{{if .IsRead}}Mark unread{{else}}Mark read{{end}}"
+    title="{{if .IsRead}}Mark unread{{else}}Mark read{{end}}"
+    data-read-state="{{if .IsRead}}read{{else}}unread{{end}}"
+    data-app-htmx="true"
+    hx-post="/items/{{.ID}}/toggle"
+    hx-vals='{"view":"compact"}'
+    hx-target="#item-{{.ID}}"
+    hx-swap="outerHTML"
+  >
+    <svg class="item-read-toggle-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.75"></circle>
+      {{if .IsRead}}
+        <path
+          class="item-read-toggle-check"
+          d="M8.5 12.25L11 14.75L15.75 9.75"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ></path>
+      {{end}}
+    </svg>
+    <span class="sr-only">{{if .IsRead}}Mark unread{{else}}Mark read{{end}}</span>
+  </button>
+{{end}}
