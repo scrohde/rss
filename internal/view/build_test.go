@@ -207,3 +207,65 @@ func TestBuildItemViewCompactPreviewSanitizesAndTruncatesSummaryHTML(t *testing.
 		t.Fatalf("expected truncated CompactPreview to end with ellipsis, got %q", item.CompactPreview)
 	}
 }
+
+func TestBuildFeedContinuationUsesSavedOrderAndSkipsCaughtUpFeeds(t *testing.T) {
+	t.Parallel()
+
+	feeds := []view.FeedView{
+		continuationTestFeed(11, "Current", 1),
+		continuationTestFeed(12, "Caught up", 0),
+		continuationTestFeed(13, "Next unread", 2),
+		continuationTestFeed(14, "Later unread", 3),
+	}
+
+	continuation := view.BuildFeedContinuation(11, feeds)
+	if !continuation.HasNext {
+		t.Fatal("expected a next unread feed")
+	}
+
+	if continuation.NextFeed.ID != 13 {
+		t.Fatalf("expected feed 13, got %d", continuation.NextFeed.ID)
+	}
+}
+
+func TestBuildFeedContinuationDoesNotWrap(t *testing.T) {
+	t.Parallel()
+
+	feeds := []view.FeedView{
+		continuationTestFeed(21, "Earlier unread", 1),
+		continuationTestFeed(22, "Current", 1),
+		continuationTestFeed(23, "Later caught up", 0),
+	}
+
+	continuation := view.BuildFeedContinuation(22, feeds)
+	if continuation.HasNext {
+		t.Fatalf("expected no next feed, got %d", continuation.NextFeed.ID)
+	}
+}
+
+func TestBuildFeedContinuationRequiresCurrentFeed(t *testing.T) {
+	t.Parallel()
+
+	feeds := []view.FeedView{continuationTestFeed(31, "Unread", 1)}
+
+	continuation := view.BuildFeedContinuation(999, feeds)
+	if continuation.HasNext {
+		t.Fatalf("expected no next feed for a missing current feed, got %d", continuation.NextFeed.ID)
+	}
+}
+
+func continuationTestFeed(id int64, title string, unreadCount int) view.FeedView {
+	return view.BuildFeedView(
+		id,
+		int(id),
+		title,
+		title,
+		"",
+		unreadCount,
+		unreadCount,
+		view.FeedStatus{
+			LastChecked: sql.NullTime{Time: time.Time{}, Valid: false},
+			LastError:   sql.NullString{String: "", Valid: false},
+		},
+	)
+}

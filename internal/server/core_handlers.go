@@ -79,7 +79,7 @@ func (a *App) renderDesktopReader(w http.ResponseWriter, r *http.Request, feeds 
 	if selectedFeedID > 0 {
 		var ok bool
 
-		itemList, ok = a.itemListOrError(w, r, selectedFeedID)
+		itemList, ok = a.itemListOrError(w, r, selectedFeedID, feeds)
 		if !ok {
 			return
 		}
@@ -87,6 +87,7 @@ func (a *App) renderDesktopReader(w http.ResponseWriter, r *http.Request, feeds 
 
 	data := itemListResponseData{
 		ItemList:          itemList,
+		Continuation:      view.BuildFeedContinuation(selectedFeedID, feeds),
 		Feeds:             feeds,
 		FeedPulseStatuses: a.pulseStatusViews(),
 		SelectedFeedID:    selectedFeedID,
@@ -98,21 +99,47 @@ func (a *App) renderDesktopReader(w http.ResponseWriter, r *http.Request, feeds 
 }
 
 func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
-	itemList, ok := a.itemListOrError(w, r, feedID)
+	feeds, ok := a.listFeedsOrError(w, r)
 	if !ok {
 		return
 	}
 
-	feeds, ok := a.listFeedsOrError(w, r)
+	a.renderItemListResponseWithFeeds(w, r, feedID, feeds)
+}
+
+func (a *App) renderItemListResponseWithFeeds(
+	w http.ResponseWriter,
+	r *http.Request,
+	feedID int64,
+	feeds []view.FeedView,
+) {
+	itemList, ok := a.itemListOrError(w, r, feedID, feeds)
 	if !ok {
 		return
 	}
 
 	data := itemListResponseData{
 		ItemList:          itemList,
+		Continuation:      feedContinuationOOB(feedID, feeds),
 		Feeds:             feeds,
 		FeedPulseStatuses: a.pulseStatusViews(),
 		SelectedFeedID:    feedID,
+		FeedEditMode:      feedEditModeEnabled(r),
+	}
+	a.renderTemplate(w, "item_list_response", data)
+}
+
+func (a *App) renderEmptyItemListResponseWithFeeds(
+	w http.ResponseWriter,
+	r *http.Request,
+	feeds []view.FeedView,
+) {
+	data := itemListResponseData{
+		ItemList:          nil,
+		Continuation:      view.BuildFeedContinuation(0, nil),
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    0,
 		FeedEditMode:      feedEditModeEnabled(r),
 	}
 	a.renderTemplate(w, "item_list_response", data)

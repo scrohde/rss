@@ -154,6 +154,7 @@ func (a *App) buildSubscribeResponseData(
 	}
 
 	itemList = a.attachMarkAllReadUndo(itemList)
+	itemList = attachFeedContinuation(itemList, feeds)
 
 	return subscribeResponseData{
 		Message:           "",
@@ -290,6 +291,7 @@ func (a *App) renderFeedEditSaveResponse(
 	var data itemListResponseData
 
 	data.ItemList = selection.itemList
+	data.Continuation = feedContinuationOOB(selection.selectedFeedID, feeds)
 	data.Feeds = feeds
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = selection.selectedFeedID
@@ -433,7 +435,9 @@ func (a *App) feedEditSelection(
 		return 0, nil, fmt.Errorf("load item list for feed %d: %w", nextFeedID, err)
 	}
 
-	return nextFeedID, a.attachMarkAllReadUndo(itemList), nil
+	itemList = a.attachMarkAllReadUndo(itemList)
+
+	return nextFeedID, attachFeedContinuation(itemList, feeds), nil
 }
 
 func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +450,63 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 
 	a.clearMarkAllReadUndoExcept(feedID)
 	a.renderItemListResponse(w, r, feedID)
+}
+
+func (a *App) handleContinueFeed(w http.ResponseWriter, r *http.Request) {
+	currentFeedID, ok := parsePathInt64(r, "feedID")
+	if !ok {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	feeds, ok := a.listFeedsOrError(w, r)
+	if !ok {
+		return
+	}
+
+	targetFeedID := continueTargetFeedID(currentFeedID, feeds)
+
+	if targetFeedID == 0 {
+		a.renderEmptyItemListResponseWithFeeds(w, r, feeds)
+
+		return
+	}
+
+	a.clearMarkAllReadUndoExcept(targetFeedID)
+	a.renderItemListResponseWithFeeds(w, r, targetFeedID, feeds)
+}
+
+func continueTargetFeedID(currentFeedID int64, feeds []view.FeedView) int64 {
+	continuation := view.BuildFeedContinuation(currentFeedID, feeds)
+	if continuation.HasNext {
+		return continuation.NextFeed.ID
+	}
+
+	if normalizeSelectedFeedID(currentFeedID, feeds) != 0 {
+		return currentFeedID
+	}
+
+	firstUnreadID := firstUnreadFeedID(feeds)
+	if firstUnreadID != 0 {
+		return firstUnreadID
+	}
+
+	if len(feeds) > 0 {
+		return feeds[0].ID
+	}
+
+	return 0
+}
+
+func firstUnreadFeedID(feeds []view.FeedView) int64 {
+	for _, feedView := range feeds {
+		if feedView.UnreadCount > 0 {
+			return feedView.ID
+		}
+	}
+
+	return 0
 }
 
 func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
@@ -487,6 +548,7 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 	var data pollResponseData
 
 	data.Banner = view.NewItemsData{FeedID: feedID, Count: count, SwapOOB: false}
+	data.Continuation = feedContinuationOOB(feedID, feeds)
 	data.Feeds = feeds
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.RefreshDisplay = refreshDisplay
@@ -639,6 +701,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 		Item:              item,
 		Feeds:             feeds,
 		FeedPulseStatuses: a.pulseStatusViews(),
+		Continuation:      feedContinuationOOB(feedID, feeds),
 		SelectedFeedID:    feedID,
 		View:              currentView,
 		FeedEditMode:      feedEditModeEnabled(r),
@@ -822,16 +885,19 @@ func (a *App) renderPulseStatusResponseWithFeeds(
 	running bool,
 	initial bool,
 ) {
+	selectedFeedID := parseSelectedFeedID(r)
 	data := pulseStatusResponseData{
 		Message:           message,
 		MessageClass:      className,
 		Feeds:             feeds,
 		FeedPulseStatuses: a.pulseStatusViews(),
-		SelectedFeedID:    parseSelectedFeedID(r),
+		Continuation:      feedContinuationOOB(selectedFeedID, feeds),
+		SelectedFeedID:    selectedFeedID,
 		FeedEditMode:      feedEditModeEnabled(r),
 		Running:           running,
 		Initial:           initial,
 	}
+
 	a.renderTemplate(w, "pulse_status_response", data)
 }
 
@@ -943,10 +1009,12 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 		}
 
 		itemList = a.attachMarkAllReadUndo(itemList)
+		itemList = attachFeedContinuation(itemList, feeds)
 	}
 
 	data := itemListResponseData{
 		ItemList:          itemList,
+		Continuation:      feedContinuationOOB(selectedFeedID, feeds),
 		Feeds:             feeds,
 		FeedPulseStatuses: a.pulseStatusViews(),
 		SelectedFeedID:    selectedFeedID,

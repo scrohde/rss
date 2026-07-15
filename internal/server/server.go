@@ -134,6 +134,7 @@ func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /feeds/{feedID}/delete", a.handleDeleteFeed)
 	mux.HandleFunc("POST /feeds/{feedID}/refresh", a.handleRefreshFeed)
 	mux.HandleFunc("GET /feeds/{feedID}/items", a.handleFeedItems)
+	mux.HandleFunc("GET /feeds/{feedID}/items/continue", a.handleContinueFeed)
 	mux.HandleFunc("GET /feeds/{feedID}/items/new", a.handleFeedItemsNew)
 	mux.HandleFunc("GET /feeds/{feedID}/items/poll", a.handleFeedItemsPoll)
 	mux.HandleFunc("POST /feeds/{feedID}/items/read", a.handleMarkAllRead)

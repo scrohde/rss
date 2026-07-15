@@ -9,6 +9,9 @@
       {{template "feed_list" .}}
     </div>
   {{end}}
+  {{if gt .SelectedFeedID 0}}
+    {{template "feed_continuation" .Continuation}}
+  {{end}}
   <div
     id="pulse-status-poller"
     {{if .Initial}}hx-swap-oob="outerHTML"{{end}}
@@ -21,6 +24,7 @@
         hx-trigger="every 800ms"
         hx-target="#pulse-status-poller"
         hx-swap="outerHTML"
+        hx-include="#selected-feed-id"
       ></div>
     {{end}}
   </div>

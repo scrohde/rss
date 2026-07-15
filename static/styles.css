@@ -5,6 +5,7 @@
   --surface-2: #f0ebe0;
   --sidebar: #f7f3eb;
   --accent: #0f766e;
+  --accent-contrast: #ffffff;
   --accent-2: #1f2937;
   --text: #1a1c1d;
   --muted: #6b7280;
@@ -77,6 +78,7 @@ html[data-theme="dark"] {
   --surface-2: #17262f;
   --sidebar: #0d181f;
   --accent: #4fd1b5;
+  --accent-contrast: #071713;
   --accent-2: #ebf1f5;
   --text: #edf3f7;
   --muted: #9fb1bd;
@@ -139,6 +141,7 @@ html[data-theme="dark"] {
     --surface-2: #17262f;
     --sidebar: #0d181f;
     --accent: #4fd1b5;
+    --accent-contrast: #071713;
     --accent-2: #ebf1f5;
     --text: #edf3f7;
     --muted: #9fb1bd;
@@ -1411,6 +1414,56 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 
 .item-list:focus {
   outline: none;
+}
+
+.feed-continuation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 20px 8px 4px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.feed-continuation-label,
+.feed-continuation-copy {
+  margin: 0;
+}
+
+.feed-continuation-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.feed-continuation-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.feed-continuation-button {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.feed-continuation-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(15, 118, 110, 0.18);
+}
+
+.feed-continuation-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
 }
 
 .new-items-banner {

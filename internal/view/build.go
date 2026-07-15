@@ -58,6 +58,34 @@ func BuildFeedView(
 	}
 }
 
+// BuildFeedContinuation finds the next feed with unread items after the current feed.
+// The input order is the saved feed order returned by the store.
+func BuildFeedContinuation(currentFeedID int64, feeds []FeedView) FeedContinuationData {
+	var continuation FeedContinuationData
+
+	continuation.CurrentFeedID = currentFeedID
+	foundCurrent := false
+
+	for _, feedView := range feeds {
+		if !foundCurrent {
+			foundCurrent = feedView.ID == currentFeedID
+
+			continue
+		}
+
+		if feedView.UnreadCount <= 0 {
+			continue
+		}
+
+		continuation.NextFeed = feedView
+		continuation.HasNext = true
+
+		return continuation
+	}
+
+	return continuation
+}
+
 // BuildItemView builds an ItemView from item row values.
 func BuildItemView(
 	id int64,

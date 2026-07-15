@@ -1,0 +1,25 @@
+{{define "feed_continuation"}}
+  <footer
+    id="feed-continuation"
+    class="feed-continuation"
+    {{if .SwapOOB}}hx-swap-oob="outerHTML"{{end}}
+  >
+    {{if .HasNext}}
+      <p class="feed-continuation-label">Next unread feed</p>
+      <button
+        class="feed-continuation-button"
+        type="button"
+        data-feed-continuation
+        data-app-htmx="true"
+        hx-get="/feeds/{{.CurrentFeedID}}/items/continue"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+      >
+        Continue to {{.NextFeed.Title}}
+      </button>
+    {{else}}
+      <p class="feed-continuation-label" data-feed-continuation-end>End of reading order</p>
+      <p class="feed-continuation-copy">No later feeds have unread items.</p>
+    {{end}}
+  </footer>
+{{end}}

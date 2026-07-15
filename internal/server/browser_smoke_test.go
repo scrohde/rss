@@ -246,6 +246,63 @@ func TestBrowserSmokeReaderFlows(t *testing.T) {
 	runFeedBoundaryKeyboardFlow(t, ctx, fixture)
 }
 
+func TestBrowserSmokeReaderFlowsContinuation(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	primaryFeedSelector := fmt.Sprintf(
+		`#feed-list .feed-link[data-feed-id="%d"]`,
+		fixture.primaryFeedID,
+	)
+	primaryListSelector := fmt.Sprintf(
+		`#main-content #item-list[data-feed-id="%d"]`,
+		fixture.primaryFeedID,
+	)
+	primaryRowSelector := fmt.Sprintf(`#item-%d`, fixture.primaryFirstItemID)
+	primaryToggleSelector := fmt.Sprintf(`#item-%d .item-read-toggle`, fixture.primaryFirstItemID)
+	secondaryRowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
+	continuationSelector := `#feed-continuation [data-feed-continuation]`
+
+	runActions(
+		t,
+		ctx,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+		chromedp.WaitVisible("#main-content", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for continuation flow")
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout for continuation flow")
+
+	clickElement(t, ctx, primaryFeedSelector, "open primary feed before continuation flow")
+	runActions(
+		t,
+		ctx,
+		chromedp.WaitVisible(primaryListSelector, chromedp.ByQuery),
+		chromedp.WaitVisible(primaryRowSelector, chromedp.ByQuery),
+		chromedp.WaitVisible(continuationSelector, chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, textPresentExpression("Continue to Secondary Feed"), "next feed continuation label")
+	waitForJS(t, ctx, elementAbsentExpression(secondaryRowSelector), "next feed items are not prefetched")
+
+	clickPointerElement(t, ctx, primaryToggleSelector, "mark primary final unread item read")
+	waitForJS(t, ctx, hasClassExpression(primaryRowSelector, "is-read"), "primary final item marked read")
+	waitForJS(t, ctx, elementPresentExpression(primaryListSelector), "current feed remains after final read")
+	waitForJS(t, ctx, elementVisibleExpression(continuationSelector), "continuation remains after final read")
+
+	clickElement(t, ctx, continuationSelector, "continue to next unread feed")
+	waitForJS(
+		t,
+		ctx,
+		feedSelectionSettledExpression(fixture.secondaryFeedID, "Secondary Feed"),
+		"secondary feed selected by continuation",
+	)
+	waitForJS(t, ctx, elementPresentExpression(secondaryRowSelector), "secondary feed items loaded after continuation")
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "continuation clears content panel")
+}
+
 func TestBrowserSmokeReaderFlowsBreakpointTransitions(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)

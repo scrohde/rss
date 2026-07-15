@@ -31,7 +31,12 @@ func (a *App) listFeedsOrError(w http.ResponseWriter, r *http.Request) ([]view.F
 	return feeds, true
 }
 
-func (a *App) itemListOrError(w http.ResponseWriter, r *http.Request, feedID int64) (*view.ItemListData, bool) {
+func (a *App) itemListOrError(
+	w http.ResponseWriter,
+	r *http.Request,
+	feedID int64,
+	feeds []view.FeedView,
+) (*view.ItemListData, bool) {
 	itemList, err := store.LoadItemList(r.Context(), a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to load items", http.StatusInternalServerError)
@@ -39,7 +44,26 @@ func (a *App) itemListOrError(w http.ResponseWriter, r *http.Request, feedID int
 		return nil, false
 	}
 
-	return a.attachMarkAllReadUndo(itemList), true
+	itemList = a.attachMarkAllReadUndo(itemList)
+
+	return attachFeedContinuation(itemList, feeds), true
+}
+
+func attachFeedContinuation(itemList *view.ItemListData, feeds []view.FeedView) *view.ItemListData {
+	if itemList == nil {
+		return nil
+	}
+
+	itemList.Continuation = view.BuildFeedContinuation(itemList.Feed.ID, feeds)
+
+	return itemList
+}
+
+func feedContinuationOOB(currentFeedID int64, feeds []view.FeedView) view.FeedContinuationData {
+	continuation := view.BuildFeedContinuation(currentFeedID, feeds)
+	continuation.SwapOOB = true
+
+	return continuation
 }
 
 func (a *App) pageDataOrError(

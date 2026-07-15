@@ -1699,6 +1699,187 @@ func TestFeedItemsUpdatesFeedListSelection(t *testing.T) {
 	)
 }
 
+type feedContinuationFixture struct {
+	currentFeedID int64
+	skippedFeedID int64
+	nextFeedID    int64
+	currentItemID int64
+	skippedItemID int64
+}
+
+func setupFeedContinuationFixture(t *testing.T, app *App) feedContinuationFixture {
+	t.Helper()
+
+	currentFeedID := mustUpsertFeed(t, app, "http://example.com/continue-current", "Current Feed")
+	skippedFeedID := mustUpsertFeed(t, app, "http://example.com/continue-skipped", "Caught Up Feed")
+	nextFeedID := mustUpsertFeed(t, app, "http://example.com/continue-next", "Next Feed")
+
+	mustUpsertSingleStory(
+		t,
+		app,
+		currentFeedID,
+		"Current Story",
+		"http://example.com/current-story",
+		"current-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		skippedFeedID,
+		"Caught Up Story",
+		"http://example.com/caught-up-story",
+		"caught-up-story",
+		time.Now().UTC().Add(-2*time.Hour),
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		nextFeedID,
+		"Next Story",
+		"http://example.com/next-story",
+		"next-story",
+		time.Now().UTC().Add(-3*time.Hour),
+	)
+	mustMarkFeedItemRead(t, app, skippedFeedID, "caught-up-story")
+
+	currentItems := mustListItems(t, app, currentFeedID)
+	skippedItems := mustListItems(t, app, skippedFeedID)
+
+	return feedContinuationFixture{
+		currentFeedID: currentFeedID,
+		skippedFeedID: skippedFeedID,
+		nextFeedID:    nextFeedID,
+		currentItemID: currentItems[0].ID,
+		skippedItemID: skippedItems[0].ID,
+	}
+}
+
+func TestFeedItemsRenderNextUnreadContinuationWithoutPrefetch(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	fixture := setupFeedContinuationFixture(t, app)
+
+	err := store.UpdateFeedOrder(
+		context.Background(),
+		app.db,
+		[]int64{fixture.skippedFeedID, fixture.currentFeedID, fixture.nextFeedID},
+	)
+	requireNoErr(t, err, "save continuation feed order: %v")
+
+	rec := getRequest(app, fmt.Sprintf("/feeds/%d/items", fixture.currentFeedID))
+	assertResponseCode(t, rec, msgFeedItemsStatus)
+
+	body := rec.Body.String()
+	assertContains(t, body, `data-feed-continuation`, "expected continuation action")
+	assertContains(t, body, "Continue to Next Feed", "expected next unread feed label")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`hx-get="/feeds/%d/items/continue"`, fixture.currentFeedID),
+		"expected dynamic continuation path",
+	)
+	assertNotContains(t, body, "Next Story", "expected next feed items not to be prefetched")
+}
+
+func TestContinueFeedRevalidatesCaughtUpCandidate(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	fixture := setupFeedContinuationFixture(t, app)
+
+	err := store.ToggleRead(context.Background(), app.db, fixture.skippedItemID)
+	requireNoErr(t, err, "make skipped feed unread: %v")
+
+	initial := getRequest(app, fmt.Sprintf("/feeds/%d/items", fixture.currentFeedID))
+	assertResponseCode(t, initial, msgFeedItemsStatus)
+	assertContains(t, initial.Body.String(), "Continue to Caught Up Feed", "expected initial candidate")
+
+	err = store.MarkAllRead(context.Background(), app.db, fixture.skippedFeedID)
+	requireNoErr(t, err, "catch up initial continuation candidate: %v")
+
+	rec := getRequest(app, fmt.Sprintf("/feeds/%d/items/continue", fixture.currentFeedID))
+	assertResponseCode(t, rec, "continue feed status")
+
+	body := rec.Body.String()
+	assertContains(t, body, "Next Story", "expected revalidated next feed items")
+	assertContains(t, body, activeFeedButton(fixture.nextFeedID), "expected next feed selected")
+	assertFeedListOOBUpdate(t, body)
+	assertContentPanelOOBUpdate(t, body)
+}
+
+func TestContinueFeedDoesNotWrapAfterFinalFeed(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	fixture := setupFeedContinuationFixture(t, app)
+
+	initial := getRequest(app, fmt.Sprintf("/feeds/%d/items", fixture.nextFeedID))
+	assertResponseCode(t, initial, msgFeedItemsStatus)
+
+	initialBody := initial.Body.String()
+	assertContains(t, initialBody, `data-feed-continuation-end`, "expected end-of-order state")
+	assertContains(t, initialBody, "No later feeds have unread items.", "expected useful end copy")
+	assertNotContains(t, initialBody, `class="feed-continuation-button"`, "expected no continuation action")
+
+	rec := getRequest(app, fmt.Sprintf("/feeds/%d/items/continue", fixture.nextFeedID))
+	assertResponseCode(t, rec, "final feed continuation status")
+
+	body := rec.Body.String()
+	assertContains(t, body, "Next Story", "expected final feed to remain selected")
+	assertNotContains(t, body, "Current Story", "expected continuation not to wrap to an earlier feed")
+	assertContains(t, body, activeFeedButton(fixture.nextFeedID), "expected final feed to stay selected")
+}
+
+func TestToggleFinalUnreadItemRefreshesContinuation(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	fixture := setupFeedContinuationFixture(t, app)
+
+	form := url.Values{}
+	form.Set("view", "compact")
+	form.Set(selectedItemIDParam, fmt.Sprintf("item-%d", fixture.currentItemID))
+	req := newURLEncodedRequest(fmt.Sprintf("/items/%d/toggle", fixture.currentItemID), form)
+	rec := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(rec, req)
+	assertResponseCode(t, rec, "toggle final unread status")
+
+	body := rec.Body.String()
+	assertContains(t, body, `id="feed-continuation"`, "expected continuation refresh")
+	assertContains(t, body, `hx-swap-oob="outerHTML"`, "expected continuation OOB swap")
+	assertContains(t, body, "Continue to Next Feed", "expected continuation after final unread")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="selected-feed-id" name="selected_feed_id" value="%d"`, fixture.currentFeedID),
+		"expected current feed to remain selected",
+	)
+}
+
+func TestMarkAllReadAndSweepKeepContinuationAvailable(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	fixture := setupFeedContinuationFixture(t, app)
+
+	markRec := postRequest(app, fmt.Sprintf("/feeds/%d/items/read", fixture.currentFeedID))
+	assertResponseCode(t, markRec, "mark final unread status")
+
+	markBody := markRec.Body.String()
+	assertContains(t, markBody, "Continue to Next Feed", "expected continuation after mark-all")
+	assertContains(t, markBody, `data-mark-all-read-undo-button`, "expected undo after mark-all")
+
+	sweepRec := postRequest(app, fmt.Sprintf("/feeds/%d/items/sweep", fixture.currentFeedID))
+	assertResponseCode(t, sweepRec, "sweep final read item status")
+
+	sweepBody := sweepRec.Body.String()
+	assertContains(t, sweepBody, "Continue to Next Feed", "expected continuation after sweep")
+	assertUndoTokenCleared(t, sweepBody, "expected sweep to clear mark-all undo")
+}
+
 func TestRenameFeedOverridesSourceTitle(t *testing.T) {
 	t.Parallel()
 

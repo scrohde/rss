@@ -43,6 +43,7 @@ type pollResponseData struct {
 	RefreshDisplay    string
 	LastError         string
 	Feeds             []view.FeedView
+	Continuation      view.FeedContinuationData
 	Banner            view.NewItemsData
 	SelectedFeedID    int64
 	FeedEditMode      bool
@@ -52,15 +53,17 @@ type itemListResponseData struct {
 	ItemList          *view.ItemListData
 	FeedPulseStatuses map[int64]*pulseFeedStatusView
 	Feeds             []view.FeedView
+	Continuation      view.FeedContinuationData
 	SelectedFeedID    int64
 	FeedEditMode      bool
 }
 
 type toggleReadResponseData struct {
+	FeedPulseStatuses map[int64]*pulseFeedStatusView
 	View              string
 	Feeds             []view.FeedView
-	FeedPulseStatuses map[int64]*pulseFeedStatusView
 	Item              view.ItemView
+	Continuation      view.FeedContinuationData
 	SelectedFeedID    int64
 	FeedEditMode      bool
 	UpdatePanel       bool
@@ -71,6 +74,7 @@ type pulseStatusResponseData struct {
 	Message           string
 	MessageClass      string
 	Feeds             []view.FeedView
+	Continuation      view.FeedContinuationData
 	SelectedFeedID    int64
 	FeedEditMode      bool
 	Running           bool

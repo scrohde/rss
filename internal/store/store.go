@@ -643,6 +643,7 @@ func LoadItemList(
 		Items:                items,
 		NewestID:             newestID,
 		NewItems:             view.NewItemsData{FeedID: feed.ID, Count: 0, SwapOOB: false},
+		Continuation:         view.BuildFeedContinuation(feed.ID, nil),
 	}, nil
 }
 

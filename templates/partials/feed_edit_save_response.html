@@ -12,5 +12,7 @@
         <p>Subscribe to a new feed or select one from the sidebar.</p>
       </section>
     </div>
+  {{else if gt .SelectedFeedID 0}}
+    {{template "feed_continuation" .Continuation}}
   {{end}}
 {{end}}

@@ -56,6 +56,7 @@ type ItemListData struct {
 	MarkAllReadUndoToken string
 	Items                []ItemView
 	Feed                 FeedView
+	Continuation         FeedContinuationData
 	NewItems             NewItemsData
 	NewestID             int64
 }
