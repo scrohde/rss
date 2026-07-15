@@ -940,7 +940,7 @@ func runFeedBoundaryKeyboardFlow(t *testing.T, ctx context.Context, fixture smok
 		fixture.archiveFeedID,
 	)
 
-	runActions(t, ctx, chromedp.Click(lastUnreadFeedSelector, chromedp.ByQuery))
+	clickElement(t, ctx, lastUnreadFeedSelector, "open last unread feed before boundary flow")
 	waitForJS(t, ctx, hasClassExpression(lastUnreadFeedSelector, "active"), "last unread feed active before boundary down")
 	runActions(t, ctx, chromedp.Focus(lastUnreadFeedSelector, chromedp.ByQuery))
 	waitForJS(
@@ -1404,13 +1404,11 @@ func runToggleReadFlow(t *testing.T, ctx context.Context, fixture smokeFixture) 
 	rowSelector := fmt.Sprintf(`#item-%d`, fixture.secondaryFirstItemID)
 	toggleSelector := fmt.Sprintf(`#item-%d .item-read-toggle`, fixture.secondaryFirstItemID)
 
-	waitForJS(t, ctx, htmxElementReadyExpression(toggleSelector), "mouse read toggle ready")
-	runActions(t, ctx, chromedp.Click(toggleSelector, chromedp.ByQuery))
+	clickPointerElement(t, ctx, toggleSelector, "mark row read with pointer")
 	waitForJS(t, ctx, hasClassExpression(rowSelector, "is-read"), "row marked read")
-	waitForJS(t, ctx, htmxElementReadyExpression(toggleSelector), "mouse unread toggle ready")
 	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "mouse read toggle keeps reader closed")
 
-	runActions(t, ctx, chromedp.Click(toggleSelector, chromedp.ByQuery))
+	clickPointerElement(t, ctx, toggleSelector, "mark row unread with pointer")
 	waitForJS(t, ctx, missingClassExpression(rowSelector, "is-read"), "row marked unread")
 	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "mouse unread toggle keeps reader closed")
 }
@@ -1439,8 +1437,7 @@ func runKeyboardFlow(t *testing.T, ctx context.Context, fixture smokeFixture) {
 	pressKey(t, ctx, "k")
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-active"), "first row active after up")
 
-	waitForJS(t, ctx, htmxElementReadyExpression(firstRowToggleSelector), "pointer read toggle ready")
-	runActions(t, ctx, chromedp.Click(firstRowToggleSelector, chromedp.ByQuery))
+	clickPointerElement(t, ctx, firstRowToggleSelector, "mark active row read with pointer")
 	waitForJS(t, ctx, hasClassExpression(firstRowSelector, "is-read"), "row marked read after pointer interaction")
 	waitForJS(
 		t,
@@ -1518,6 +1515,7 @@ func runContentPanelMarkReadButtonFlow(t *testing.T, ctx context.Context, fixtur
 		contentPanelItemExpression(fixture.secondarySecondItemID),
 		"second article opens after read first article",
 	)
+	waitForJS(t, ctx, hasClassExpression(secondRowSelector, "is-expanded"), "second article row expanded")
 	waitForJS(
 		t,
 		ctx,
@@ -1559,7 +1557,17 @@ func runActions(t *testing.T, ctx context.Context, actions ...chromedp.Action) {
 func clickElement(t *testing.T, ctx context.Context, selector, label string) {
 	t.Helper()
 
-	waitForJS(t, ctx, htmxElementReadyExpression(selector), label+" htmx ready")
+	clickElementWithDetail(t, ctx, selector, label, 0)
+}
+
+func clickPointerElement(t *testing.T, ctx context.Context, selector, label string) {
+	t.Helper()
+
+	clickElementWithDetail(t, ctx, selector, label, 1)
+}
+
+func clickElementWithDetail(t *testing.T, ctx context.Context, selector, label string, detail int) {
+	t.Helper()
 
 	expression := fmt.Sprintf(
 		`(() => {
@@ -1567,19 +1575,39 @@ func clickElement(t *testing.T, ctx context.Context, selector, label string) {
 			if (!el || typeof el.click !== "function") {
 				return false;
 			}
-			el.click();
+			if (document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling")) {
+				return false;
+			}
+			const htmxSelector = [
+				"[hx-get]", "[hx-post]", "[hx-put]", "[hx-delete]", "[hx-patch]",
+				"[data-hx-get]", "[data-hx-post]", "[data-hx-put]", "[data-hx-delete]", "[data-hx-patch]",
+			].join(",");
+			if (el.matches(htmxSelector)) {
+				const data = el["htmx-internal-data"];
+				if (!data || !Array.isArray(data.listenerInfos) || data.listenerInfos.length === 0) {
+					return false;
+				}
+			}
+			if (%d > 0) {
+				el.dispatchEvent(new MouseEvent("click", {
+					bubbles: true,
+					cancelable: true,
+					composed: true,
+					detail: %d,
+					view: window,
+				}));
+			} else {
+				el.click();
+			}
 			return true;
 		})()`,
 		selector,
+		detail,
+		detail,
 	)
 
-	var ok bool
-	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &ok)); err != nil {
-		t.Fatalf("click element %s: %v", label, err)
-	}
-	if !ok {
-		t.Fatalf("click element %s: selector not clickable (%s)", label, selector)
-	}
+	waitForJS(t, ctx, expression, label+" on settled HTMX element")
+	waitForJS(t, ctx, htmxSettledExpression(), label+" HTMX settle")
 }
 
 func selectMobileFeedFilter(t *testing.T, ctx context.Context, feedID int64) {
@@ -1613,6 +1641,9 @@ func requestHTMX(t *testing.T, ctx context.Context, method, path, target, select
 
 	expression := fmt.Sprintf(
 		`(() => {
+			if (document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling")) {
+				return false;
+			}
 			if (!window.htmx || typeof window.htmx.ajax !== "function") {
 				return false;
 			}
@@ -1630,14 +1661,8 @@ func requestHTMX(t *testing.T, ctx context.Context, method, path, target, select
 		selectedItemID,
 	)
 
-	var ok bool
-	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &ok)); err != nil {
-		t.Fatalf("request htmx %s %s: %v", method, path, err)
-	}
-
-	if !ok {
-		t.Fatalf("request htmx %s %s: htmx not available", method, path)
-	}
+	waitForJS(t, ctx, expression, fmt.Sprintf("start htmx %s %s from settled state", method, path))
+	waitForJS(t, ctx, htmxSettledExpression(), fmt.Sprintf("htmx %s %s settle", method, path))
 }
 
 func pressKey(t *testing.T, ctx context.Context, key string) {
@@ -1645,6 +1670,9 @@ func pressKey(t *testing.T, ctx context.Context, key string) {
 
 	expression := fmt.Sprintf(
 		`(() => {
+			if (document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling")) {
+				return false;
+			}
 			const target = document.activeElement || document.body;
 			target.dispatchEvent(new KeyboardEvent("keydown", {key: %q, bubbles: true, cancelable: true}));
 			target.dispatchEvent(new KeyboardEvent("keyup", {key: %q, bubbles: true, cancelable: true}));
@@ -1654,10 +1682,7 @@ func pressKey(t *testing.T, ctx context.Context, key string) {
 		key,
 	)
 
-	var ok bool
-	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &ok)); err != nil {
-		t.Fatalf("press key %q: %v", key, err)
-	}
+	waitForJS(t, ctx, expression, fmt.Sprintf("press key %q after HTMX settle", key))
 }
 
 func waitForJS(t *testing.T, ctx context.Context, expression, label string) {
@@ -1946,6 +1971,9 @@ func htmxReadyExpression() string {
 func htmxElementReadyExpression(selector string) string {
 	return fmt.Sprintf(
 		`(() => {
+			if (document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling")) {
+				return false;
+			}
 			const el = document.querySelector(%q);
 			if (!el) {
 				return false;
@@ -1958,6 +1986,10 @@ func htmxElementReadyExpression(selector string) string {
 		})()`,
 		selector,
 	)
+}
+
+func htmxSettledExpression() string {
+	return `(() => !document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling"))()`
 }
 
 func mobileLayoutExpression() string {

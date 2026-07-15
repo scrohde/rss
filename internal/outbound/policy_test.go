@@ -20,7 +20,6 @@ func (f netIPResolverFunc) LookupNetIP(
 	return f(ctx, network, host)
 }
 
-//nolint:revive // One table keeps the allow and deny authority policy readable together.
 func TestValidateURL(t *testing.T) {
 	t.Parallel()
 
@@ -52,7 +51,14 @@ func TestValidateURL(t *testing.T) {
 		"https://example..com/",
 	}
 
-	for _, raw := range allowed {
+	runAllowedURLTests(t, allowed)
+	runBlockedURLTests(t, blocked)
+}
+
+func runAllowedURLTests(t *testing.T, values []string) {
+	t.Helper()
+
+	for _, raw := range values {
 		t.Run("allows_"+url.PathEscape(raw), func(t *testing.T) {
 			t.Parallel()
 
@@ -62,8 +68,12 @@ func TestValidateURL(t *testing.T) {
 			}
 		})
 	}
+}
 
-	for _, raw := range blocked {
+func runBlockedURLTests(t *testing.T, values []string) {
+	t.Helper()
+
+	for _, raw := range values {
 		t.Run("blocks_"+url.PathEscape(raw), func(t *testing.T) {
 			t.Parallel()
 
