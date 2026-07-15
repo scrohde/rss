@@ -51,6 +51,12 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
+		a.renderDesktopReader(w, r, feeds)
+
+		return
+	}
+
 	data, ok := a.pageDataOrError(w, r, "failed to load page state")
 	if !ok {
 		return
@@ -60,6 +66,35 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.FeedEditMode = feedEditModeEnabled(r)
 	a.renderTemplate(w, "index", data)
+}
+
+func (a *App) renderDesktopReader(w http.ResponseWriter, r *http.Request, feeds []view.FeedView) {
+	selectedFeedID := normalizeSelectedFeedID(parseSelectedFeedID(r), feeds)
+	if selectedFeedID == 0 && len(feeds) > 0 {
+		selectedFeedID = feeds[0].ID
+	}
+
+	var itemList *view.ItemListData
+
+	if selectedFeedID > 0 {
+		var ok bool
+
+		itemList, ok = a.itemListOrError(w, r, selectedFeedID)
+		if !ok {
+			return
+		}
+	}
+
+	data := itemListResponseData{
+		ItemList:          itemList,
+		Feeds:             feeds,
+		FeedPulseStatuses: a.pulseStatusViews(),
+		SelectedFeedID:    selectedFeedID,
+		FeedEditMode:      feedEditModeEnabled(r),
+	}
+
+	w.Header().Set("Hx-Replace-Url", "/")
+	a.renderTemplate(w, "item_list_response", data)
 }
 
 func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
@@ -157,6 +192,10 @@ func parsePathInt64(r *http.Request, key string) (int64, bool) {
 
 func isHTMXRequest(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Hx-Request")), "true")
+}
+
+func isHTMXHistoryRestoreRequest(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Hx-History-Restore-Request")), "true")
 }
 
 func isMobileStreamSelectorTrigger(r *http.Request) bool {

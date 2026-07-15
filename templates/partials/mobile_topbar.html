@@ -45,6 +45,13 @@
   </div>
 {{end}}
 
+{{define "desktop_topbar_slots_oob"}}
+  <div id="topbar-brand-slot" class="topbar-brand-slot" hx-swap-oob="outerHTML">
+    {{template "topbar_brand_button"}}
+  </div>
+  <div id="topbar-mobile-slot" class="topbar-mobile-slot" hx-swap-oob="outerHTML"></div>
+{{end}}
+
 {{define "mobile_topbar_selector"}}
   <form
     class="mobile-stream-filter"

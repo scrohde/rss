@@ -4785,6 +4785,97 @@ func TestDesktopIndexIgnoresMobileSelectedFeedQuery(t *testing.T) {
 	)
 }
 
+func TestDesktopIndexHTMXRestoresReaderLayout(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	firstFeedID := mustUpsertFeed(t, app, "http://example.com/desktop-first", "Desktop First")
+	selectedFeedID := mustUpsertFeed(t, app, "http://example.com/desktop-selected", "Desktop Selected")
+	mustUpsertSingleStory(
+		t,
+		app,
+		selectedFeedID,
+		"Selected Desktop Story",
+		"http://example.com/selected-desktop-story",
+		"selected-desktop-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	assertDesktopIndexHTMXRestore(
+		t,
+		app,
+		fmt.Sprintf("%s?selected_feed_id=%d", pathIndex, selectedFeedID),
+		selectedFeedID,
+		"Selected Desktop Story",
+	)
+	assertDesktopIndexHTMXRestore(t, app, pathIndex, firstFeedID, "Desktop First")
+}
+
+func assertDesktopIndexHTMXRestore(t *testing.T, app *App, target string, wantFeedID int64, wantTitle string) {
+	t.Helper()
+
+	rec := getHTMXRequest(app, target)
+	assertResponseCode(t, rec, "desktop index htmx restore status")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != pathIndex {
+		t.Fatalf("expected HX-Replace-Url %q, got %q", pathIndex, got)
+	}
+
+	body := rec.Body.String()
+	assertNotContains(t, body, "<!doctype html>", "expected desktop restore to be an htmx partial")
+	assertContains(
+		t,
+		body,
+		fmt.Sprintf(`id="item-list" tabindex="-1" data-feed-id="%d"`, wantFeedID),
+		"expected desktop restore to load the selected feed",
+	)
+	assertContains(t, body, wantTitle, "expected desktop restore feed content")
+	assertContains(t, body, `hx-post="/feeds/pulse"`, "expected desktop pulse action to be restored")
+	assertNotContains(t, body, `hx-post="/mobile/pulse`, "expected mobile pulse action to be removed")
+	assertContains(
+		t,
+		body,
+		`id="topbar-mobile-slot" class="topbar-mobile-slot" hx-swap-oob="outerHTML"`,
+		"expected mobile selector slot to be cleared",
+	)
+	assertContains(t, body, feedListSwapAttr, msgFeedListOOBSwap)
+	assertContains(t, body, contentPanelSwapAttr, "expected desktop content panel OOB reset")
+	assertNotContains(t, body, `data-mobile-stream="true"`, "expected mobile stream to be removed")
+}
+
+func TestDesktopIndexHTMXRestoresEmptyReaderLayout(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	rec := getHTMXRequest(app, pathIndex)
+	assertResponseCode(t, rec, "empty desktop index htmx restore status")
+
+	body := rec.Body.String()
+	assertContains(t, body, emptyStateNoFeed, "expected desktop empty state")
+	assertContains(t, body, `hx-post="/feeds/pulse"`, "expected desktop pulse action")
+	assertContains(t, body, contentPanelSwapAttr, "expected empty desktop content panel OOB reset")
+	assertNotContains(t, body, `class="mobile-stream-filter"`, "expected mobile selector to be cleared")
+}
+
+func TestDesktopIndexHTMXHistoryRestoreReturnsFullPage(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, pathIndex, http.NoBody)
+	req.Header.Set("Hx-Request", "true")
+	req.Header.Set("Hx-History-Restore-Request", "true")
+
+	rec := httptest.NewRecorder()
+	app.Routes().ServeHTTP(rec, req)
+
+	assertResponseCode(t, rec, "desktop index htmx history restore status")
+	assertContains(t, rec.Body.String(), "<!doctype html>", "expected full page for htmx history cache miss")
+
+	if got := rec.Header().Get("Hx-Replace-Url"); got != "" {
+		t.Fatalf("expected no HX-Replace-Url for history restore, got %q", got)
+	}
+}
+
 func TestParseSelectedFeedID(t *testing.T) {
 	t.Parallel()
 

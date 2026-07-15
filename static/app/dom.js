@@ -49,8 +49,10 @@ export const isTextEntryTarget = (target) => {
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
 };
 
+export const mobileLayoutQuery = "(max-width: 960px)";
+
 export const isDesktopLayout = () =>
-  !window.matchMedia("(max-width: 960px)").matches;
+  !window.matchMedia(mobileLayoutQuery).matches;
 
 export const isVisible = (element) =>
   Boolean(element && element.getClientRects().length > 0);
