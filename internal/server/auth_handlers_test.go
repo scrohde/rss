@@ -333,15 +333,17 @@ func assertStrictContentCSP(t *testing.T, csp string) {
 		"style-src-elem 'self'",
 		"connect-src 'self'",
 		"media-src 'none'",
-		"frame-src 'none'",
+		"frame-src https://www.youtube.com https://www.youtube-nocookie.com",
 	} {
 		if !strings.Contains(csp, directive) {
 			t.Fatalf("expected CSP directive %q in %q", directive, csp)
 		}
 	}
 
-	if strings.Contains(csp, "https:") || strings.Contains(csp, "http:") {
-		t.Fatalf("expected CSP to reject arbitrary remote origins, got %q", csp)
+	for field := range strings.FieldsSeq(strings.ReplaceAll(csp, ";", " ")) {
+		if field == "https:" || field == "http:" {
+			t.Fatalf("expected CSP to reject arbitrary remote origins, got %q", csp)
+		}
 	}
 }
 

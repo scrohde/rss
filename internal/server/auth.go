@@ -340,7 +340,8 @@ func (*App) withSecurityHeaders(next http.Handler) http.Handler {
 			"Content-Security-Policy",
 			"default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "+
 				"style-src-elem 'self'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'none'; "+
-				"connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; "+
+				"connect-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com; "+
+				"object-src 'none'; base-uri 'self'; "+
 				"frame-ancestors 'none'; form-action 'self'",
 		)
 
