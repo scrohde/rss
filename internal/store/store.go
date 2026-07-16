@@ -21,6 +21,9 @@ const (
 	maxItemsPerFeed       = 200
 	unreadItemsDefaultCap = 200
 	readRetention         = 30 * time.Minute
+	tombstoneRetention    = 30 * 24 * time.Hour
+	// MaxFeedItems is the maximum number of parsed feed items accepted for persistence.
+	MaxFeedItems = 1000
 )
 
 const initSchemaSQL = `
@@ -62,12 +65,7 @@ CREATE TABLE IF NOT EXISTS tombstones (
 	FOREIGN KEY(feed_id) REFERENCES feeds(id) ON DELETE CASCADE
 );
 
-CREATE TRIGGER IF NOT EXISTS tombstones_prune
-AFTER INSERT ON tombstones
-BEGIN
-	DELETE FROM tombstones
-	WHERE datetime(deleted_at) <= datetime('now', '-30 days');
-END;
+DROP TRIGGER IF EXISTS tombstones_prune;
 `
 
 // Open is part of the store package API.
@@ -362,7 +360,6 @@ WHERE NOT EXISTS (
 }
 
 const (
-	maxFeedItems        = 1000
 	maxItemTitleBytes   = 16 << 10
 	maxItemURLBytes     = 16 << 10
 	maxItemGUIDBytes    = 16 << 10
@@ -374,8 +371,8 @@ var errInvalidFeedItems = errors.New("feed items exceed resource limits")
 
 // ValidateItems rejects feed data that exceeds persistence resource limits.
 func ValidateItems(items []*gofeed.Item) error {
-	if len(items) > maxFeedItems {
-		return fmt.Errorf("%w: contains %d items; limit is %d", errInvalidFeedItems, len(items), maxFeedItems)
+	if len(items) > MaxFeedItems {
+		return fmt.Errorf("%w: contains %d items; limit is %d", errInvalidFeedItems, len(items), MaxFeedItems)
 	}
 
 	for index, item := range items {
@@ -1455,6 +1452,36 @@ func CleanupReadItems(db *sql.DB) error {
 	logCleanupReadItemsDeleted(deleted)
 
 	return nil
+}
+
+// CleanupTombstones removes expired item tombstones.
+func CleanupTombstones(db *sql.DB) error {
+	cutoff := time.Now().UTC().Add(-tombstoneRetention)
+
+	deleted, err := cleanupTombstonesBefore(context.Background(), db, cutoff)
+	if err != nil {
+		return err
+	}
+
+	if deleted > 0 {
+		slog.Info("cleanup tombstones", "deleted", deleted)
+	}
+
+	return nil
+}
+
+func cleanupTombstonesBefore(ctx context.Context, db *sql.DB, cutoff time.Time) (int64, error) {
+	result, err := db.ExecContext(ctx, "DELETE FROM tombstones WHERE deleted_at <= ?", cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired tombstones: %w", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count deleted tombstones: %w", err)
+	}
+
+	return deleted, nil
 }
 
 func cleanupReadItemsBefore(ctx context.Context, db *sql.DB, cutoff time.Time) (int64, error) {
