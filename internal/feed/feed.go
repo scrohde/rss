@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -195,6 +196,8 @@ func parseFetchResponse(resp *http.Response) (*FetchResult, error) {
 		return nil, fmt.Errorf("failed to parse feed: %w", err)
 	}
 
+	limitParsedFeedItems(feed)
+
 	err = store.ValidateItems(feed.Items)
 	if err != nil {
 		return nil, fmt.Errorf("feed exceeds resource limits: %w", err)
@@ -203,6 +206,54 @@ func parseFetchResponse(resp *http.Response) (*FetchResult, error) {
 	result.Feed = feed
 
 	return result, nil
+}
+
+func limitParsedFeedItems(feed *gofeed.Feed) {
+	originalItemCount := len(feed.Items)
+
+	feed.Items = limitFeedItems(feed.Items)
+	if len(feed.Items) >= originalItemCount {
+		return
+	}
+
+	slog.Warn(
+		"feed item list truncated",
+		"items_in_feed", originalItemCount,
+		"items_retained", len(feed.Items),
+	)
+}
+
+func limitFeedItems(items []*gofeed.Item) []*gofeed.Item {
+	if len(items) <= store.MaxFeedItems {
+		return items
+	}
+
+	bounded := append([]*gofeed.Item(nil), items...)
+	if allItemsHaveDates(bounded) {
+		slices.SortStableFunc(bounded, func(left, right *gofeed.Item) int {
+			return itemDate(right).Compare(itemDate(left))
+		})
+	}
+
+	return bounded[:store.MaxFeedItems]
+}
+
+func allItemsHaveDates(items []*gofeed.Item) bool {
+	for _, item := range items {
+		if item == nil || (item.PublishedParsed == nil && item.UpdatedParsed == nil) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func itemDate(item *gofeed.Item) time.Time {
+	if item.PublishedParsed != nil {
+		return *item.PublishedParsed
+	}
+
+	return *item.UpdatedParsed
 }
 
 func buildFetchStatusError(resp *http.Response) error {

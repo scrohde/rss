@@ -156,7 +156,7 @@ func TestItemLimitAndTombstones(t *testing.T) {
 	db := openTestDB(t)
 	feedID := mustUpsertFeed(t, db, "http://example.com/rss", "Feed")
 
-	_, upsertErr := UpsertItems(context.Background(), db, feedID, sequentialItems(210))
+	_, upsertErr := UpsertItems(context.Background(), db, feedID, sequentialItems(MaxFeedItems))
 	if upsertErr != nil {
 		t.Fatalf("UpsertItems: %v", upsertErr)
 	}
@@ -175,7 +175,7 @@ func TestItemLimitAndTombstones(t *testing.T) {
 		t.Fatalf("expected 200 items, got %d", len(itemsInDB))
 	}
 
-	assertGUIDRangeDeletedAndTombstoned(t, db, feedID, 0, 10)
+	assertGUIDRangeDeletedAndTombstoned(t, db, feedID, 0, MaxFeedItems-maxItemsPerFeed)
 }
 
 func TestSweepReadItems(t *testing.T) {
@@ -281,6 +281,83 @@ func TestCleanupReadItems(t *testing.T) {
 
 	if !existsInTombstones(t, db, feedID, "old") {
 		t.Fatal("expected old read item to be tombstoned")
+	}
+}
+
+func TestCleanupTombstonesRemovesOnlyExpiredRows(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/tombstones", "Tombstones")
+	cutoff := time.Now().UTC().Add(-tombstoneRetention)
+
+	_, err := db.ExecContext(context.Background(), `
+INSERT INTO tombstones (feed_id, guid, deleted_at)
+VALUES (?, 'expired', ?), (?, 'recent', ?)
+`, feedID, cutoff.Add(-time.Second), feedID, cutoff.Add(time.Second))
+	if err != nil {
+		t.Fatalf("insert tombstones: %v", err)
+	}
+
+	deleted, err := cleanupTombstonesBefore(context.Background(), db, cutoff)
+	if err != nil {
+		t.Fatalf("cleanupTombstonesBefore: %v", err)
+	}
+
+	if deleted != 1 {
+		t.Fatalf("expected 1 deleted tombstone, got %d", deleted)
+	}
+
+	if existsInTombstones(t, db, feedID, "expired") {
+		t.Fatal("expected expired tombstone to be deleted")
+	}
+
+	if !existsInTombstones(t, db, feedID, "recent") {
+		t.Fatal("expected recent tombstone to remain")
+	}
+
+	deleted, err = cleanupTombstonesBefore(context.Background(), db, cutoff)
+	if err != nil {
+		t.Fatalf("second cleanupTombstonesBefore: %v", err)
+	}
+
+	if deleted != 0 {
+		t.Fatalf("expected idempotent cleanup, deleted %d additional tombstones", deleted)
+	}
+}
+
+func TestInitRemovesLegacyTombstonePruneTrigger(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	_, err := db.ExecContext(context.Background(), `
+CREATE TRIGGER tombstones_prune
+AFTER INSERT ON tombstones
+BEGIN
+	DELETE FROM tombstones WHERE datetime(deleted_at) <= datetime('now', '-30 days');
+END
+`)
+	if err != nil {
+		t.Fatalf("create legacy trigger: %v", err)
+	}
+
+	err = Init(db)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	var triggerCount int
+
+	err = db.QueryRowContext(context.Background(), `
+SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'tombstones_prune'
+`).Scan(&triggerCount)
+	if err != nil {
+		t.Fatalf("count legacy trigger: %v", err)
+	}
+
+	if triggerCount != 0 {
+		t.Fatal("expected legacy tombstone trigger to be removed")
 	}
 }
 
@@ -985,7 +1062,7 @@ func TestUpsertItemsRejectsPathologicalInputBeforeWrites(t *testing.T) {
 func TestValidateItemsRejectsExcessiveItemCount(t *testing.T) {
 	t.Parallel()
 
-	items := make([]*gofeed.Item, maxFeedItems+1)
+	items := make([]*gofeed.Item, MaxFeedItems+1)
 	for index := range items {
 		items[index] = new(gofeed.Item)
 		items[index].GUID = fmt.Sprintf("item-%d", index)

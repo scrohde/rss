@@ -203,6 +203,11 @@ func (a *App) runCleanupIteration() {
 		slog.Error("cleanup error", "err", err)
 	}
 
+	tombstoneErr := store.CleanupTombstones(a.db)
+	if tombstoneErr != nil {
+		slog.Error("tombstone cleanup error", "err", tombstoneErr)
+	}
+
 	if a.authEnabled && a.authManager != nil {
 		authErr := a.authManager.CleanupExpiredAuthData(context.Background())
 		if authErr != nil {
