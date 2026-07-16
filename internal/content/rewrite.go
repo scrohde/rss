@@ -23,10 +23,15 @@ const (
 	ImageProxyCacheFallback = "public, max-age=86400"
 	// ImageProxyUserAgent identifies proxy requests to upstream servers.
 	ImageProxyUserAgent = "Mozilla/5.0 (compatible; PulseRSSImageProxy/1.0; https://localhost)"
+
+	youtubeVideoIDMaxLength = 64
+	youtubeVideoIDChars     = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+	youtubeEmbedSandbox     = "allow-scripts allow-same-origin allow-presentation allow-popups"
 )
 
 // summaryAllowedElements is intentionally small: stored feed markup may format reader content, but it may not create
-// controls, browsing contexts, executable content, or independent network clients.
+// controls, executable content, or independent network clients. Iframes pass a separate YouTube-only URL check and
+// receive enforced sandbox attributes below.
 //
 //nolint:gochecknoglobals // A package-level literal keeps the security allowlist centralized and auditable.
 var summaryAllowedElements = map[string]bool{
@@ -64,6 +69,7 @@ var summaryAllowedElements = map[string]bool{
 	"hr":         true,
 	"i":          true,
 	"img":        true,
+	"iframe":     true,
 	"ins":        true,
 	"kbd":        true,
 	"li":         true,
@@ -111,7 +117,6 @@ var summaryDroppedSubtrees = map[string]bool{
 	"datalist": true,
 	"embed":    true,
 	"fieldset": true,
-	"iframe":   true,
 	"input":    true,
 	"legend":   true,
 	"math":     true,
@@ -147,6 +152,11 @@ var summaryAllowedAttrs = map[string]map[string]bool{
 		"height": true,
 		"src":    true,
 		"srcset": true,
+		"width":  true,
+	},
+	"iframe": {
+		"height": true,
+		"src":    true,
 		"width":  true,
 	},
 	"li": {
@@ -286,6 +296,10 @@ func newSanitizedSummaryElement(
 		return nil
 	}
 
+	if name == "iframe" && !hasSummaryAttr(cloned, "src") {
+		return nil
+	}
+
 	addEnforcedSummaryAttrs(cloned, name)
 
 	return cloned
@@ -304,6 +318,20 @@ func addEnforcedSummaryAttrs(node *html.Node, name string) {
 			html.Attribute{Namespace: "", Key: "loading", Val: "lazy"},
 			html.Attribute{Namespace: "", Key: "decoding", Val: "async"},
 			html.Attribute{Namespace: "", Key: "referrerpolicy", Val: "no-referrer"},
+		)
+	}
+
+	if name == "iframe" {
+		if !hasSummaryAttr(node, "title") {
+			node.Attr = append(node.Attr, html.Attribute{Namespace: "", Key: "title", Val: "YouTube video"})
+		}
+
+		node.Attr = append(node.Attr,
+			html.Attribute{Namespace: "", Key: "loading", Val: "lazy"},
+			html.Attribute{Namespace: "", Key: "referrerpolicy", Val: "strict-origin-when-cross-origin"},
+			html.Attribute{Namespace: "", Key: "sandbox", Val: youtubeEmbedSandbox},
+			html.Attribute{Namespace: "", Key: "allow", Val: "encrypted-media; picture-in-picture; fullscreen"},
+			html.Attribute{Namespace: "", Key: "allowfullscreen", Val: ""},
 		)
 	}
 }
@@ -329,7 +357,7 @@ func sanitizeSummaryAttrs(node *html.Node, element string, base *url.URL) []html
 			continue
 		}
 
-		value, ok := sanitizeSummaryAttrValue(key, attr.Val, base)
+		value, ok := sanitizeSummaryAttrValue(element, key, attr.Val, base)
 		if !ok {
 			continue
 		}
@@ -341,13 +369,17 @@ func sanitizeSummaryAttrs(node *html.Node, element string, base *url.URL) []html
 	return attrs
 }
 
-func sanitizeSummaryAttrValue(key, value string, base *url.URL) (string, bool) {
+func sanitizeSummaryAttrValue(element, key, value string, base *url.URL) (string, bool) {
 	switch key {
 	case "href":
 		return sanitizeSummaryLink(value, base)
 	case "srcset":
 		return rewriteSrcset(value, base)
 	case "src":
+		if element == "iframe" {
+			return sanitizeYouTubeEmbedURL(value)
+		}
+
 		return ProxyImageURL(value, base)
 	case "dir":
 		direction := strings.ToLower(strings.TrimSpace(value))
@@ -356,6 +388,44 @@ func sanitizeSummaryAttrValue(key, value string, base *url.URL) (string, bool) {
 	default:
 		return value, true
 	}
+}
+
+func sanitizeYouTubeEmbedURL(raw string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !isAllowedYouTubeEmbedURL(parsed) {
+		return "", false
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	parsed.Scheme = "https"
+	parsed.Host = host
+
+	return parsed.String(), true
+}
+
+func isAllowedYouTubeEmbedURL(parsed *url.URL) bool {
+	if parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" || parsed.Fragment != "" {
+		return false
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if host != "www.youtube.com" && host != "www.youtube-nocookie.com" {
+		return false
+	}
+
+	videoID, ok := strings.CutPrefix(parsed.EscapedPath(), "/embed/")
+
+	return ok && videoID != "" && !strings.Contains(videoID, "/") && isYouTubeVideoID(videoID)
+}
+
+func isYouTubeVideoID(value string) bool {
+	if len(value) > youtubeVideoIDMaxLength {
+		return false
+	}
+
+	return strings.IndexFunc(value, func(char rune) bool {
+		return !strings.ContainsRune(youtubeVideoIDChars, char)
+	}) == -1
 }
 
 func sanitizeSummaryLink(raw string, base *url.URL) (string, bool) {
@@ -375,6 +445,16 @@ func sanitizeSummaryLink(raw string, base *url.URL) (string, bool) {
 func hasSummaryImageSource(node *html.Node) bool {
 	for _, attr := range node.Attr {
 		if attr.Key == "src" || attr.Key == "srcset" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func hasSummaryAttr(node *html.Node, key string) bool {
+	for _, attr := range node.Attr {
+		if attr.Key == key {
 			return true
 		}
 	}

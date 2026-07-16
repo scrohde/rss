@@ -1977,6 +1977,18 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   border-radius: 10px;
 }
 
+.content-panel-body iframe,
+.mobile-reader-body iframe {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  margin: 0 0 0.95em;
+  border: 0;
+  border-radius: 10px;
+}
+
 .content-panel-body a {
   color: var(--accent);
 }

@@ -262,18 +262,35 @@ func TestRewriteSummaryHTMLDropsUnsafeIframeSrc(t *testing.T) {
 	}
 }
 
-func TestRewriteSummaryHTMLDropsYouTubeEmbed(t *testing.T) {
+func TestRewriteSummaryHTMLAllowsYouTubeEmbed(t *testing.T) {
 	t.Parallel()
 
-	input := `<iframe src="https://www.youtube.com/embed/0YhJxJZOWBw?feature=oembed"></iframe>`
+	input := `<iframe width="200" height="113" src="https://www.youtube.com/embed/0YhJxJZOWBw?feature=oembed" ` +
+		`frameborder="0" allow="autoplay" onclick="attack()" title="An interview"></iframe>`
 	output := sanitizedSummaryString(input, "")
 
-	if output != "" {
-		t.Fatalf("expected iframe removed, got %q", output)
+	wantAttrs := []string{
+		`<iframe width="200" height="113" src="https://www.youtube.com/embed/0YhJxJZOWBw?feature=oembed"`,
+		`title="An interview"`,
+		`loading="lazy"`,
+		`referrerpolicy="strict-origin-when-cross-origin"`,
+		`sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"`,
+		`allow="encrypted-media; picture-in-picture; fullscreen"`,
+		`allowfullscreen=""`,
+	}
+	for _, want := range wantAttrs {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected hardened YouTube iframe attribute %q, got %q", want, output)
+		}
+	}
+
+	if strings.Contains(output, "onclick") || strings.Contains(output, "frameborder") ||
+		strings.Contains(output, `allow="autoplay"`) {
+		t.Fatalf("expected feed-provided active attributes removed, got %q", output)
 	}
 }
 
-func TestRewriteSummaryHTMLDropsShortYouTubeEmbed(t *testing.T) {
+func TestRewriteSummaryHTMLDropsNonEmbedYouTubeURL(t *testing.T) {
 	t.Parallel()
 
 	input := `<iframe src="https://youtu.be/Jr2auYrBDA4"></iframe>`
@@ -281,6 +298,39 @@ func TestRewriteSummaryHTMLDropsShortYouTubeEmbed(t *testing.T) {
 
 	if output != "" {
 		t.Fatalf("expected iframe removed, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLAllowsYouTubeNoCookieEmbed(t *testing.T) {
+	t.Parallel()
+
+	input := `<iframe src="https://www.youtube-nocookie.com/embed/Jr2auYrBDA4"></iframe>`
+	output := sanitizedSummaryString(input, "")
+
+	if !strings.Contains(output, `src="https://www.youtube-nocookie.com/embed/Jr2auYrBDA4"`) {
+		t.Fatalf("expected youtube-nocookie embed preserved, got %q", output)
+	}
+
+	if !strings.Contains(output, `title="YouTube video"`) {
+		t.Fatalf("expected fallback iframe title, got %q", output)
+	}
+}
+
+func TestRewriteSummaryHTMLDropsUntrustedIframeHostsAndPaths(t *testing.T) {
+	t.Parallel()
+
+	inputs := []string{
+		`<iframe src="https://example.com/embed/Jr2auYrBDA4"></iframe>`,
+		`<iframe src="https://www.youtube.com/watch?v=Jr2auYrBDA4"></iframe>`,
+		`<iframe src="https://www.youtube.com.evil.test/embed/Jr2auYrBDA4"></iframe>`,
+		`<iframe src="http://www.youtube.com/embed/Jr2auYrBDA4"></iframe>`,
+		`<iframe src="https://www.youtube.com/embed/a%2Fb"></iframe>`,
+	}
+
+	for _, input := range inputs {
+		if output := sanitizedSummaryString(input, ""); output != "" {
+			t.Fatalf("expected unsafe iframe removed for %q, got %q", input, output)
+		}
 	}
 }
 
