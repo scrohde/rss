@@ -6,7 +6,7 @@
       {{else if .Items}}
         <div class="mobile-stream-list">
           {{range .Items}}
-            <article class="mobile-card">
+            <article class="mobile-card" id="mobile-card-{{.ID}}" data-mobile-item-id="{{.ID}}">
               <div class="mobile-card-meta">
                 <span class="mobile-card-source">{{.FeedTitle}}</span>
                 <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>

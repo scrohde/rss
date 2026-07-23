@@ -2367,16 +2367,17 @@ html[data-theme="dark"] .mobile-reader-body {
 
 @media (max-width: 960px) {
   body {
-    height: 100vh;
-    height: 100dvh;
-    overflow: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
+    overflow: visible;
   }
 
   .page {
-    height: 100vh;
-    height: 100dvh;
-    min-height: 0;
-    overflow: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: auto;
+    overflow: visible;
   }
 
   .topbar {
@@ -2445,8 +2446,9 @@ html[data-theme="dark"] .mobile-reader-body {
 
   .app {
     display: block;
+    flex: 1 0 auto;
     min-height: 0;
-    overflow: auto;
+    overflow: visible;
   }
 
   .feed-panel {

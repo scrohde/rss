@@ -5909,6 +5909,12 @@ func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
 	assertContains(
 		t,
 		body,
+		fmt.Sprintf(`id="mobile-card-%d" data-mobile-item-id="%d"`, alphaItems[0].ID, alphaItems[0].ID),
+		"expected selected-feed mobile card to expose stable item hooks",
+	)
+	assertContains(
+		t,
+		body,
 		fmt.Sprintf(`/mobile/items/%d/reader?selected_feed_id=%d`, alphaItems[0].ID, alphaID),
 		"expected reader action to preserve selected feed",
 	)

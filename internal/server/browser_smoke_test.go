@@ -954,6 +954,71 @@ func TestBrowserSmokeMobileFilteredFeedFlows(t *testing.T) {
 	runMobileFilteredEmptyStateFlow(t, ctx, fixture)
 }
 
+//nolint:funlen // One browser journey verifies the mobile scroll owner across stream, reader, and breakpoint swaps.
+func TestBrowserSmokeMobileDocumentScrolling(t *testing.T) {
+	app := newSmokeApp(t)
+	feedID := mustUpsertFeed(t, app, "https://example.com/mobile-document-scroll.xml", "Document Scroll")
+	base := time.Date(2026, time.January, 3, 12, 0, 0, 0, time.UTC)
+	feedItems := make([]*gofeed.Item, 0, mobileAggregateItemPageLimit)
+	for index := range mobileAggregateItemPageLimit {
+		item := newSmokeItem(
+			fmt.Sprintf("Document Scroll %02d", index+1),
+			fmt.Sprintf("https://example.com/mobile-document-scroll/%d", index+1),
+			fmt.Sprintf("mobile-document-scroll-%d", index+1),
+			base.Add(-time.Duration(index)*time.Minute),
+		)
+		if index == 0 {
+			item.Content = strings.Repeat(
+				"<p>Long mobile reader content keeps the document scroll surface active.</p>",
+				40,
+			)
+		}
+		feedItems = append(feedItems, item)
+	}
+	mustUpsertItems(t, app, feedID, feedItems)
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, mobileAggregateItemPageLimit)
+	firstItemID := items[0].ID
+
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(1365, 1024),
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for document scroll flow")
+	waitForJS(t, ctx, desktopLayoutExpression(), "initial desktop layout for document scroll flow")
+
+	runActions(t, ctx, chromedp.EmulateViewport(390, 568))
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "live desktop-to-mobile scroll transition")
+	waitForJS(t, ctx, htmxSettledExpression(), "desktop-to-mobile scroll transition settle")
+	waitForJS(
+		t,
+		ctx,
+		mobileDocumentScrollSurfaceExpression(firstItemID),
+		"mobile stream uses the document scroll surface",
+	)
+	runActions(t, ctx, chromedp.Evaluate(`window.scrollTo(0, document.scrollingElement.scrollHeight)`, nil))
+	waitForJS(t, ctx, mobileDocumentScrolledExpression(), "mobile stream document scroll")
+
+	firstReaderSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", firstItemID)
+	clickElement(t, ctx, firstReaderSelector, "open long mobile reader")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "long mobile reader loaded")
+	waitForJS(t, ctx, mobileDocumentScrollSurfaceExpression(0), "mobile reader uses the document scroll surface")
+	runActions(t, ctx, chromedp.Evaluate(`window.scrollTo(0, document.scrollingElement.scrollHeight)`, nil))
+	waitForJS(t, ctx, mobileDocumentScrolledExpression(), "mobile reader document scroll")
+
+	runActions(t, ctx, chromedp.EmulateViewport(1365, 1024))
+	waitForJS(t, ctx, responsiveDesktopLayoutExpression(feedID), "live mobile-to-desktop scroll transition")
+	waitForJS(t, ctx, htmxSettledExpression(), "mobile-to-desktop scroll transition settle")
+	waitForJS(t, ctx, desktopPanelScrollSurfaceExpression(), "desktop panel scroll surfaces remain intact")
+}
+
 func TestBrowserSmokePulseIndicatorFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
@@ -2646,6 +2711,71 @@ func htmxSettledExpression() string {
 
 func mobileLayoutExpression() string {
 	return `(() => window.matchMedia("(max-width: 960px)").matches)()`
+}
+
+func mobileDocumentScrollSurfaceExpression(itemID int64) string {
+	itemHookCheck := "true"
+	if itemID > 0 {
+		itemHookCheck = fmt.Sprintf(
+			`document.querySelector("#mobile-card-%d[data-mobile-item-id='%d']") !== null`,
+			itemID,
+			itemID,
+		)
+	}
+
+	return fmt.Sprintf(
+		`(() => {
+			const root = document.scrollingElement;
+			const body = document.body;
+			const page = document.querySelector(".page");
+			const app = document.querySelector(".app");
+			const main = document.querySelector(".main-panel");
+			if (!root || !body || !page || !app || !main) return false;
+			const bodyStyle = getComputedStyle(body);
+			const pageStyle = getComputedStyle(page);
+			const appStyle = getComputedStyle(app);
+			return window.matchMedia("(max-width: 960px)").matches &&
+				root.scrollHeight > innerHeight &&
+				bodyStyle.height !== innerHeight + "px" &&
+				bodyStyle.overflowY === "visible" &&
+				pageStyle.overflowY === "visible" &&
+				appStyle.overflowY === "visible" &&
+				getComputedStyle(main).overflowY === "visible" &&
+				%s;
+		})()`,
+		itemHookCheck,
+	)
+}
+
+func mobileDocumentScrolledExpression() string {
+	return `(() => {
+		const app = document.querySelector(".app");
+		const topbar = document.querySelector(".topbar");
+		const actions = document.querySelector(".mobile-reader-actions");
+		if (!app || !topbar || window.scrollY <= 0 || app.scrollTop !== 0) return false;
+		const topbarRect = topbar.getBoundingClientRect();
+		if (Math.abs(topbarRect.top) > 1) return false;
+		if (!actions) return true;
+		const actionsRect = actions.getBoundingClientRect();
+		return actionsRect.top >= 0 && actionsRect.bottom <= innerHeight;
+	})()`
+}
+
+func desktopPanelScrollSurfaceExpression() string {
+	return `(() => {
+		const body = document.body;
+		const page = document.querySelector(".page");
+		const app = document.querySelector(".app");
+		const feed = document.querySelector(".feed-panel");
+		const main = document.querySelector(".main-panel");
+		if (!body || !page || !app || !feed || !main) return false;
+		return !window.matchMedia("(max-width: 960px)").matches &&
+			getComputedStyle(body).overflowY === "hidden" &&
+			getComputedStyle(page).overflowY === "hidden" &&
+			getComputedStyle(app).overflowY === "hidden" &&
+			getComputedStyle(feed).overflowY === "auto" &&
+			getComputedStyle(main).overflowY === "auto";
+	})()`
 }
 
 func mobileAggregateSectionOrderExpression(feedIDs ...int64) string {
