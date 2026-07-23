@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
@@ -1171,6 +1172,289 @@ func TestBrowserSmokeMobileReaderHistoryFallbacks(t *testing.T) {
 	waitForJS(t, ctx, pathnameExpression(pathMobileStream), "direct reader back stream URL")
 	if got := streamRequests.Load(); got != requestsBeforeBack+1 {
 		t.Fatalf("expected direct reader back to issue one normal stream request, got %d after %d", got, requestsBeforeBack)
+	}
+}
+
+//nolint:funlen,revive // One gesture journey covers rejection, cancellation, in-flight locking, and both endpoints.
+func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
+	app := newSmokeApp(t)
+	feedID := mustUpsertFeed(t, app, "not a valid feed url", "Pull Refresh Feed")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Pull Refresh Story",
+		"https://example.com/pull-refresh-story",
+		"pull-refresh-story",
+		time.Now().UTC().Add(-time.Hour),
+	)
+
+	var refreshRequests atomic.Int64
+	var forceRefreshFailure atomic.Bool
+	refreshStarted := make(chan string, 8)
+	releaseRefresh := make(chan struct{}, 8)
+	t.Cleanup(func() {
+		close(releaseRefresh)
+	})
+
+	selectedRefreshPath := fmt.Sprintf(pathMobileFeedRefresh, feedID)
+	routes := app.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && (r.URL.Path == pathMobilePulse || r.URL.Path == selectedRefreshPath) {
+			refreshRequests.Add(1)
+			refreshStarted <- r.URL.RequestURI()
+			<-releaseRefresh
+			if r.Context().Err() != nil {
+				return
+			}
+			if forceRefreshFailure.Swap(false) {
+				http.Error(w, "forced pull-refresh failure", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		routes.ServeHTTP(w, r)
+	})
+	server := newSmokeServer(t, handler)
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 568),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for mobile pull refresh")
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "short mobile stream for pull refresh")
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "idle pull-refresh indicator")
+
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		".mobile-card-open",
+		"touchstart",
+		180,
+		100,
+		1,
+		false,
+		"interactive touch start",
+	)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		".mobile-card-open",
+		"touchmove",
+		182,
+		220,
+		1,
+		false,
+		"interactive vertical move",
+	)
+	dispatchSyntheticTouch(t, ctx, ".mobile-card-open", "touchend", 182, 220, 0)
+
+	streamSelector := `[data-mobile-stream="true"]`
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 16, 120, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		116,
+		132,
+		1,
+		false,
+		"horizontal edge gesture",
+	)
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchend", 116, 132, 0)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "horizontal gesture leaves pull refresh idle")
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 2)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		182,
+		220,
+		2,
+		false,
+		"multitouch gesture",
+	)
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchcancel", 182, 220, 0)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "multitouch leaves pull refresh idle")
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		182,
+		132,
+		1,
+		true,
+		"claimed sub-threshold pull",
+	)
+	waitForJS(t, ctx, mobilePullRefreshStateExpression("pulling"), "sub-threshold pulling state")
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchend",
+		182,
+		132,
+		0,
+		true,
+		"sub-threshold release",
+	)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "sub-threshold pull springs idle")
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		181,
+		150,
+		1,
+		true,
+		"claimed pull before cancellation",
+	)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchcancel",
+		181,
+		150,
+		0,
+		true,
+		"claimed touch cancellation",
+	)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "touch cancellation springs idle")
+	if got := refreshRequests.Load(); got != 0 {
+		t.Fatalf("non-activating gestures issued %d refresh request(s)", got)
+	}
+
+	performSyntheticPullToRefresh(t, ctx, streamSelector)
+	if got := awaitRefreshPath(t, refreshStarted); got != pathMobilePulse {
+		t.Fatalf("expected all-feeds pull endpoint %q, got %q", pathMobilePulse, got)
+	}
+	waitForJS(t, ctx, mobilePullRefreshingExpression(), "all-feeds pull refreshing state")
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		181,
+		230,
+		1,
+		false,
+		"repeated pull while refresh is pending",
+	)
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchend", 181, 230, 0)
+	if got := refreshRequests.Load(); got != 1 {
+		t.Fatalf("repeated in-flight pull changed request count to %d", got)
+	}
+
+	releaseRefresh <- struct{}{}
+	waitForJS(t, ctx, mobilePullRefreshCompleteExpression(), "all-feeds pull completion reset")
+	waitForJS(t, ctx, htmxSettledExpression(), "all-feeds pull HTMX settle")
+
+	selectMobileFeedFilter(t, ctx, feedID)
+	filteredStreamPath := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, feedID)
+	waitForJS(t, ctx, requestURIExpression(filteredStreamPath), "filtered stream before selected pull")
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "filtered pull-refresh indicator idle")
+
+	performSyntheticPullToRefresh(t, ctx, streamSelector)
+	expectedSelectedPath := fmt.Sprintf(pathMobileFeedRefresh+"?selected_feed_id=%d", feedID, feedID)
+	if got := awaitRefreshPath(t, refreshStarted); got != expectedSelectedPath {
+		t.Fatalf("expected selected-feed pull endpoint %q, got %q", expectedSelectedPath, got)
+	}
+	waitForJS(t, ctx, mobilePullRefreshingExpression(), "selected-feed pull refreshing state")
+	releaseRefresh <- struct{}{}
+	waitForJS(t, ctx, mobilePullRefreshCompleteExpression(), "selected-feed pull completion reset")
+	waitForJS(t, ctx, requestURIExpression(filteredStreamPath), "selected-feed pull preserves stream URL")
+	if got := refreshRequests.Load(); got != 2 {
+		t.Fatalf("expected exactly two completed pull refresh requests, got %d", got)
+	}
+
+	performSyntheticPullToRefresh(t, ctx, streamSelector)
+	if got := awaitRefreshPath(t, refreshStarted); got != expectedSelectedPath {
+		t.Fatalf("expected navigation-aborted pull endpoint %q, got %q", expectedSelectedPath, got)
+	}
+	waitForJS(t, ctx, mobilePullRefreshingExpression(), "navigation-aborted pull refreshing state")
+	selectMobileFeedFilter(t, ctx, 0)
+	waitForJS(t, ctx, requestURIExpression(pathMobileStream), "filter change replaces pending refresh stream")
+	waitForJS(t, ctx, mobilePullRefreshCanceledExpression(), "filter change cancels pending pull refresh")
+	releaseRefresh <- struct{}{}
+	waitForJS(t, ctx, htmxSettledExpression(), "navigation-aborted pull HTMX settle")
+	if got := refreshRequests.Load(); got != 3 {
+		t.Fatalf("expected filter change to leave three pull requests, got %d", got)
+	}
+
+	forceRefreshFailure.Store(true)
+	performSyntheticPullToRefresh(t, ctx, streamSelector)
+	if got := awaitRefreshPath(t, refreshStarted); got != pathMobilePulse {
+		t.Fatalf("expected forced-failure pull endpoint %q, got %q", pathMobilePulse, got)
+	}
+	waitForJS(t, ctx, mobilePullRefreshingExpression(), "forced-failure pull refreshing state")
+	releaseRefresh <- struct{}{}
+	waitForJS(t, ctx, mobilePullRefreshFailedExpression(), "failed pull resets state and lock")
+	waitForJS(t, ctx, htmxSettledExpression(), "failed pull HTMX settle")
+
+	performSyntheticPullToRefresh(t, ctx, streamSelector)
+	if got := awaitRefreshPath(t, refreshStarted); got != pathMobilePulse {
+		t.Fatalf("expected post-failure retry endpoint %q, got %q", pathMobilePulse, got)
+	}
+	releaseRefresh <- struct{}{}
+	waitForJS(t, ctx, mobilePullRefreshCompleteExpression(), "post-failure pull retry completes")
+	if got := refreshRequests.Load(); got != 5 {
+		t.Fatalf("expected failure and retry to leave five pull requests, got %d", got)
+	}
+
+	runActions(
+		t,
+		ctx,
+		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{
+			{Name: "prefers-reduced-motion", Value: "reduce"},
+		}),
+	)
+	waitForJS(t, ctx, mobilePullReducedMotionExpression("idle"), "reduced-motion idle feedback")
+	performSyntheticPullToRefresh(t, ctx, streamSelector)
+	if got := awaitRefreshPath(t, refreshStarted); got != pathMobilePulse {
+		t.Fatalf("expected reduced-motion pull endpoint %q, got %q", pathMobilePulse, got)
+	}
+	waitForJS(t, ctx, mobilePullRefreshingExpression(), "reduced-motion pull refreshing state")
+	waitForJS(t, ctx, mobilePullReducedMotionExpression("refreshing"), "reduced-motion refreshing feedback")
+	releaseRefresh <- struct{}{}
+	waitForJS(t, ctx, mobilePullRefreshCompleteExpression(), "reduced-motion pull completion reset")
+	if got := refreshRequests.Load(); got != 6 {
+		t.Fatalf("expected reduced-motion pull to leave six pull requests, got %d", got)
+	}
+
+	readerSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", mustListItems(t, app, feedID)[0].ID)
+	clickElement(t, ctx, readerSelector, "open mobile reader before pull-disabled check")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "reader loaded for pull-disabled check")
+	waitForJS(t, ctx, elementAbsentExpression(`[data-mobile-pull-refresh]`), "pull indicator absent in reader")
+	dispatchSyntheticTouch(t, ctx, ".mobile-reader-article", "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		".mobile-reader-article",
+		"touchmove",
+		181,
+		230,
+		1,
+		false,
+		"reader vertical touch",
+	)
+	dispatchSyntheticTouch(t, ctx, ".mobile-reader-article", "touchend", 181, 230, 0)
+	if got := refreshRequests.Load(); got != 6 {
+		t.Fatalf("reader touch changed refresh request count to %d", got)
 	}
 }
 
@@ -2472,6 +2756,128 @@ func clickElementWithDetail(t *testing.T, ctx context.Context, selector, label s
 	waitForJS(t, ctx, htmxSettledExpression(), label+" HTMX settle")
 }
 
+func dispatchSyntheticTouch(
+	t *testing.T,
+	ctx context.Context,
+	selector, eventName string,
+	clientX, clientY, touchCount int,
+) bool {
+	t.Helper()
+
+	expression := fmt.Sprintf(
+		`(() => {
+			const target = document.querySelector(%q);
+			if (!target) {
+				return { found: false, prevented: false };
+			}
+			const makeTouch = (identifier, offset) => ({
+				identifier,
+				target,
+				clientX: %d + offset,
+				clientY: %d + offset,
+				pageX: %d + offset,
+				pageY: %d + offset,
+				screenX: %d + offset,
+				screenY: %d + offset,
+			});
+			const primaryTouch = makeTouch(37, 0);
+			const touches = Array.from(
+				{ length: %d },
+				(_value, index) => index === 0 ? primaryTouch : makeTouch(37 + index, index * 8),
+			);
+			const event = new Event(%q, {
+				bubbles: true,
+				cancelable: true,
+				composed: true,
+			});
+			Object.defineProperties(event, {
+				touches: { value: touches },
+				targetTouches: { value: touches },
+				changedTouches: { value: [primaryTouch] },
+			});
+			target.dispatchEvent(event);
+			return { found: true, prevented: event.defaultPrevented };
+		})()`,
+		selector,
+		clientX,
+		clientY,
+		clientX,
+		clientY,
+		clientX,
+		clientY,
+		touchCount,
+		eventName,
+	)
+
+	var result struct {
+		Found     bool `json:"found"`
+		Prevented bool `json:"prevented"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &result)); err != nil {
+		t.Fatalf("dispatch synthetic %s on %s: %v", eventName, selector, err)
+	}
+	if !result.Found {
+		t.Fatalf("dispatch synthetic %s: selector %s was not found", eventName, selector)
+	}
+	return result.Prevented
+}
+
+func assertSyntheticTouchPrevented(
+	t *testing.T,
+	ctx context.Context,
+	selector, eventName string,
+	clientX, clientY, touchCount int,
+	wantPrevented bool,
+	label string,
+) {
+	t.Helper()
+
+	if got := dispatchSyntheticTouch(t, ctx, selector, eventName, clientX, clientY, touchCount); got != wantPrevented {
+		t.Fatalf("%s: synthetic %s defaultPrevented = %t, want %t", label, eventName, got, wantPrevented)
+	}
+}
+
+func performSyntheticPullToRefresh(t *testing.T, ctx context.Context, streamSelector string) {
+	t.Helper()
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		181,
+		230,
+		1,
+		true,
+		"armed pull",
+	)
+	waitForJS(t, ctx, mobilePullRefreshStateExpression("ready"), "armed pull-refresh state")
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchend",
+		181,
+		230,
+		0,
+		true,
+		"armed pull release",
+	)
+}
+
+func awaitRefreshPath(t *testing.T, refreshStarted <-chan string) string {
+	t.Helper()
+
+	select {
+	case path := <-refreshStarted:
+		return path
+	case <-time.After(smokeWaitTimeout):
+		t.Fatal("timed out waiting for pull-refresh request")
+		return ""
+	}
+}
+
 func scrollCardToViewportOffset(t *testing.T, ctx context.Context, selector string, offset int) {
 	t.Helper()
 
@@ -2920,6 +3326,118 @@ func htmxSettledExpression() string {
 
 func mobileLayoutExpression() string {
 	return `(() => window.matchMedia("(max-width: 960px)").matches)()`
+}
+
+func mobilePullRefreshStateExpression(state string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+			const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+			if (!stream || !indicator || !surface || indicator.dataset.state !== %q) {
+				return false;
+			}
+			const distance = Number.parseFloat(surface.style.getPropertyValue("--mobile-pull-distance"));
+			return Number.isFinite(distance) && distance > 0;
+		})()`,
+		state,
+	)
+}
+
+func mobilePullRefreshIdleExpression() string {
+	return `(() => {
+		const stream = document.querySelector("[data-mobile-stream='true']");
+		const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+		const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+		const label = indicator ? indicator.querySelector("[data-mobile-pull-label]") : null;
+		if (!stream || !indicator || !surface || !label) return false;
+		const distance = Number.parseFloat(surface.style.getPropertyValue("--mobile-pull-distance") || "0");
+		return indicator.dataset.state === "idle" &&
+			label.textContent.trim() === "Pull to refresh" &&
+			!stream.hasAttribute("data-mobile-pull-tracking") &&
+			Number.isFinite(distance) &&
+			distance <= 0;
+	})()`
+}
+
+func mobilePullRefreshingExpression() string {
+	return `(() => {
+		const stream = document.querySelector("[data-mobile-stream='true']");
+		const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+		const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+		const label = indicator ? indicator.querySelector("[data-mobile-pull-label]") : null;
+		const announcement = indicator ? indicator.querySelector("[data-mobile-pull-announcement]") : null;
+		if (!stream || !indicator || !surface || !label || !announcement) return false;
+		const distance = Number.parseFloat(surface.style.getPropertyValue("--mobile-pull-distance"));
+		return indicator.dataset.state === "refreshing" &&
+			label.textContent.trim() === "Refreshing" &&
+			announcement.textContent.trim().length > 0 &&
+			Number.isFinite(distance) &&
+			distance > 0;
+	})()`
+}
+
+func mobilePullRefreshCompleteExpression() string {
+	return `(() => {
+		const stream = document.querySelector("[data-mobile-stream='true']");
+		const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+		const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+		const announcement = indicator ? indicator.querySelector("[data-mobile-pull-announcement]") : null;
+		if (!stream || !indicator || !surface || !announcement) return false;
+		const distance = Number.parseFloat(surface.style.getPropertyValue("--mobile-pull-distance") || "0");
+		return indicator.dataset.state === "idle" &&
+			announcement.textContent.trim() === "Refresh complete." &&
+			!stream.hasAttribute("data-mobile-pull-tracking") &&
+			Number.isFinite(distance) &&
+			distance <= 0;
+	})()`
+}
+
+func mobilePullRefreshCanceledExpression() string {
+	return `(() => {
+		const stream = document.querySelector("[data-mobile-stream='true']");
+		const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+		const announcement = indicator ? indicator.querySelector("[data-mobile-pull-announcement]") : null;
+		return !!stream && !!indicator && !!announcement &&
+			indicator.dataset.state === "idle" &&
+			announcement.textContent.trim() === "Refresh canceled." &&
+			!stream.hasAttribute("data-mobile-pull-tracking");
+	})()`
+}
+
+func mobilePullRefreshFailedExpression() string {
+	return `(() => {
+		const stream = document.querySelector("[data-mobile-stream='true']");
+		const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+		const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+		const announcement = indicator ? indicator.querySelector("[data-mobile-pull-announcement]") : null;
+		if (!stream || !indicator || !surface || !announcement) return false;
+		const distance = Number.parseFloat(surface.style.getPropertyValue("--mobile-pull-distance") || "0");
+		return indicator.dataset.state === "idle" &&
+			announcement.textContent.trim() === "Refresh failed." &&
+			!stream.hasAttribute("data-mobile-pull-tracking") &&
+			Number.isFinite(distance) &&
+			distance <= 0;
+	})()`
+}
+
+func mobilePullReducedMotionExpression(state string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+			const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+			const icon = indicator ? indicator.querySelector(".mobile-pull-refresh-icon") : null;
+			if (!stream || !indicator || !surface || !icon) return false;
+			return matchMedia("(prefers-reduced-motion: reduce)").matches &&
+				indicator.dataset.state === %q &&
+				getComputedStyle(surface).transitionDuration === "0s" &&
+				getComputedStyle(indicator).transitionDuration === "0s" &&
+				getComputedStyle(icon).transitionDuration === "0s" &&
+				getComputedStyle(icon).animationName === "none";
+		})()`,
+		state,
+	)
 }
 
 func mobileDocumentScrollSurfaceExpression(itemID int64) string {

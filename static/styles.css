@@ -2496,6 +2496,74 @@ html[data-theme="dark"] .mobile-reader-body {
     animation: mobile-fade-in 0.22s ease;
   }
 
+  #mobile-stream-content {
+    --mobile-pull-distance: 0px;
+    position: relative;
+    transform: translate3d(0, var(--mobile-pull-distance), 0);
+    transition: transform 0.34s cubic-bezier(0.22, 1.35, 0.36, 1);
+    will-change: transform;
+  }
+
+  .mobile-stream[data-mobile-pull-tracking="true"] #mobile-stream-content {
+    transition: none;
+  }
+
+  .mobile-pull-refresh {
+    position: absolute;
+    top: -38px;
+    right: 0;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    justify-content: center;
+    height: 34px;
+    color: var(--muted);
+    opacity: 0;
+    pointer-events: none;
+    transition: color 0.16s ease, opacity 0.16s ease;
+  }
+
+  .mobile-pull-refresh[data-state="pulling"],
+  .mobile-pull-refresh[data-state="ready"],
+  .mobile-pull-refresh[data-state="refreshing"] {
+    opacity: 1;
+  }
+
+  .mobile-pull-refresh[data-state="ready"],
+  .mobile-pull-refresh[data-state="refreshing"] {
+    color: var(--accent);
+  }
+
+  .mobile-pull-refresh-visual {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 11px;
+    border: 1px solid var(--mobile-status-border);
+    border-radius: 999px;
+    background: var(--mobile-status-bg);
+    box-shadow: var(--mobile-card-shadow);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(8px);
+  }
+
+  .mobile-pull-refresh-icon {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.2s ease;
+  }
+
+  .mobile-pull-refresh[data-state="ready"] .mobile-pull-refresh-icon {
+    transform: rotate(90deg);
+  }
+
+  .mobile-pull-refresh[data-state="refreshing"] .mobile-pull-refresh-icon {
+    animation: mobile-pull-refresh-spin 0.8s linear infinite;
+  }
+
   .mobile-reader {
     --mobile-reader-fab-top: max(52px, calc(env(safe-area-inset-top) + 46px));
     --mobile-reader-fab-size: 34px;
@@ -2858,6 +2926,24 @@ html[data-theme="dark"] .mobile-reader-body {
       opacity: 1;
       transform: translateY(0);
     }
+  }
+
+  @keyframes mobile-pull-refresh-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+@media (max-width: 960px) and (prefers-reduced-motion: reduce) {
+  #mobile-stream-content,
+  .mobile-pull-refresh,
+  .mobile-pull-refresh-icon {
+    transition: none;
+  }
+
+  .mobile-pull-refresh[data-state="refreshing"] .mobile-pull-refresh-icon {
+    animation: none;
   }
 }
 

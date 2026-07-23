@@ -1,6 +1,24 @@
 {{define "mobile_stream"}}
   <section class="mobile-stream" data-mobile-stream="true">
     <div id="mobile-stream-content">
+      <div class="mobile-pull-refresh" data-mobile-pull-refresh data-state="idle">
+        <div class="mobile-pull-refresh-visual" aria-hidden="true">
+          <svg class="mobile-pull-refresh-icon" viewBox="0 0 24 24" fill="none">
+            <path d="M19 8A8 8 0 1 0 20 14" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" />
+            <path d="M16 4L19 8L15 10" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span data-mobile-pull-label>Pull to refresh</span>
+        </div>
+        <span
+          class="sr-only"
+          data-mobile-pull-announcement
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        ></span>
+      </div>
       {{if .Aggregate}}
         {{template "mobile_stream_sections" .Aggregate}}
       {{else if .Items}}

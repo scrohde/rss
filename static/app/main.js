@@ -8,6 +8,7 @@ import * as feed from "./feed-panel.js";
 import * as content from "./content-panel.js";
 import * as mobile from "./mobile.js";
 import { bindMobileReaderNavigation } from "./mobile-navigation.js";
+import { bindMobilePullRefresh } from "./mobile-pull-refresh.js";
 import { bindKeyboardShortcuts } from "./keyboard.js";
 import { bindHTMXLifecycle } from "./htmx.js";
 
@@ -43,4 +44,5 @@ bindHTMXLifecycle({
 });
 
 bindMobileReaderNavigation();
+bindMobilePullRefresh();
 mobile.bindMobileBootstrap();
