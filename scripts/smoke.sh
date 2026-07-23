@@ -11,7 +11,9 @@ GO_BUILD_CACHE="${GO_BUILD_CACHE:-/tmp/go-build-cache}"
 mkdir -p "$GO_BUILD_CACHE"
 export GOCACHE="$GO_BUILD_CACHE"
 
-SMOKE_PATTERN='TestBrowserSmoke(AuthLoginSwitchesFromConditionalToExplicit|AuthLoginUnsupportedFallback|InactiveFeedContentBoundary|ReaderFlows|PulseIndicatorFlows)'
+SMOKE_PATTERN='TestBrowserSmoke('
+SMOKE_PATTERN+='AuthLoginSwitchesFromConditionalToExplicit|AuthLoginUnsupportedFallback|'
+SMOKE_PATTERN+='InactiveFeedContentBoundary|ReaderFlows|PulseIndicatorFlows|Mobile)'
 
 echo "==> go test -tags=smoke -count=1 ./internal/server -run ${SMOKE_PATTERN}"
 go test -tags=smoke -count=1 ./internal/server -run "${SMOKE_PATTERN}" "$@"

@@ -1485,6 +1485,46 @@ func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "short mobile stream for pull refresh")
 	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "idle pull-refresh indicator")
 
+	streamSelector := `[data-mobile-stream="true"]`
+	waitForJS(
+		t,
+		ctx,
+		`(() => {
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			if (!stream) return false;
+			stream.style.minHeight = String(innerHeight + 400) + "px";
+			window.scrollTo(0, 160);
+			return window.scrollY >= 100;
+		})()`,
+		"scrollable pull-refresh fixture away from document top",
+	)
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		181,
+		230,
+		1,
+		false,
+		"vertical pull away from document top",
+	)
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchend", 181, 230, 0)
+	waitForJS(
+		t,
+		ctx,
+		`(() => {
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			if (!stream) return false;
+			stream.style.removeProperty("min-height");
+			window.scrollTo(0, 0);
+			return window.scrollY === 0;
+		})()`,
+		"restore pull-refresh fixture to document top",
+	)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "away-from-top pull leaves indicator idle")
+
 	assertSyntheticTouchPrevented(
 		t,
 		ctx,
@@ -1509,7 +1549,6 @@ func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 	)
 	dispatchSyntheticTouch(t, ctx, ".mobile-card-open", "touchend", 182, 220, 0)
 
-	streamSelector := `[data-mobile-stream="true"]`
 	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 16, 120, 1)
 	assertSyntheticTouchPrevented(
 		t,
