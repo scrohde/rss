@@ -55,6 +55,10 @@ type mobileAggregateSmokeFixture struct {
 	laterItemID      int64
 }
 
+type mobileReaderNavigationSmokeFixture struct {
+	itemIDs []int64
+}
+
 func TestBrowserSmokeAuthLoginSwitchesFromConditionalToExplicit(t *testing.T) {
 	app := newAuthEnabledTestApp(t)
 	staticRoot := filepath.Join(pathParentDir, pathParentDir, "static")
@@ -696,11 +700,7 @@ func TestBrowserSmokeMobileReaderFlows(t *testing.T) {
 		"secondary item present in mobile stream before reading",
 	)
 
-	aggregateState := mobileAggregateState{
-		FeedCursor: nil,
-		ItemCursor: nil,
-		FeedID:     fixture.secondaryFeedID,
-	}
+	aggregateState := mobileAggregateState{}
 	firstReaderSelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", fixture.secondaryFirstItemID)
 	clickElement(t, ctx, firstReaderSelector, "open first mobile aggregate reader")
 	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "mobile reader loaded")
@@ -1019,6 +1019,161 @@ func TestBrowserSmokeMobileDocumentScrolling(t *testing.T) {
 	waitForJS(t, ctx, desktopPanelScrollSurfaceExpression(), "desktop panel scroll surfaces remain intact")
 }
 
+//nolint:funlen,revive // One history journey covers cached back, forward, repeat back, and cache-miss recovery.
+func TestBrowserSmokeMobileReaderHistoryNavigation(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedMobileReaderNavigationSmokeFixture(t, app)
+
+	var streamRequests atomic.Int64
+	var historyRestoreRequests atomic.Int64
+	routes := app.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == pathMobileStream && r.Header.Get("Hx-Request") == "true" {
+			if r.Header.Get("Hx-History-Restore-Request") == "true" {
+				historyRestoreRequests.Add(1)
+			} else {
+				streamRequests.Add(1)
+			}
+		}
+		routes.ServeHTTP(w, r)
+	})
+	server := newSmokeServer(t, handler)
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 568),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for mobile reader history")
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "mobile stream for reader history")
+	waitForJS(t, ctx, htmxSettledExpression(), "initial mobile stream history settle")
+	if got := streamRequests.Load(); got != 1 {
+		t.Fatalf("expected one mobile bootstrap stream request, got %d", got)
+	}
+
+	const targetIndex = 8
+	targetItemID := fixture.itemIDs[targetIndex]
+	targetSelector := fmt.Sprintf("#mobile-card-%d", targetItemID)
+	scrollCardToViewportOffset(t, ctx, targetSelector, 164)
+	waitForJS(t, ctx, mobileCardAtViewportOffsetExpression(targetItemID, 164), "history target card offset")
+
+	clickElement(t, ctx, targetSelector+" .mobile-card-open", "open reader with saved stream origin")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "history reader loaded")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderOriginStoredExpression(
+			targetItemID,
+			targetIndex,
+			fixture.itemIDs[targetIndex-1],
+			fixture.itemIDs[targetIndex+1],
+		),
+		"reader origin stored in history and session storage",
+	)
+	waitForJS(t, ctx, windowScrollYExpression(0), "reader starts at document top")
+
+	runActions(t, ctx, chromedp.Reload(), chromedp.WaitVisible(`[data-mobile-reader="true"]`, chromedp.ByQuery))
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready after reader reload")
+	waitForJS(t, ctx, mobileReaderNavigationStateExpression(targetItemID), "reader reload recovers session origin")
+
+	clickElement(t, ctx, ".mobile-reader-back", "history-backed visible reader back")
+	waitForJS(t, ctx, mobileReaderOriginRestoredExpression(targetItemID), "visible back restores stream anchor")
+	if got := streamRequests.Load(); got != 1 {
+		t.Fatalf("history-backed visible back issued a stream request: got %d total", got)
+	}
+	if got := historyRestoreRequests.Load(); got != 0 {
+		t.Fatalf("cached visible back unexpectedly missed HTMX history: got %d restore requests", got)
+	}
+
+	runActions(t, ctx, chromedp.Evaluate(`window.history.forward()`, nil))
+	waitForJS(t, ctx, mobileReaderNavigationStateExpression(targetItemID), "forward restores reader navigation state")
+	clickElement(t, ctx, ".mobile-reader-back", "visible back after forward history")
+	waitForJS(t, ctx, mobileReaderOriginRestoredExpression(targetItemID), "repeat back restores stream anchor")
+	if got := streamRequests.Load(); got != 1 {
+		t.Fatalf("repeat history-backed visible back issued a stream request: got %d total", got)
+	}
+
+	clickElement(t, ctx, targetSelector+" .mobile-card-open", "reopen reader before cache-miss back")
+	waitForJS(t, ctx, mobileReaderNavigationStateExpression(targetItemID), "reopened reader navigation state")
+	runActions(t, ctx, chromedp.Evaluate(`window.localStorage.removeItem("htmx-history-cache")`, nil))
+	clickElement(t, ctx, ".mobile-reader-back", "history cache-miss visible reader back")
+	waitForJS(t, ctx, mobileReaderOriginRestoredExpression(targetItemID), "cache miss restores stream anchor")
+	if got := historyRestoreRequests.Load(); got != 1 {
+		t.Fatalf("expected one HTMX history cache-miss request, got %d", got)
+	}
+	if got := streamRequests.Load(); got != 1 {
+		t.Fatalf("cache-miss history back used the normal stream request path: got %d total", got)
+	}
+}
+
+//nolint:funlen // One browser journey verifies failed-reader stability and direct-reader fallback semantics.
+func TestBrowserSmokeMobileReaderHistoryFallbacks(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedMobileReaderNavigationSmokeFixture(t, app)
+	failedItemID := fixture.itemIDs[9]
+	failedReaderPath := fmt.Sprintf("/mobile/items/%d/reader", failedItemID)
+
+	var streamRequests atomic.Int64
+	failedReaderRequests := make(chan struct{}, 1)
+	routes := app.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == failedReaderPath {
+			failedReaderRequests <- struct{}{}
+			http.Error(w, "forced reader failure", http.StatusInternalServerError)
+
+			return
+		}
+		if r.URL.Path == pathMobileStream && r.Header.Get("Hx-Request") == "true" &&
+			r.Header.Get("Hx-History-Restore-Request") != "true" {
+			streamRequests.Add(1)
+		}
+		routes.ServeHTTP(w, r)
+	})
+	server := newSmokeServer(t, handler)
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 568),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for mobile reader fallbacks")
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "mobile stream for reader fallbacks")
+	waitForJS(t, ctx, htmxSettledExpression(), "initial fallback stream settle")
+
+	failedCardSelector := fmt.Sprintf("#mobile-card-%d", failedItemID)
+	scrollCardToViewportOffset(t, ctx, failedCardSelector, 176)
+	runActions(t, ctx, chromedp.Evaluate(`window.__failedReaderScrollY = window.scrollY`, nil))
+	clickElement(t, ctx, failedCardSelector+" .mobile-card-open", "open forced failed reader")
+	select {
+	case <-failedReaderRequests:
+	case <-time.After(smokeWaitTimeout):
+		t.Fatal("forced failed reader request did not arrive")
+	}
+	waitForJS(t, ctx, htmxSettledExpression(), "failed reader request settles")
+	waitForJS(t, ctx, failedReaderPreservesStreamExpression(), "failed reader preserves stream position")
+
+	directItemID := fixture.itemIDs[2]
+	directReaderPath := fmt.Sprintf("/mobile/items/%d/reader", directItemID)
+	runActions(t, ctx, chromedp.Navigate(server.URL+directReaderPath))
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready on direct mobile reader")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-reader="true"]`), "direct mobile reader loaded")
+	waitForJS(t, ctx, directReaderHasNoOriginExpression(), "direct reader has no valid navigation origin")
+
+	requestsBeforeBack := streamRequests.Load()
+	clickElement(t, ctx, ".mobile-reader-back", "direct reader server-provided back")
+	waitForJS(t, ctx, elementPresentExpression(`[data-mobile-stream="true"]`), "direct reader back returns to stream")
+	waitForJS(t, ctx, pathnameExpression(pathMobileStream), "direct reader back stream URL")
+	if got := streamRequests.Load(); got != requestsBeforeBack+1 {
+		t.Fatalf("expected direct reader back to issue one normal stream request, got %d after %d", got, requestsBeforeBack)
+	}
+}
+
 func TestBrowserSmokePulseIndicatorFlows(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
@@ -1211,6 +1366,44 @@ func seedMobileAggregateSmokeFixture(t *testing.T, app *App) mobileAggregateSmok
 		highNewestItemID: highItems[0].ID,
 		highOldestItemID: highItems[mobileAggregateItemPageLimit].ID,
 		laterItemID:      laterItems[0].ID,
+	}
+}
+
+func seedMobileReaderNavigationSmokeFixture(t *testing.T, app *App) mobileReaderNavigationSmokeFixture {
+	t.Helper()
+
+	feedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-navigation.xml",
+		"Reader Navigation",
+	)
+	base := time.Date(2026, time.January, 4, 12, 0, 0, 0, time.UTC)
+	feedItems := make([]*gofeed.Item, 0, mobileAggregateItemPageLimit)
+	for index := range mobileAggregateItemPageLimit {
+		item := newSmokeItem(
+			fmt.Sprintf("Reader Navigation %02d", index+1),
+			fmt.Sprintf("https://example.com/mobile-reader-navigation/%d", index+1),
+			fmt.Sprintf("mobile-reader-navigation-%d", index+1),
+			base.Add(-time.Duration(index)*time.Minute),
+		)
+		item.Content = strings.Repeat(
+			fmt.Sprintf("<p>Reader navigation item %d has enough content to preserve document scroll.</p>", index+1),
+			32,
+		)
+		feedItems = append(feedItems, item)
+	}
+	mustUpsertItems(t, app, feedID, feedItems)
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, mobileAggregateItemPageLimit)
+
+	itemIDs := make([]int64, 0, len(items))
+	for _, item := range items {
+		itemIDs = append(itemIDs, item.ID)
+	}
+
+	return mobileReaderNavigationSmokeFixture{
+		itemIDs: itemIDs,
 	}
 }
 
@@ -2279,6 +2472,22 @@ func clickElementWithDetail(t *testing.T, ctx context.Context, selector, label s
 	waitForJS(t, ctx, htmxSettledExpression(), label+" HTMX settle")
 }
 
+func scrollCardToViewportOffset(t *testing.T, ctx context.Context, selector string, offset int) {
+	t.Helper()
+
+	expression := fmt.Sprintf(
+		`(() => {
+			const card = document.querySelector(%q);
+			if (!card) return false;
+			window.scrollTo(0, window.scrollY + card.getBoundingClientRect().top - %d);
+			return true;
+		})()`,
+		selector,
+		offset,
+	)
+	waitForJS(t, ctx, expression, "scroll mobile card to viewport offset")
+}
+
 func selectMobileFeedFilter(t *testing.T, ctx context.Context, feedID int64) {
 	t.Helper()
 
@@ -2775,6 +2984,113 @@ func desktopPanelScrollSurfaceExpression() string {
 			getComputedStyle(app).overflowY === "hidden" &&
 			getComputedStyle(feed).overflowY === "auto" &&
 			getComputedStyle(main).overflowY === "auto";
+	})()`
+}
+
+func mobileCardAtViewportOffsetExpression(itemID int64, offset int) string {
+	return fmt.Sprintf(
+		`(() => {
+			const card = document.querySelector("#mobile-card-%d");
+			return !!card && window.scrollY > 0 &&
+				Math.abs(card.getBoundingClientRect().top - %d) <= 2;
+		})()`,
+		itemID,
+		offset,
+	)
+}
+
+func mobileReaderOriginStoredExpression(itemID int64, cardIndex int, previousItemID, nextItemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			let record;
+			try {
+				record = JSON.parse(sessionStorage.getItem("pulse.mobileReaderOrigin.v1"));
+			} catch (_error) {
+				return false;
+			}
+			const state = history.state;
+			return !!record && !!state && state.htmx === true &&
+				typeof state.pulseMobileReaderNavigationID === "string" &&
+				state.pulseMobileReaderNavigationID === record.navigationID &&
+				record.version === 1 &&
+				record.streamURL === "/mobile/stream" &&
+				record.readerRequestPath === location.pathname + location.search &&
+				record.itemID === %q &&
+				record.cardIndex === %d &&
+				record.previousItemID === %q &&
+				record.nextItemID === %q &&
+				record.scrollY > 0 &&
+				Number.isFinite(record.cardViewportOffset);
+		})()`,
+		fmt.Sprintf("%d", itemID),
+		cardIndex,
+		fmt.Sprintf("%d", previousItemID),
+		fmt.Sprintf("%d", nextItemID),
+	)
+}
+
+func mobileReaderOriginRestoredExpression(itemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			let record;
+			try {
+				record = JSON.parse(sessionStorage.getItem("pulse.mobileReaderOrigin.v1"));
+			} catch (_error) {
+				return false;
+			}
+			const card = document.querySelector("#mobile-card-%d");
+			return !!record && !!card &&
+				!!document.querySelector("[data-mobile-stream='true']") &&
+				location.pathname + location.search === record.streamURL &&
+				record.itemID === %q &&
+				window.scrollY > 0 &&
+				Math.abs(card.getBoundingClientRect().top - record.cardViewportOffset) <= 2;
+		})()`,
+		itemID,
+		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func mobileReaderNavigationStateExpression(itemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			let record;
+			try {
+				record = JSON.parse(sessionStorage.getItem("pulse.mobileReaderOrigin.v1"));
+			} catch (_error) {
+				return false;
+			}
+			const state = history.state;
+			return !!record && !!state && state.htmx === true &&
+				!!document.querySelector("[data-mobile-reader='true']") &&
+				record.itemID === %q &&
+				record.readerRequestPath === location.pathname + location.search &&
+				state.pulseMobileReaderNavigationID === record.navigationID;
+		})()`,
+		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func windowScrollYExpression(scrollY int) string {
+	return fmt.Sprintf(`(() => Math.abs(window.scrollY - %d) <= 1)()`, scrollY)
+}
+
+func failedReaderPreservesStreamExpression() string {
+	return `(() => {
+		const state = history.state;
+		return !!document.querySelector("[data-mobile-stream='true']") &&
+			location.pathname === "/mobile/stream" &&
+			Math.abs(window.scrollY - window.__failedReaderScrollY) <= 1 &&
+			(!state || !state.pulseMobileReaderNavigationID) &&
+			sessionStorage.getItem("pulse.mobileReaderOrigin.v1") === null;
+	})()`
+}
+
+func directReaderHasNoOriginExpression() string {
+	return `(() => {
+		const state = history.state;
+		return !!document.querySelector("[data-mobile-reader='true']") &&
+			(!state || !state.pulseMobileReaderNavigationID);
 	})()`
 }
 
