@@ -10,6 +10,8 @@ let lastMobileFeedID = "";
 let lastMobileStreamPath = mobileStreamPath;
 const contentRequests = new Map();
 const focusedPaginationRequests = new WeakSet();
+const pendingFeedSelectionRequests = new WeakSet();
+const swappedFeedSelectionRequests = new WeakSet();
 
 const hasMainContentTarget = () => Boolean(document.getElementById("main-content"));
 const hasMobileContent = () =>
@@ -126,13 +128,59 @@ const trackContentRequest = (event) => {
     event.preventDefault();
     return;
   }
+  if (source.id === "mobile-stream-feed-filter") {
+    pendingFeedSelectionRequests.add(request);
+  }
   contentRequests.set(request, source);
 };
 
 const forgetContentRequest = (event) => {
-  const request = event && event.detail ? event.detail.xhr : null;
+  const detail = event && event.detail ? event.detail : null;
+  const request = detail ? detail.xhr : null;
+  if (request && detail.successful !== true) {
+    pendingFeedSelectionRequests.delete(request);
+    swappedFeedSelectionRequests.delete(request);
+  }
   if (request) {
     contentRequests.delete(request);
+  }
+};
+
+const trackFeedSelectionSwap = (event) => {
+  const detail = event && event.detail ? event.detail : null;
+  const request = detail ? detail.xhr : null;
+  if (request && detail.successful === true && pendingFeedSelectionRequests.has(request)) {
+    swappedFeedSelectionRequests.add(request);
+  }
+};
+
+const resetFeedSelectionScroll = (event) => {
+  const detail = event && event.detail ? event.detail : null;
+  const request = detail ? detail.xhr : null;
+  if (!request || !swappedFeedSelectionRequests.has(request)) {
+    return;
+  }
+
+  pendingFeedSelectionRequests.delete(request);
+  swappedFeedSelectionRequests.delete(request);
+  if (
+    !layoutMedia ||
+    !layoutMedia.matches ||
+    !document.querySelector("#main-content [data-mobile-stream='true']")
+  ) {
+    return;
+  }
+
+  window.scrollTo(0, 0);
+  const root = document.scrollingElement;
+  if (root) {
+    root.scrollTop = 0;
+  }
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  const app = document.querySelector(".app");
+  if (app) {
+    app.scrollTop = 0;
   }
 };
 
@@ -305,6 +353,8 @@ export const bindMobileBootstrap = () => {
     document.body.addEventListener("htmx:beforeRequest", trackContentRequest);
     document.body.addEventListener("htmx:afterRequest", forgetContentRequest);
     document.body.addEventListener("htmx:afterSettle", focusMobilePaginationResult);
+    document.body.addEventListener("htmx:afterSwap", trackFeedSelectionSwap);
+    document.body.addEventListener("htmx:afterSettle", resetFeedSelectionScroll);
     document.body.addEventListener("htmx:afterSwap", syncResponsiveLayout);
     document.body.addEventListener("htmx:historyRestore", syncResponsiveLayout);
     syncResponsiveLayout();

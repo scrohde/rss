@@ -4911,7 +4911,8 @@ func TestMobileAggregateUsesSavedFeedOrderAndSkipsCaughtUpFeeds(t *testing.T) {
 	)
 }
 
-//nolint:funlen,revive // This integration scenario keeps initial and continuation bounds in one contract test.
+//revive:disable:function-length The initial and continuation bounds form one contract.
+//nolint:funlen // This integration scenario keeps initial and continuation bounds in one contract test.
 func TestMobileAggregateInitialBoundsAndFeedSectionContinuation(t *testing.T) {
 	t.Parallel()
 
@@ -5029,7 +5030,10 @@ func TestMobileAggregateInitialBoundsAndFeedSectionContinuation(t *testing.T) {
 	)
 }
 
-//nolint:funlen,revive // The bounded batch and canonical continuation contract are asserted together.
+//revive:enable:function-length
+
+//revive:disable:function-length The bounded batch and canonical continuation form one contract.
+//nolint:funlen // The bounded batch and canonical continuation contract are asserted together.
 func TestMobileAggregateItemContinuationReturnsBoundedBatch(t *testing.T) {
 	t.Parallel()
 
@@ -5147,7 +5151,10 @@ func TestMobileAggregateItemContinuationReturnsBoundedBatch(t *testing.T) {
 	assertContains(t, body, wantPulsePrefix, "expected item continuation to update the pulse item cursor")
 }
 
-//nolint:funlen,revive // Reader and mark-read assertions share one persisted aggregate-window fixture.
+//revive:enable:function-length
+
+//revive:disable:function-length Reader and mark-read assertions share one persisted fixture.
+//nolint:funlen // Reader and mark-read assertions share one persisted aggregate-window fixture.
 func TestMobileAggregateReaderAndMarkReadPreserveWindowState(t *testing.T) {
 	t.Parallel()
 
@@ -5230,6 +5237,8 @@ func TestMobileAggregateReaderAndMarkReadPreserveWindowState(t *testing.T) {
 		"expected reader mark-read to preserve the later feed window",
 	)
 }
+
+//revive:enable:function-length
 
 func TestMobileAggregateCardMarkReadUpdatesOnlyOwningSection(t *testing.T) {
 	t.Parallel()
@@ -5909,6 +5918,12 @@ func TestMobileStreamFiltersUnreadItemsBySelectedFeed(t *testing.T) {
 	assertContains(
 		t,
 		body,
+		fmt.Sprintf(`id="mobile-card-%d" data-mobile-item-id="%d"`, alphaItems[0].ID, alphaItems[0].ID),
+		"expected selected-feed mobile card to expose stable item hooks",
+	)
+	assertContains(
+		t,
+		body,
 		fmt.Sprintf(`/mobile/items/%d/reader?selected_feed_id=%d`, alphaItems[0].ID, alphaID),
 		"expected reader action to preserve selected feed",
 	)
@@ -6032,6 +6047,9 @@ func TestMobileStreamRendersFlatRowsWithIconMarkRead(t *testing.T) {
 	)
 	assertNotContains(t, body, `class="mobile-stream-refresh-button"`, "expected separate refresh button to be removed")
 	assertNotContains(t, body, `class="mobile-card-actions"`, "expected trailing card action row to be removed")
+	assertContains(t, body, `data-mobile-pull-refresh data-state="idle"`, "expected idle pull-refresh indicator")
+	assertContains(t, body, `data-mobile-pull-announcement`, "expected pull-refresh live region")
+	assertContains(t, body, `aria-live="polite"`, "expected polite pull-refresh announcements")
 	assertContains(t, body, `class="mobile-card-title-row"`, "expected title row to hold item actions")
 	assertContains(t, body, `class="mobile-card-mark-read"`, "expected icon-only mark-read button")
 	assertContains(t, body, `aria-label="Mark Alpha Story read"`, "expected mark-read button accessible name")
