@@ -1020,6 +1020,171 @@ func TestBrowserSmokeMobileDocumentScrolling(t *testing.T) {
 	waitForJS(t, ctx, desktopPanelScrollSurfaceExpression(), "desktop panel scroll surfaces remain intact")
 }
 
+//nolint:funlen,revive // One selector journey covers failed, aborted, successful, and history-restored scroll.
+func TestBrowserSmokeMobileFeedSelectionScrollReset(t *testing.T) {
+	app := newSmokeApp(t)
+	firstFeedID := mustUpsertFeed(t, app, "https://example.com/mobile-selection-first.xml", "Selection First")
+	secondFeedID := mustUpsertFeed(t, app, "https://example.com/mobile-selection-second.xml", "Selection Second")
+	base := time.Date(2026, time.January, 6, 12, 0, 0, 0, time.UTC)
+
+	seedSelectionFeed := func(feedID int64, title, slug string) []int64 {
+		t.Helper()
+
+		items := make([]*gofeed.Item, 0, mobileAggregateItemPageLimit)
+		for index := range mobileAggregateItemPageLimit {
+			itemTitle := fmt.Sprintf("%s %02d", title, index+1)
+			items = append(
+				items,
+				newSmokeItem(
+					itemTitle,
+					fmt.Sprintf("https://example.com/%s/%d", slug, index+1),
+					fmt.Sprintf("%s-%d", slug, index+1),
+					base.Add(-time.Duration(index)*time.Minute),
+				),
+			)
+		}
+		mustUpsertItems(t, app, feedID, items)
+		storedItems := mustListItems(t, app, feedID)
+		assertItemCount(t, storedItems, mobileAggregateItemPageLimit)
+		itemIDs := make([]int64, 0, len(storedItems))
+		for _, item := range storedItems {
+			itemIDs = append(itemIDs, item.ID)
+		}
+		return itemIDs
+	}
+
+	firstItems := seedSelectionFeed(firstFeedID, "Selection First", "mobile-selection-first")
+	seedSelectionFeed(secondFeedID, "Selection Second", "mobile-selection-second")
+	err := store.UpdateFeedOrder(context.Background(), app.db, []int64{firstFeedID, secondFeedID})
+	requireNoErr(t, err, "store.UpdateFeedOrder mobile selection fixture: %v")
+
+	var selectorRequests atomic.Int64
+	var failFirstSelection atomic.Bool
+	var blockSecondSelection atomic.Bool
+	failFirstSelection.Store(true)
+	blockSecondSelection.Store(true)
+	failedSelectionSeen := make(chan struct{}, 1)
+	blockedSelectionStarted := make(chan struct{}, 1)
+	blockedSelectionCanceled := make(chan struct{}, 1)
+	releaseBlockedSelection := make(chan struct{})
+	t.Cleanup(func() {
+		close(releaseBlockedSelection)
+	})
+
+	routes := app.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		isSelectorRequest := r.URL.Path == pathMobileStream &&
+			r.Header.Get("Hx-Request") == "true" &&
+			r.Header.Get("Hx-Trigger") == "mobile-stream-feed-filter"
+		if isSelectorRequest {
+			selectorRequests.Add(1)
+			selectedFeedID := r.URL.Query().Get("selected_feed_id")
+			if selectedFeedID == strconv.FormatInt(firstFeedID, 10) && failFirstSelection.Swap(false) {
+				failedSelectionSeen <- struct{}{}
+				http.Error(w, "forced mobile selector failure", http.StatusServiceUnavailable)
+				return
+			}
+			if selectedFeedID == strconv.FormatInt(secondFeedID, 10) && blockSecondSelection.Swap(false) {
+				blockedSelectionStarted <- struct{}{}
+				select {
+				case <-releaseBlockedSelection:
+				case <-r.Context().Done():
+					blockedSelectionCanceled <- struct{}{}
+					return
+				}
+			}
+		}
+
+		routes.ServeHTTP(w, r)
+	})
+	server := newSmokeServer(t, handler)
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 568),
+		chromedp.Navigate(server.URL+pathMobileStream),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for mobile selector scroll reset")
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "long aggregate selector fixture")
+	waitForJS(t, ctx, mobileDocumentScrollSurfaceExpression(firstItems[0]), "selector document scroll surface")
+	waitForJS(
+		t,
+		ctx,
+		`(() => {
+			window.scrollTo(0, 640);
+			window.__mobileSelectionScrollY = window.scrollY;
+			return window.__mobileSelectionScrollY >= 300;
+		})()`,
+		"remember aggregate scroll before rejected selections",
+	)
+
+	selectMobileFeedFilter(t, ctx, firstFeedID)
+	select {
+	case <-failedSelectionSeen:
+	case <-time.After(smokeWaitTimeout):
+		t.Fatal("failed selector request did not reach the server")
+	}
+	waitForJS(t, ctx, htmxSettledExpression(), "failed selector request settles")
+	waitForJS(t, ctx, mobileSelectionFailurePreservesScrollExpression(), "failed selection preserves stream scroll")
+
+	selectMobileFeedFilter(t, ctx, secondFeedID)
+	select {
+	case <-blockedSelectionStarted:
+	case <-time.After(smokeWaitTimeout):
+		t.Fatal("blocked selector request did not start")
+	}
+	runActions(
+		t,
+		ctx,
+		chromedp.Evaluate(`htmx.trigger(
+			document.getElementById("mobile-stream-feed-filter"),
+			"htmx:abort",
+		)`, nil),
+	)
+	select {
+	case <-blockedSelectionCanceled:
+	case <-time.After(smokeWaitTimeout):
+		t.Fatal("blocked selector request was not canceled")
+	}
+	waitForJS(t, ctx, htmxSettledExpression(), "aborted selector request settles")
+	waitForJS(t, ctx, mobileSelectionFailurePreservesScrollExpression(), "aborted selection preserves stream scroll")
+
+	firstStreamPath := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, firstFeedID)
+	selectMobileFeedFilter(t, ctx, firstFeedID)
+	waitForJS(t, ctx, requestURIExpression(firstStreamPath), "all-to-selected stream URL")
+	waitForJS(t, ctx, htmxSettledExpression(), "all-to-selected stream settles")
+	waitForJS(t, ctx, mobileStreamAtTrueTopExpression(firstFeedID), "all-to-selected stream starts at top")
+
+	historyItem := firstItems[mobileAggregateItemPageLimit/2]
+	historySelector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", historyItem)
+	scrollCardToViewportOffset(t, ctx, fmt.Sprintf("#mobile-card-%d", historyItem), 164)
+	waitForJS(t, ctx, mobileCardAtViewportOffsetExpression(historyItem, 164), "selected history card offset")
+	clickElement(t, ctx, historySelector, "open reader from selected stream")
+	waitForJS(t, ctx, mobileReaderNavigationStateExpression(historyItem), "selected reader history state")
+	runActions(t, ctx, chromedp.Evaluate(`history.back()`, nil))
+	waitForJS(t, ctx, mobileReaderOriginRestoredExpression(historyItem), "history restores selected stream offset")
+
+	secondStreamPath := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, secondFeedID)
+	selectMobileFeedFilter(t, ctx, secondFeedID)
+	waitForJS(t, ctx, requestURIExpression(secondStreamPath), "selected-to-selected stream URL")
+	waitForJS(t, ctx, htmxSettledExpression(), "selected-to-selected stream settles")
+	waitForJS(t, ctx, mobileStreamAtTrueTopExpression(secondFeedID), "selected-to-selected stream starts at top")
+
+	runActions(t, ctx, chromedp.Evaluate(`window.scrollTo(0, 520)`, nil))
+	waitForJS(t, ctx, mobileDocumentScrolledExpression(), "second selected stream is scrolled")
+	selectMobileFeedFilter(t, ctx, 0)
+	waitForJS(t, ctx, requestURIExpression(pathMobileStream), "selected-to-all stream URL")
+	waitForJS(t, ctx, htmxSettledExpression(), "selected-to-all stream settles")
+	waitForJS(t, ctx, mobileStreamAtTrueTopExpression(0), "selected-to-all stream starts at top")
+
+	if got := selectorRequests.Load(); got != 5 {
+		t.Fatalf("expected five selector requests without duplicates, got %d", got)
+	}
+}
+
 //nolint:funlen,revive // One history journey covers cached back, forward, repeat back, and cache-miss recovery.
 func TestBrowserSmokeMobileReaderHistoryNavigation(t *testing.T) {
 	app := newSmokeApp(t)
@@ -3922,6 +4087,37 @@ func mobileDocumentScrolledExpression() string {
 		const actionsRect = actions.getBoundingClientRect();
 		return actionsRect.top >= 0 && actionsRect.bottom <= innerHeight;
 	})()`
+}
+
+func mobileSelectionFailurePreservesScrollExpression() string {
+	return `(() => {
+		const app = document.querySelector(".app");
+		const root = document.scrollingElement;
+		return !!app && !!root &&
+			!!document.querySelector("[data-mobile-stream='true'] [data-mobile-sections-page]") &&
+			location.pathname + location.search === "/mobile/stream" &&
+			Number.isFinite(window.__mobileSelectionScrollY) &&
+			Math.abs(window.scrollY - window.__mobileSelectionScrollY) <= 1 &&
+			Math.abs(root.scrollTop - window.__mobileSelectionScrollY) <= 1 &&
+			app.scrollTop === 0;
+	})()`
+}
+
+func mobileStreamAtTrueTopExpression(feedID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			const app = document.querySelector(".app");
+			const root = document.scrollingElement;
+			const filter = document.querySelector("#mobile-stream-feed-filter");
+			return !!app && !!root && !!filter &&
+				!!document.querySelector("[data-mobile-stream='true']") &&
+				filter.value === %q &&
+				Math.abs(window.scrollY) <= 1 &&
+				Math.abs(root.scrollTop) <= 1 &&
+				Math.abs(app.scrollTop) <= 1;
+		})()`,
+		strconv.FormatInt(feedID, 10),
+	)
 }
 
 func desktopPanelScrollSurfaceExpression() string {
