@@ -14,11 +14,11 @@ const interactiveStartSelector = [
   "[role='link']",
 ].join(",");
 
-const gestureDecisionDistance = 10;
-const verticalDominanceRatio = 1.2;
+const gestureDecisionDistance = 4;
+const navigationEdgeWidth = 28;
 const activationDistance = 84;
-const maximumVisualDistance = 92;
-const refreshingVisualDistance = 52;
+const maximumVisualDistance = 108;
+const refreshingVisualDistance = 58;
 
 const indicatorLabels = Object.freeze({
   idle: "Pull to refresh",
@@ -117,8 +117,8 @@ const touchWithIdentifier = (touches, identifier) => {
 };
 
 const resistedDistance = (distance) => {
-  const initial = Math.min(distance, activationDistance) * 0.62;
-  const beyondThreshold = Math.max(0, distance - activationDistance) * 0.18;
+  const initial = Math.min(distance, activationDistance) * 0.78;
+  const beyondThreshold = Math.max(0, distance - activationDistance) * 0.22;
   return Math.min(maximumVisualDistance, initial + beyondThreshold);
 };
 
@@ -143,6 +143,9 @@ const onTouchStart = (event) => {
   }
 
   const touch = event.touches[0];
+  if (touch.clientX <= navigationEdgeWidth) {
+    return;
+  }
   gesture = {
     stream,
     identifier: touch.identifier,
@@ -185,21 +188,24 @@ const onTouchMove = (event) => {
     if (horizontalDistance < gestureDecisionDistance && verticalDistance < gestureDecisionDistance) {
       return;
     }
-    const predominantlyDownward =
-      deltaY > gestureDecisionDistance &&
-      deltaY >= horizontalDistance * verticalDominanceRatio;
-    if (!predominantlyDownward) {
+    if (deltaY <= gestureDecisionDistance || verticalDistance <= horizontalDistance) {
+      cancelGesture();
+      return;
+    }
+    if (!event.cancelable) {
       cancelGesture();
       return;
     }
 
     gesture.claimed = true;
+    event.preventDefault();
     gesture.stream.dataset.mobilePullTracking = "true";
     setIndicatorState(gesture.stream, "pulling", "Pull down to refresh.");
-  }
-
-  if (event.cancelable) {
+  } else if (event.cancelable) {
     event.preventDefault();
+  } else {
+    cancelGesture("Refresh canceled.");
+    return;
   }
 
   const pullDistance = Math.max(0, deltaY);
@@ -361,10 +367,10 @@ export const bindMobilePullRefresh = () => {
     layoutMedia.addListener(onLayoutChange);
   }
 
-  document.addEventListener("touchstart", onTouchStart, { passive: true });
-  document.addEventListener("touchmove", onTouchMove, { passive: false });
-  document.addEventListener("touchend", onTouchEnd, { passive: false });
-  document.addEventListener("touchcancel", onTouchCancel, { passive: false });
+  document.addEventListener("touchstart", onTouchStart, { capture: true, passive: false });
+  document.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+  document.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
+  document.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: false });
   document.body.addEventListener("htmx:beforeRequest", onBeforeRequest);
   document.body.addEventListener("htmx:afterRequest", onAfterRequest);
   document.body.addEventListener("htmx:afterSwap", onAfterSwap);

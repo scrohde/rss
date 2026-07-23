@@ -1484,6 +1484,7 @@ func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for mobile pull refresh")
 	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "short mobile stream for pull refresh")
 	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "idle pull-refresh indicator")
+	waitForJS(t, ctx, mobilePullRootOverscrollBlockedExpression(), "native vertical overscroll disabled")
 
 	streamSelector := `[data-mobile-stream="true"]`
 	waitForJS(
@@ -1564,6 +1565,21 @@ func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 	dispatchSyntheticTouch(t, ctx, streamSelector, "touchend", 116, 132, 0)
 	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "horizontal gesture leaves pull refresh idle")
 
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
+		240,
+		160,
+		1,
+		false,
+		"diagonal gesture",
+	)
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchend", 240, 160, 0)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "diagonal gesture leaves pull refresh idle")
+
 	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 2)
 	assertSyntheticTouchPrevented(
 		t,
@@ -1585,6 +1601,44 @@ func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 		ctx,
 		streamSelector,
 		"touchmove",
+		214,
+		190,
+		1,
+		true,
+		"fast first vertical move",
+	)
+	waitForJS(
+		t,
+		ctx,
+		mobilePullRefreshDistanceAtLeastExpression("ready", 64),
+		"fast first move claimed with useful travel",
+	)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchcancel",
+		214,
+		190,
+		0,
+		true,
+		"fast first move cancellation",
+	)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "fast first move cancellation cleans up")
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	if dispatchSyntheticTouchWithCancelable(t, ctx, streamSelector, "touchmove", 181, 230, 1, false) {
+		t.Fatal("non-cancelable vertical move unexpectedly prevented its default")
+	}
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchend", 181, 230, 0)
+	waitForJS(t, ctx, mobilePullRefreshIdleExpression(), "non-cancelable move abandons custom refresh")
+
+	dispatchSyntheticTouch(t, ctx, streamSelector, "touchstart", 180, 100, 1)
+	assertSyntheticTouchPrevented(
+		t,
+		ctx,
+		streamSelector,
+		"touchmove",
 		182,
 		132,
 		1,
@@ -1592,6 +1646,12 @@ func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 		"claimed sub-threshold pull",
 	)
 	waitForJS(t, ctx, mobilePullRefreshStateExpression("pulling"), "sub-threshold pulling state")
+	waitForJS(
+		t,
+		ctx,
+		mobilePullRefreshDistanceAtLeastExpression("pulling", 24),
+		"sub-threshold pull has useful travel",
+	)
 	assertSyntheticTouchPrevented(
 		t,
 		ctx,
@@ -3094,6 +3154,27 @@ func dispatchSyntheticTouch(
 ) bool {
 	t.Helper()
 
+	return dispatchSyntheticTouchWithCancelable(
+		t,
+		ctx,
+		selector,
+		eventName,
+		clientX,
+		clientY,
+		touchCount,
+		true,
+	)
+}
+
+func dispatchSyntheticTouchWithCancelable(
+	t *testing.T,
+	ctx context.Context,
+	selector, eventName string,
+	clientX, clientY, touchCount int,
+	cancelable bool,
+) bool {
+	t.Helper()
+
 	expression := fmt.Sprintf(
 		`(() => {
 			const target = document.querySelector(%q);
@@ -3117,7 +3198,7 @@ func dispatchSyntheticTouch(
 			);
 			const event = new Event(%q, {
 				bubbles: true,
-				cancelable: true,
+				cancelable: %t,
 				composed: true,
 			});
 			Object.defineProperties(event, {
@@ -3137,6 +3218,7 @@ func dispatchSyntheticTouch(
 		clientY,
 		touchCount,
 		eventName,
+		cancelable,
 	)
 
 	var result struct {
@@ -3672,6 +3754,30 @@ func mobilePullRefreshStateExpression(state string) string {
 		})()`,
 		state,
 	)
+}
+
+func mobilePullRefreshDistanceAtLeastExpression(state string, minimum int) string {
+	return fmt.Sprintf(
+		`(() => {
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			const indicator = stream ? stream.querySelector("[data-mobile-pull-refresh]") : null;
+			const surface = stream ? stream.querySelector("#mobile-stream-content") : null;
+			if (!stream || !indicator || !surface || indicator.dataset.state !== %q) {
+				return false;
+			}
+			const distance = Number.parseFloat(surface.style.getPropertyValue("--mobile-pull-distance"));
+			return Number.isFinite(distance) && distance >= %d;
+		})()`,
+		state,
+		minimum,
+	)
+}
+
+func mobilePullRootOverscrollBlockedExpression() string {
+	return `(() =>
+		getComputedStyle(document.documentElement).overscrollBehaviorY === "none" &&
+		getComputedStyle(document.body).overscrollBehaviorY === "none"
+	)()`
 }
 
 func mobilePullRefreshIdleExpression() string {

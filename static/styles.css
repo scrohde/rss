@@ -2366,6 +2366,11 @@ html[data-theme="dark"] .mobile-reader-body {
 }
 
 @media (max-width: 960px) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+
   body {
     min-height: 100vh;
     min-height: 100dvh;
