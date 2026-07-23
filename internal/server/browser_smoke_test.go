@@ -1175,6 +1175,263 @@ func TestBrowserSmokeMobileReaderHistoryFallbacks(t *testing.T) {
 	}
 }
 
+//nolint:funlen,revive // One browser journey covers the ordered continuation fallbacks and failure retention.
+func TestBrowserSmokeMobileReaderMarkReadContinuation(t *testing.T) {
+	app := newSmokeApp(t)
+	base := time.Date(2026, time.January, 5, 12, 0, 0, 0, time.UTC)
+	refillFeedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-continuation-refill.xml",
+		"Continuation Refill",
+	)
+	refillItems := seedMobileAggregateItems(
+		t,
+		app,
+		refillFeedID,
+		"Continuation Refill",
+		mobileAggregateItemPageLimit+1,
+		base,
+	)
+
+	var failedMarkItemID atomic.Int64
+	routes := app.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		failedItemID := failedMarkItemID.Load()
+		if failedItemID > 0 &&
+			r.Method == http.MethodPost &&
+			r.URL.Path == fmt.Sprintf("/mobile/items/%d/read", failedItemID) {
+			http.Error(w, "forced reader mark-read failure", http.StatusServiceUnavailable)
+			return
+		}
+		routes.ServeHTTP(w, r)
+	})
+	server := newSmokeServer(t, handler)
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	navigateToMobileStream(t, ctx, server.URL)
+
+	refillRemovedID := refillItems[mobileAggregateItemPageLimit-1].ID
+	refillTargetID := refillItems[mobileAggregateItemPageLimit].ID
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-card-%d", refillTargetID)),
+		"refill continuation target initially outside bounded page",
+	)
+	scrollCardToViewportOffset(t, ctx, fmt.Sprintf("#mobile-card-%d", refillRemovedID), 176)
+	openMobileReaderAndStashOrigin(
+		t,
+		ctx,
+		refillRemovedID,
+		0,
+		mobileAggregateItemPageLimit-1,
+		"page-refill reader",
+	)
+	clickElement(t, ctx, ".mobile-reader-mark-read", "mark page-refill reader item read")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderMarkReadContinuationExpression(refillRemovedID, refillTargetID),
+		"newly refilled card occupies removed card position",
+	)
+	waitForJS(t, ctx, requestURIExpression(pathMobileStream), "page-refill continuation stream URL")
+
+	crossSourceFeedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-continuation-source.xml",
+		"Continuation Source",
+	)
+	crossTargetFeedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-continuation-target.xml",
+		"Continuation Target",
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		crossSourceFeedID,
+		"Cross-feed Source",
+		"https://example.com/cross-feed-source",
+		"cross-feed-source",
+		base.Add(time.Hour),
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		crossTargetFeedID,
+		"Cross-feed Target",
+		"https://example.com/cross-feed-target",
+		"cross-feed-target",
+		base.Add(2*time.Hour),
+	)
+	crossSourceItemID := mustListItems(t, app, crossSourceFeedID)[0].ID
+	crossTargetItemID := mustListItems(t, app, crossTargetFeedID)[0].ID
+	err := store.UpdateFeedOrder(
+		context.Background(),
+		app.db,
+		[]int64{crossSourceFeedID, crossTargetFeedID, refillFeedID},
+	)
+	requireNoErr(t, err, "store.UpdateFeedOrder cross-feed continuation: %v")
+
+	navigateToMobileStream(t, ctx, server.URL)
+	scrollCardToViewportOffset(t, ctx, fmt.Sprintf("#mobile-card-%d", crossSourceItemID), 176)
+	openMobileReaderAndStashOrigin(
+		t,
+		ctx,
+		crossSourceItemID,
+		crossTargetItemID,
+		0,
+		"cross-feed reader",
+	)
+	clickElement(t, ctx, ".mobile-reader-mark-read", "mark final item in first feed section read")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderMarkReadContinuationExpression(crossSourceItemID, crossTargetItemID),
+		"next feed continues at removed section position",
+	)
+	waitForJS(
+		t,
+		ctx,
+		elementAbsentExpression(fmt.Sprintf("#mobile-feed-section-%d", crossSourceFeedID)),
+		"caught-up source section removed",
+	)
+
+	previousFeedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-continuation-previous.xml",
+		"Continuation Previous",
+	)
+	previousItems := seedMobileAggregateItems(
+		t,
+		app,
+		previousFeedID,
+		"Continuation Previous",
+		mobileAggregateItemPageLimit,
+		base.Add(3*time.Hour),
+	)
+	navigateToMobileStream(t, ctx, server.URL)
+	selectMobileFeedFilter(t, ctx, previousFeedID)
+	previousStreamPath := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, previousFeedID)
+	waitForJS(t, ctx, requestURIExpression(previousStreamPath), "previous-fallback selected stream")
+
+	previousRemovedID := previousItems[len(previousItems)-1].ID
+	previousTargetID := previousItems[len(previousItems)-2].ID
+	scrollCardToViewportOffset(t, ctx, fmt.Sprintf("#mobile-card-%d", previousRemovedID), 176)
+	openMobileReaderAndStashOrigin(
+		t,
+		ctx,
+		previousRemovedID,
+		0,
+		len(previousItems)-1,
+		"previous-fallback reader",
+	)
+	clickElement(t, ctx, ".mobile-reader-mark-read", "mark final selected-feed reader item read")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderMarkReadContinuationExpression(previousRemovedID, previousTargetID),
+		"previous card fallback clamps near document bottom",
+	)
+	waitForJS(t, ctx, requestURIExpression(previousStreamPath), "previous fallback preserves selected feed URL")
+
+	emptyFeedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-continuation-empty.xml",
+		"Continuation Empty",
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		emptyFeedID,
+		"Empty-stream Source",
+		"https://example.com/empty-stream-source",
+		"empty-stream-source",
+		base.Add(4*time.Hour),
+	)
+	emptyItemID := mustListItems(t, app, emptyFeedID)[0].ID
+	navigateToMobileStream(t, ctx, server.URL)
+	selectMobileFeedFilter(t, ctx, emptyFeedID)
+	emptyStreamPath := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, emptyFeedID)
+	openMobileReaderAndStashOrigin(t, ctx, emptyItemID, 0, 0, "empty-stream reader")
+	clickElement(t, ctx, ".mobile-reader-mark-read", "mark only selected-feed reader item read")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderEmptyMarkReadContinuationExpression(emptyItemID),
+		"empty stream continuation resets to top",
+	)
+	waitForJS(t, ctx, requestURIExpression(emptyStreamPath), "empty continuation preserves selected feed URL")
+
+	failureFeedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-reader-continuation-failure.xml",
+		"Continuation Failure",
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		failureFeedID,
+		"Failure Source",
+		"https://example.com/failure-source",
+		"failure-source",
+		base.Add(5*time.Hour),
+	)
+	failureItemID := mustListItems(t, app, failureFeedID)[0].ID
+	failedMarkItemID.Store(failureItemID)
+	navigateToMobileStream(t, ctx, server.URL)
+	selectMobileFeedFilter(t, ctx, failureFeedID)
+	failureStreamPath := fmt.Sprintf("%s?selected_feed_id=%d", pathMobileStream, failureFeedID)
+	openMobileReaderAndStashOrigin(t, ctx, failureItemID, 0, 0, "failed mark-read reader")
+	failureReaderPath := fmt.Sprintf(
+		"/mobile/items/%d/reader?selected_feed_id=%d",
+		failureItemID,
+		failureFeedID,
+	)
+	clickElement(t, ctx, ".mobile-reader-mark-read", "force reader mark-read failure")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderMarkReadFailurePreservesOriginExpression(failureItemID),
+		"failed mark-read retains reader origin",
+	)
+	waitForJS(t, ctx, requestURIExpression(failureReaderPath), "failed mark-read keeps reader URL")
+
+	failureItem, err := store.GetItem(context.Background(), app.db, failureItemID)
+	requireNoErr(t, err, "store.GetItem failed reader mark-read item: %v")
+	if failureItem.IsRead {
+		t.Fatal("failed reader mark-read unexpectedly persisted read state")
+	}
+
+	clickElement(t, ctx, ".mobile-reader-back", "back after failed reader mark-read")
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(`[data-mobile-stream="true"]`),
+		"failed mark-read back restores stream",
+	)
+	waitForJS(t, ctx, requestURIExpression(failureStreamPath), "failed mark-read back stream URL")
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf("#mobile-card-%d", failureItemID)),
+		"failed mark-read back restores unread card",
+	)
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderOriginRestoredAtTopExpression(failureItemID),
+		"failed mark-read origin still restores stream position",
+	)
+}
+
 //nolint:funlen,revive // One gesture journey covers rejection, cancellation, in-flight locking, and both endpoints.
 func TestBrowserSmokeMobilePullRefreshFlows(t *testing.T) {
 	app := newSmokeApp(t)
@@ -2756,6 +3013,40 @@ func clickElementWithDetail(t *testing.T, ctx context.Context, selector, label s
 	waitForJS(t, ctx, htmxSettledExpression(), label+" HTMX settle")
 }
 
+func navigateToMobileStream(t *testing.T, ctx context.Context, serverURL string) {
+	t.Helper()
+
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 568),
+		chromedp.Navigate(serverURL+pathMobileStream),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready after mobile stream navigation")
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "mobile stream navigation layout")
+	waitForJS(t, ctx, htmxSettledExpression(), "mobile stream navigation HTMX settle")
+}
+
+func openMobileReaderAndStashOrigin(
+	t *testing.T,
+	ctx context.Context,
+	itemID, nextItemID int64,
+	cardIndex int,
+	label string,
+) {
+	t.Helper()
+
+	selector := fmt.Sprintf("#mobile-card-%d .mobile-card-open", itemID)
+	clickElement(t, ctx, selector, "open "+label)
+	waitForJS(t, ctx, mobileReaderNavigationStateExpression(itemID), label+" navigation state")
+	waitForJS(
+		t,
+		ctx,
+		mobileReaderOriginStashedExpression(itemID, nextItemID, cardIndex),
+		label+" stashed origin",
+	)
+}
+
 func dispatchSyntheticTouch(
 	t *testing.T,
 	ctx context.Context,
@@ -3569,6 +3860,27 @@ func mobileReaderOriginRestoredExpression(itemID int64) string {
 	)
 }
 
+func mobileReaderOriginRestoredAtTopExpression(itemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			let record;
+			try {
+				record = JSON.parse(sessionStorage.getItem("pulse.mobileReaderOrigin.v1"));
+			} catch (_error) {
+				return false;
+			}
+			const card = document.querySelector("#mobile-card-%d");
+			return !!record && !!card &&
+				!!document.querySelector("[data-mobile-stream='true']") &&
+				location.pathname + location.search === record.streamURL &&
+				record.itemID === %q &&
+				Math.abs(card.getBoundingClientRect().top - record.cardViewportOffset) <= 2;
+		})()`,
+		itemID,
+		fmt.Sprintf("%d", itemID),
+	)
+}
+
 func mobileReaderNavigationStateExpression(itemID int64) string {
 	return fmt.Sprintf(
 		`(() => {
@@ -3587,6 +3899,121 @@ func mobileReaderNavigationStateExpression(itemID int64) string {
 		})()`,
 		fmt.Sprintf("%d", itemID),
 	)
+}
+
+func mobileReaderOriginStashedExpression(itemID, nextItemID int64, cardIndex int) string {
+	return fmt.Sprintf(
+		`(() => {
+			let record;
+			try {
+				record = JSON.parse(sessionStorage.getItem("pulse.mobileReaderOrigin.v1"));
+			} catch (_error) {
+				return false;
+			}
+			const state = history.state;
+			if (
+				!record ||
+				!state ||
+				state.htmx !== true ||
+				state.pulseMobileReaderNavigationID !== record.navigationID ||
+				record.itemID !== %q ||
+				record.nextItemID !== %q ||
+				record.cardIndex !== %d ||
+				!Number.isFinite(record.cardViewportOffset)
+			) {
+				return false;
+			}
+			window.__mobileMarkReadOrigin = { ...record };
+			return true;
+		})()`,
+		fmt.Sprintf("%d", itemID),
+		itemIDString(nextItemID),
+		cardIndex,
+	)
+}
+
+func mobileReaderMarkReadContinuationExpression(removedItemID, targetItemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			const record = window.__mobileMarkReadOrigin;
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			const removed = document.querySelector("#mobile-card-%d");
+			const target = document.querySelector("#mobile-card-%d");
+			const root = document.scrollingElement;
+			if (!record || !stream || removed || !target || !root) return false;
+			if (stream.getAnimations().some((animation) => animation.playState === "running")) {
+				return false;
+			}
+			let documentTop = 0;
+			for (let current = target; current; current = current.offsetParent) {
+				documentTop += current.offsetTop;
+			}
+			const maximum = Math.max(0, root.scrollHeight - innerHeight);
+			const expectedScroll = Math.min(
+				maximum,
+				Math.max(0, documentTop - record.cardViewportOffset),
+			);
+			const expectedViewportTop = documentTop - expectedScroll;
+			const state = history.state;
+			return Math.abs(window.scrollY - expectedScroll) <= 2 &&
+				Math.abs(target.getBoundingClientRect().top - expectedViewportTop) <= 2 &&
+				sessionStorage.getItem("pulse.mobileReaderOrigin.v1") === null &&
+				(!state || !state.pulseMobileReaderNavigationID);
+		})()`,
+		removedItemID,
+		targetItemID,
+	)
+}
+
+func mobileReaderEmptyMarkReadContinuationExpression(removedItemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			const stream = document.querySelector("[data-mobile-stream='true']");
+			const state = history.state;
+			return !!stream &&
+				!document.querySelector("#mobile-card-%d") &&
+				!stream.querySelector("[data-mobile-item-id]") &&
+				!!stream.querySelector("[data-mobile-empty='true']") &&
+				Math.abs(window.scrollY) <= 1 &&
+				sessionStorage.getItem("pulse.mobileReaderOrigin.v1") === null &&
+				(!state || !state.pulseMobileReaderNavigationID);
+		})()`,
+		removedItemID,
+	)
+}
+
+func mobileReaderMarkReadFailurePreservesOriginExpression(itemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			let stored;
+			try {
+				stored = JSON.parse(sessionStorage.getItem("pulse.mobileReaderOrigin.v1"));
+			} catch (_error) {
+				return false;
+			}
+			const stashed = window.__mobileMarkReadOrigin;
+			const state = history.state;
+			const markRead = document.querySelector(
+				".mobile-reader-mark-read[hx-post^='/mobile/items/%d/read']",
+			);
+			return !!stored && !!stashed && !!state && !!markRead &&
+				!!document.querySelector("[data-mobile-reader='true']") &&
+				!document.querySelector("[data-mobile-stream='true']") &&
+				stored.itemID === %q &&
+				stored.navigationID === stashed.navigationID &&
+				state.htmx === true &&
+				state.pulseMobileReaderNavigationID === stored.navigationID;
+		})()`,
+		itemID,
+		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func itemIDString(itemID int64) string {
+	if itemID <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(itemID, 10)
 }
 
 func windowScrollYExpression(scrollY int) string {

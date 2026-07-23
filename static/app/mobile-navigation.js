@@ -15,8 +15,10 @@ let pendingPushedReaderOrigin = null;
 let pendingStreamRestore = null;
 let navigationSequence = 0;
 let streamRestoreSequence = 0;
+let readerContinuationSequence = 0;
 
 const pendingReaderOrigins = new WeakMap();
+const pendingReaderContinuations = new WeakMap();
 
 const currentPath = () => `${window.location.pathname}${window.location.search}`;
 
@@ -117,6 +119,17 @@ const storeReaderOrigin = (record) => {
   }
 };
 
+const removeStoredReaderOrigin = (record) => {
+  try {
+    const stored = readStoredReaderOrigin();
+    if (stored && stored.navigationID === record.navigationID) {
+      window.sessionStorage.removeItem(readerOriginStorageKey);
+    }
+  } catch (_error) {
+    // The in-memory record is still cleared when storage is unavailable.
+  }
+};
+
 const navigationIDFromState = (state = window.history.state) => {
   if (!state || state.htmx !== true) {
     return "";
@@ -206,6 +219,14 @@ const onBeforeRequest = (event) => {
   if (record) {
     pendingReaderOrigins.set(request, record);
     pendingPushedReaderOrigin = record;
+    return;
+  }
+
+  if (source.matches(".mobile-reader-mark-read")) {
+    const continuationRecord = readerOriginForCurrentHistory();
+    if (continuationRecord) {
+      pendingReaderContinuations.set(request, continuationRecord);
+    }
   }
 };
 
@@ -330,6 +351,100 @@ const clampedScrollTarget = (value) => {
   return Math.min(maximum, Math.max(0, value));
 };
 
+const elementDocumentTop = (element) => {
+  let top = 0;
+  let current = element;
+  while (current) {
+    top += current.offsetTop;
+    current = current.offsetParent;
+  }
+  return top;
+};
+
+const readerContinuationCard = (stream, record) => {
+  const cards = Array.from(stream.querySelectorAll("[data-mobile-item-id]"));
+  const cardForItem = (itemID) =>
+    itemID ? stream.querySelector(`[data-mobile-item-id="${CSS.escape(itemID)}"]`) : null;
+
+  return (
+    cardForItem(record.nextItemID) ||
+    cards[record.cardIndex] ||
+    cardForItem(record.previousItemID) ||
+    null
+  );
+};
+
+const clearCompletedReaderOrigin = (record) => {
+  if (activeReaderOrigin && activeReaderOrigin.navigationID === record.navigationID) {
+    activeReaderOrigin = null;
+  }
+  if (
+    pendingPushedReaderOrigin &&
+    pendingPushedReaderOrigin.navigationID === record.navigationID
+  ) {
+    pendingPushedReaderOrigin = null;
+  }
+  if (pendingStreamRestore && pendingStreamRestore.navigationID === record.navigationID) {
+    pendingStreamRestore = null;
+    streamRestoreSequence += 1;
+  }
+
+  removeStoredReaderOrigin(record);
+  currentReaderNavigationID = navigationIDFromState();
+};
+
+const scheduleReaderContinuation = (stream, record) => {
+  readerContinuationSequence += 1;
+  const sequence = readerContinuationSequence;
+  const targetCard = readerContinuationCard(stream, record);
+
+  window.requestAnimationFrame(() => {
+    if (
+      sequence !== readerContinuationSequence ||
+      !stream.isConnected ||
+      stream !== document.querySelector("[data-mobile-stream='true']")
+    ) {
+      return;
+    }
+
+    const target = targetCard
+      ? elementDocumentTop(targetCard) - record.cardViewportOffset
+      : 0;
+    window.scrollTo(0, clampedScrollTarget(target));
+  });
+};
+
+const completePendingReaderContinuation = (event) => {
+  const detail = event && event.detail ? event.detail : null;
+  const request = detail ? detail.xhr : null;
+  const record = request ? pendingReaderContinuations.get(request) : null;
+  const stream = document.querySelector("[data-mobile-stream='true']");
+  if (!request || !record || detail.successful !== true || !stream) {
+    return false;
+  }
+
+  pendingReaderContinuations.delete(request);
+  clearCompletedReaderOrigin(record);
+  scheduleReaderContinuation(stream, record);
+  return true;
+};
+
+const restoreReaderContinuationAfterSwap = (event) => {
+  completePendingReaderContinuation(event);
+};
+
+const forgetPendingReaderContinuation = (event) => {
+  if (completePendingReaderContinuation(event)) {
+    return;
+  }
+
+  const detail = event && event.detail ? event.detail : null;
+  const request = detail ? detail.xhr : null;
+  if (request) {
+    pendingReaderContinuations.delete(request);
+  }
+};
+
 const restoreStreamPosition = (record) => {
   if (
     !window.matchMedia(mobileLayoutQuery).matches ||
@@ -447,8 +562,10 @@ export const bindMobileReaderNavigation = () => {
   document.body.addEventListener("htmx:beforeRequest", onBeforeRequest);
   document.body.addEventListener("htmx:pushedIntoHistory", activatePushedReaderOrigin);
   document.body.addEventListener("htmx:replacedInHistory", resetNavigationStateFromHistory);
+  document.body.addEventListener("htmx:afterSwap", restoreReaderContinuationAfterSwap);
   document.body.addEventListener("htmx:afterSettle", scrollReaderToTop);
   document.body.addEventListener("htmx:afterRequest", forgetPendingReaderOrigin);
+  document.body.addEventListener("htmx:afterRequest", forgetPendingReaderContinuation);
   document.body.addEventListener("htmx:historyRestore", onHistoryRestore);
   window.addEventListener("popstate", onPopState);
 };
