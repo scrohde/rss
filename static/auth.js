@@ -245,7 +245,6 @@
     button.dataset.bound = "true";
     let activeController = null;
     let activeMode = "";
-    let conditionalTask = null;
     let preparedLogin = null;
     const preparedTask = prepareLogin("conditional").then((prepared) => {
       preparedLogin = prepared;
@@ -332,10 +331,7 @@
       if (selector) {
         selector.hidden = false;
       }
-      conditionalTask = runLogin("conditional", prepared);
-      void conditionalTask.finally(() => {
-        conditionalTask = null;
-      });
+      void runLogin("conditional", prepared);
     }).catch((error) => {
       button.disabled = false;
       console.warn("prepare passkey login failed", error);

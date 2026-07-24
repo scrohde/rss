@@ -320,6 +320,50 @@ func TestBrowserSmokeReaderFlowsContinuation(t *testing.T) {
 	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "continuation clears content panel")
 }
 
+func TestBrowserSmokeReaderFlowsPanelResize(t *testing.T) {
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-panel-resizer", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for panel resize")
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout for panel resize")
+	assertPanelResize(
+		t,
+		ctx,
+		"#feed-panel-resizer",
+		"--feed-panel-width",
+		"pulse.feedPanelWidth",
+		40,
+	)
+
+	rowSelector := fmt.Sprintf("#item-%d", fixture.primaryFirstItemID)
+	requestHTMX(
+		t,
+		ctx,
+		"GET",
+		fmt.Sprintf("/items/%d", fixture.primaryFirstItemID),
+		rowSelector,
+		rowSelector[1:],
+	)
+	waitForJS(t, ctx, hasClassExpression("#content-panel", "is-open"), "content panel open for resize")
+	assertPanelResize(
+		t,
+		ctx,
+		"#content-panel-resizer",
+		"--content-panel-width",
+		"pulse.contentPanelWidth",
+		-40,
+	)
+}
+
 func TestBrowserSmokeReaderFlowsBreakpointTransitions(t *testing.T) {
 	app := newSmokeApp(t)
 	fixture := seedSmokeFixture(t, app)
@@ -1018,6 +1062,45 @@ func TestBrowserSmokeMobileDocumentScrolling(t *testing.T) {
 	waitForJS(t, ctx, responsiveDesktopLayoutExpression(feedID), "live mobile-to-desktop scroll transition")
 	waitForJS(t, ctx, htmxSettledExpression(), "mobile-to-desktop scroll transition settle")
 	waitForJS(t, ctx, desktopPanelScrollSurfaceExpression(), "desktop panel scroll surfaces remain intact")
+}
+
+func TestBrowserSmokeMobileReaderLargeTextDoesNotOverflow(t *testing.T) {
+	app := newSmokeApp(t)
+	feedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/mobile-large-text.xml",
+		"MobileLargeTextFeedNameWithoutBreaks",
+	)
+	title := strings.Repeat("LargeReaderTitle", 12)
+	item := newSmokeItem(
+		title,
+		"https://example.com/mobile-large-text",
+		"mobile-large-text",
+		time.Date(2026, time.January, 4, 12, 0, 0, 0, time.UTC),
+	)
+	item.Content = fmt.Sprintf("<p>%s</p>", strings.Repeat("ReaderBodyWord", 24))
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{item})
+	itemID := mustListItems(t, app, feedID)[0].ID
+
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Navigate(server.URL),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for large mobile reader text")
+	waitForJS(t, ctx, responsiveMobileLayoutExpression(0), "mobile stream for large reader text")
+	clickElement(
+		t,
+		ctx,
+		fmt.Sprintf("#mobile-card-%d .mobile-card-open", itemID),
+		"open large-text mobile reader",
+	)
+	waitForJS(t, ctx, mobileReaderLargeTextFitsExpression(), "large mobile reader text stays within viewport")
 }
 
 //nolint:funlen,revive // One selector journey covers failed, aborted, successful, and history-restored scroll.
@@ -4471,6 +4554,135 @@ func contentPanelItemExpression(itemID int64) string {
 		})()`,
 		fmt.Sprintf("%d", itemID),
 	)
+}
+
+func assertPanelResize(
+	t *testing.T,
+	ctx context.Context,
+	resizerSelector string,
+	cssProperty string,
+	storageKey string,
+	pointerDelta int,
+) {
+	t.Helper()
+
+	waitForJS(
+		t,
+		ctx,
+		fmt.Sprintf(
+			`(() => {
+				const resizer = document.querySelector(%q);
+				return !!resizer && resizer.dataset.bound === "true";
+			})()`,
+			resizerSelector,
+		),
+		"panel resizer bound",
+	)
+
+	expression := fmt.Sprintf(
+		`(() => {
+			const resizer = document.querySelector(%q);
+			const panel = %q === "--feed-panel-width"
+				? document.querySelector(".feed-panel")
+				: document.querySelector("#content-panel");
+			if (!resizer || !panel || resizer.dataset.bound !== "true") {
+				return { ok: false, error: "missing panel or binding" };
+			}
+
+			const rawWidth = Number.parseFloat(
+				getComputedStyle(document.documentElement).getPropertyValue(%q)
+			);
+			const before = Number.isFinite(rawWidth)
+				? rawWidth
+				: panel.getBoundingClientRect().width;
+			Object.defineProperty(resizer, "setPointerCapture", {
+				configurable: true,
+				value: () => {},
+			});
+			resizer.dispatchEvent(new PointerEvent("pointerdown", {
+				bubbles: true,
+				button: 0,
+				clientX: 400,
+				pointerId: 41,
+			}));
+			resizer.dispatchEvent(new PointerEvent("pointermove", {
+				bubbles: true,
+				clientX: 400 + %d,
+				pointerId: 41,
+			}));
+			resizer.dispatchEvent(new PointerEvent("pointerup", {
+				bubbles: true,
+				clientX: 400 + %d,
+				pointerId: 41,
+			}));
+
+			const stored = Number.parseFloat(localStorage.getItem(%q) || "");
+			const applied = Number.parseFloat(
+				document.documentElement.style.getPropertyValue(%q)
+			);
+			const direction = Math.sign(%q === "--feed-panel-width" ? %d : -(%d));
+			const ok = Number.isFinite(stored) && Number.isFinite(applied) &&
+				(applied - before) * direction > 0 && Math.abs(stored - applied) <= 1 &&
+				!document.body.classList.contains("is-resizing-feed-panel") &&
+				!document.body.classList.contains("is-resizing-content-panel");
+			return { ok, before, applied, stored, direction };
+		})()`,
+		resizerSelector,
+		cssProperty,
+		cssProperty,
+		pointerDelta,
+		pointerDelta,
+		storageKey,
+		cssProperty,
+		cssProperty,
+		pointerDelta,
+		pointerDelta,
+	)
+
+	var result struct {
+		OK        bool    `json:"ok"`
+		Error     string  `json:"error"`
+		Before    float64 `json:"before"`
+		Applied   float64 `json:"applied"`
+		Stored    float64 `json:"stored"`
+		Direction float64 `json:"direction"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expression, &result)); err != nil {
+		t.Fatalf("resize %s: %v", cssProperty, err)
+	}
+	if !result.OK {
+		t.Fatalf(
+			"resize %s failed: error=%q before=%.1f applied=%.1f stored=%.1f direction=%.0f",
+			cssProperty,
+			result.Error,
+			result.Before,
+			result.Applied,
+			result.Stored,
+			result.Direction,
+		)
+	}
+}
+
+func mobileReaderLargeTextFitsExpression() string {
+	return `(() => {
+		const article = document.querySelector(".mobile-reader-article");
+		const source = document.querySelector(".mobile-reader-source");
+		const title = document.querySelector(".mobile-reader-title");
+		const body = document.querySelector(".mobile-reader-body");
+		if (!article || !source || !title || !body) {
+			return false;
+		}
+
+		source.style.fontSize = "22px";
+		title.style.fontSize = "50px";
+		body.style.fontSize = "32px";
+		const wraps = [source, title, body].every(
+			(element) => getComputedStyle(element).overflowWrap === "anywhere"
+		);
+		return wraps &&
+			document.documentElement.scrollWidth <= window.innerWidth + 1 &&
+			article.scrollWidth <= article.clientWidth + 1;
+	})()`
 }
 
 func feedUnreadCountExpression(feedID int64, want string) string {

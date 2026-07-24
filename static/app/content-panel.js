@@ -14,12 +14,14 @@ import {
   getContentPanel,
   getContentPanelResizer,
   isTextEntryTarget,
+  isDesktopLayout,
 } from "./dom.js";
 import {
   setPendingPanelFocus,
   setPanelFocus,
   focusItemList,
 } from "./panel-focus.js";
+import { createPanelResizer } from "./panel-resize.js";
 
 export const getItemRows = () => {
   const list = getItemList();
@@ -88,8 +90,14 @@ export const ensureActive = () => {
   return target;
 };
 
-export const bindItemRowClickGuards = () => {
-  document.querySelectorAll(".item-entry a, .item-entry button").forEach((element) => {
+export const bindItemRowClickGuards = (root = document) => {
+  const selector = ".item-entry a, .item-entry button";
+  const elements = Array.from(root.querySelectorAll(selector));
+  if (root instanceof Element && root.matches(selector)) {
+    elements.unshift(root);
+  }
+
+  elements.forEach((element) => {
     if (element.dataset.cardClickGuardBound === "true") {
       return;
     }
@@ -557,136 +565,36 @@ export const syncContentPanelMode = () => {
   syncContentPanelToggleButtons(isContentPanelFloating());
 };
 
-const clampContentPanelWidth = (width) =>
-  Math.min(contentPanelMax, Math.max(contentPanelMin, Math.round(width)));
-
-const currentContentPanelWidth = () => {
-  const computed = getComputedStyle(document.documentElement);
-  const parsed = parseFloat(computed.getPropertyValue("--content-panel-width"));
-  if (Number.isFinite(parsed)) {
-    return parsed;
-  }
-
-  const panel = getContentPanel();
-  if (panel) {
-    return panel.getBoundingClientRect().width;
-  }
-
-  return 520;
-};
-
-const setContentPanelWidth = (width, persist) => {
-  const clamped = clampContentPanelWidth(width);
-  document.documentElement.style.setProperty("--content-panel-width", `${clamped}px`);
-  if (!persist) {
-    return clamped;
-  }
-
-  try {
-    window.localStorage.setItem(contentPanelStorageKey, String(clamped));
-    contentPanelResizeState.hasStoredWidth = true;
-  } catch (_error) {
-    // Ignore localStorage failures.
-  }
-
-  return clamped;
-};
-
-const readStoredContentPanelWidth = () => {
-  try {
-    const raw = window.localStorage.getItem(contentPanelStorageKey);
-    if (!raw) {
-      return null;
-    }
-    const parsed = parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-
-    return clampContentPanelWidth(parsed);
-  } catch (_error) {
-    return null;
-  }
-};
+const contentPanelWidth = createPanelResizer({
+  state: contentPanelResizeState,
+  storageKey: contentPanelStorageKey,
+  cssProperty: "--content-panel-width",
+  minimum: contentPanelMin,
+  maximum: contentPanelMax,
+  fallbackWidth: 520,
+  getResizer: getContentPanelResizer,
+  measureWidth: () => {
+    const panel = getContentPanel();
+    return panel ? panel.getBoundingClientRect().width : null;
+  },
+  bodyClass: "is-resizing-content-panel",
+  canStart: () =>
+    isDesktopLayout() && isContentPanelOpen() && !isContentPanelFloating(),
+  widthFromDelta: (startWidth, delta) => startWidth - delta,
+});
 
 export const syncContentPanelWidth = () => {
-  if (window.matchMedia("(max-width: 960px)").matches) {
+  if (!isDesktopLayout()) {
     return;
   }
 
-  const storedWidth = readStoredContentPanelWidth();
+  const storedWidth = contentPanelWidth.readStoredWidth();
   if (storedWidth !== null) {
-    setContentPanelWidth(storedWidth, false);
-    contentPanelResizeState.hasStoredWidth = true;
+    contentPanelWidth.setWidth(storedWidth, false);
   }
 };
 
-const stopContentPanelResize = (persist) => {
-  if (!contentPanelResizeState.active) {
-    return;
-  }
-  contentPanelResizeState.active = false;
-  contentPanelResizeState.pointerId = null;
-  document.body.classList.remove("is-resizing-content-panel");
-  if (persist) {
-    setContentPanelWidth(currentContentPanelWidth(), true);
-  }
-};
-
-export const bindContentPanelResize = () => {
-  const resizer = getContentPanelResizer();
-  if (!resizer || resizer.dataset.bound === "true") {
-    return;
-  }
-  resizer.dataset.bound = "true";
-
-  resizer.addEventListener("pointerdown", (event) => {
-    if (
-      event.button !== 0 ||
-      window.matchMedia("(max-width: 960px)").matches ||
-      !isContentPanelOpen() ||
-      isContentPanelFloating()
-    ) {
-      return;
-    }
-
-    contentPanelResizeState.active = true;
-    contentPanelResizeState.pointerId = event.pointerId;
-    contentPanelResizeState.startX = event.clientX;
-    contentPanelResizeState.startWidth = currentContentPanelWidth();
-    document.body.classList.add("is-resizing-content-panel");
-    if (typeof resizer.setPointerCapture === "function") {
-      resizer.setPointerCapture(event.pointerId);
-    }
-    event.preventDefault();
-  });
-
-  resizer.addEventListener("pointermove", (event) => {
-    if (
-      !contentPanelResizeState.active ||
-      contentPanelResizeState.pointerId !== event.pointerId
-    ) {
-      return;
-    }
-
-    const delta = event.clientX - contentPanelResizeState.startX;
-    setContentPanelWidth(contentPanelResizeState.startWidth - delta, false);
-  });
-
-  resizer.addEventListener("pointerup", (event) => {
-    if (contentPanelResizeState.pointerId !== event.pointerId) {
-      return;
-    }
-    stopContentPanelResize(true);
-  });
-
-  resizer.addEventListener("pointercancel", (event) => {
-    if (contentPanelResizeState.pointerId !== event.pointerId) {
-      return;
-    }
-    stopContentPanelResize(false);
-  });
-};
+export const bindContentPanelResize = () => contentPanelWidth.bind();
 
 export const bindContentPanelInteractions = () => {
   if (document.body.dataset.contentPanelInteractionsBound === "true") {

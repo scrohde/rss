@@ -23,20 +23,23 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
     }
   };
 
-  const bindCommonInteractions = () => {
-    processSharedTopbarHTMX();
+  const bindOneTimeInteractions = () => {
     topbar.bindTopbarShortcuts();
     topbar.bindSubscribeForms();
     topbar.bindImportControls();
     topbar.bindThemeForms();
-    content.bindItemRowClickGuards();
     feed.bindFeedPanelResize();
     content.bindContentPanelResize();
+    topbar.syncTopbarShortcuts();
+  };
+
+  const hydrateSwappedContent = (root = document) => {
+    processSharedTopbarHTMX();
+    content.bindItemRowClickGuards(root);
     feed.syncFeedPanelWidth();
     content.syncContentPanelWidth();
     content.syncContentPanelMode();
     content.syncActiveItemOutline();
-    topbar.syncTopbarShortcuts();
     feed.syncFeedDeleteMarks();
     feed.syncFeedMoreState();
   };
@@ -88,7 +91,8 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
   };
 
   document.addEventListener("DOMContentLoaded", () => {
-    bindCommonInteractions();
+    bindOneTimeInteractions();
+    hydrateSwappedContent();
     if (isFeedEditMode()) {
       focusFeedEditTitleInput();
       return;
@@ -105,7 +109,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
 
   document.body.addEventListener("htmx:afterSwap", (event) => {
     clearFeedDragState();
-    bindCommonInteractions();
+    hydrateSwappedContent(event.target);
     const swapTarget = event && event.detail ? event.detail.target : null;
     if (swapTarget && swapTarget.id === "feed-list" && isFeedEditMode()) {
       focusFeedEditTitleInput();

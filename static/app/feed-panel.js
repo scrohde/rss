@@ -21,6 +21,7 @@ import {
   setPanelFocus,
   focusItemList,
 } from "./panel-focus.js";
+import { createPanelResizer } from "./panel-resize.js";
 
 export const isFeedEditMode = () => {
   const feedList = getFeedList();
@@ -530,57 +531,25 @@ export const openSelectedFeed = () => {
   return requestFeedItems(selectedFeed, "items");
 };
 
-const clampFeedPanelWidth = (width) =>
-  Math.min(feedPanelMax, Math.max(feedPanelMin, Math.round(width)));
-
-const currentFeedPanelWidth = () => {
-  const computed = getComputedStyle(document.documentElement);
-  const parsed = parseFloat(computed.getPropertyValue("--feed-panel-width"));
-  if (Number.isFinite(parsed)) {
-    return parsed;
-  }
-
-  const panel = document.querySelector(".feed-panel");
-  if (panel) {
-    return panel.getBoundingClientRect().width;
-  }
-
-  return 260;
-};
-
-const setFeedPanelWidth = (width, persist) => {
-  const clamped = clampFeedPanelWidth(width);
-  document.documentElement.style.setProperty("--feed-panel-width", `${clamped}px`);
-  if (!persist) {
-    return clamped;
-  }
-
-  try {
-    window.localStorage.setItem(feedPanelStorageKey, String(clamped));
+const feedPanelWidth = createPanelResizer({
+  state: feedPanelResizeState,
+  storageKey: feedPanelStorageKey,
+  cssProperty: "--feed-panel-width",
+  minimum: feedPanelMin,
+  maximum: feedPanelMax,
+  fallbackWidth: 260,
+  getResizer: getFeedPanelResizer,
+  measureWidth: () => {
+    const panel = document.querySelector(".feed-panel");
+    return panel ? panel.getBoundingClientRect().width : null;
+  },
+  bodyClass: "is-resizing-feed-panel",
+  canStart: isDesktopLayout,
+  widthFromDelta: (startWidth, delta) => startWidth + delta,
+  onStored: () => {
     feedPanelResizeState.hasStoredWidth = true;
-  } catch (_error) {
-    // Ignore localStorage failures.
-  }
-
-  return clamped;
-};
-
-const readStoredFeedPanelWidth = () => {
-  try {
-    const raw = window.localStorage.getItem(feedPanelStorageKey);
-    if (!raw) {
-      return null;
-    }
-    const parsed = parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-
-    return clampFeedPanelWidth(parsed);
-  } catch (_error) {
-    return null;
-  }
-};
+  },
+});
 
 const measuredFeedPanelWidth = () => {
   const feedList = getFeedList();
@@ -598,17 +567,17 @@ const measuredFeedPanelWidth = () => {
     widest = Math.max(widest, element.scrollWidth + 54);
   });
 
-  return clampFeedPanelWidth(widest);
+  return feedPanelWidth.clampWidth(widest);
 };
 
 export const syncFeedPanelWidth = () => {
-  if (window.matchMedia("(max-width: 960px)").matches) {
+  if (!isDesktopLayout()) {
     return;
   }
 
-  const storedWidth = readStoredFeedPanelWidth();
+  const storedWidth = feedPanelWidth.readStoredWidth();
   if (storedWidth !== null) {
-    setFeedPanelWidth(storedWidth, false);
+    feedPanelWidth.setWidth(storedWidth, false);
     feedPanelResizeState.hasStoredWidth = true;
 
     return;
@@ -620,68 +589,11 @@ export const syncFeedPanelWidth = () => {
 
   const measuredWidth = measuredFeedPanelWidth();
   if (measuredWidth !== null) {
-    setFeedPanelWidth(measuredWidth, false);
+    feedPanelWidth.setWidth(measuredWidth, false);
   }
 };
 
-const stopFeedPanelResize = (persist) => {
-  if (!feedPanelResizeState.active) {
-    return;
-  }
-  feedPanelResizeState.active = false;
-  feedPanelResizeState.pointerId = null;
-  document.body.classList.remove("is-resizing-feed-panel");
-  if (persist) {
-    setFeedPanelWidth(currentFeedPanelWidth(), true);
-  }
-};
-
-export const bindFeedPanelResize = () => {
-  const resizer = getFeedPanelResizer();
-  if (!resizer || resizer.dataset.bound === "true") {
-    return;
-  }
-  resizer.dataset.bound = "true";
-
-  resizer.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || window.matchMedia("(max-width: 960px)").matches) {
-      return;
-    }
-
-    feedPanelResizeState.active = true;
-    feedPanelResizeState.pointerId = event.pointerId;
-    feedPanelResizeState.startX = event.clientX;
-    feedPanelResizeState.startWidth = currentFeedPanelWidth();
-    document.body.classList.add("is-resizing-feed-panel");
-    if (typeof resizer.setPointerCapture === "function") {
-      resizer.setPointerCapture(event.pointerId);
-    }
-    event.preventDefault();
-  });
-
-  resizer.addEventListener("pointermove", (event) => {
-    if (!feedPanelResizeState.active || feedPanelResizeState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const delta = event.clientX - feedPanelResizeState.startX;
-    setFeedPanelWidth(feedPanelResizeState.startWidth + delta, false);
-  });
-
-  resizer.addEventListener("pointerup", (event) => {
-    if (feedPanelResizeState.pointerId !== event.pointerId) {
-      return;
-    }
-    stopFeedPanelResize(true);
-  });
-
-  resizer.addEventListener("pointercancel", (event) => {
-    if (feedPanelResizeState.pointerId !== event.pointerId) {
-      return;
-    }
-    stopFeedPanelResize(false);
-  });
-};
+export const bindFeedPanelResize = () => feedPanelWidth.bind();
 
 export const bindFeedPanelInteractions = () => {
   if (document.body.dataset.feedPanelInteractionsBound === "true") {
