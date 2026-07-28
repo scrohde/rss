@@ -21,7 +21,6 @@ const (
 	maxItemsPerFeed       = 200
 	unreadItemsDefaultCap = 200
 	readRetention         = 30 * time.Minute
-	tombstoneRetention    = 30 * 24 * time.Hour
 	// MaxFeedItems is the maximum number of parsed feed items accepted for persistence.
 	MaxFeedItems = 1000
 )
@@ -39,7 +38,8 @@ CREATE TABLE IF NOT EXISTS feeds (
 	last_refreshed_at DATETIME,
 	last_error TEXT,
 	unchanged_count INTEGER NOT NULL DEFAULT 0,
-	next_refresh_at DATETIME
+	next_refresh_at DATETIME,
+	tombstone_limit INTEGER NOT NULL DEFAULT 1000
 );
 
 CREATE TABLE IF NOT EXISTS items (
@@ -95,6 +95,11 @@ func Init(db *sql.DB) error {
 	}
 
 	err = ensureFeedOrderColumn(db)
+	if err != nil {
+		return err
+	}
+
+	err = ensureFeedTombstoneLimitColumn(db)
 	if err != nil {
 		return err
 	}
@@ -315,7 +320,7 @@ func applyFeedOrder(ctx context.Context, tx *sql.Tx, finalOrder []int64) error {
 	return nil
 }
 
-// UpsertItems is part of the store package API.
+// UpsertItems inserts unseen items and records the fetched count as the feed's tombstone limit.
 func UpsertItems(ctx context.Context, db *sql.DB, feedID int64, items []*gofeed.Item) (int, error) {
 	ctx = contextOrBackground(ctx)
 
@@ -356,7 +361,21 @@ WHERE NOT EXISTS (
 		inserted += added
 	}
 
+	err = updateFeedTombstoneLimit(ctx, db, feedID, len(items))
+	if err != nil {
+		return inserted, err
+	}
+
 	return inserted, nil
+}
+
+func updateFeedTombstoneLimit(ctx context.Context, db *sql.DB, feedID int64, limit int) error {
+	_, err := db.ExecContext(ctx, "UPDATE feeds SET tombstone_limit = ? WHERE id = ?", limit, feedID)
+	if err != nil {
+		return fmt.Errorf("update tombstone limit for feed %d: %w", feedID, err)
+	}
+
+	return nil
 }
 
 const (
@@ -1454,31 +1473,49 @@ func CleanupReadItems(db *sql.DB) error {
 	return nil
 }
 
-// CleanupTombstones removes expired item tombstones.
+// CleanupTombstones keeps each feed's newest tombstones up to its latest fetched item count.
 func CleanupTombstones(db *sql.DB) error {
-	cutoff := time.Now().UTC().Add(-tombstoneRetention)
-
-	deleted, err := cleanupTombstonesBefore(context.Background(), db, cutoff)
+	deleted, err := cleanupTombstonesBeyondLimit(context.Background(), db)
 	if err != nil {
 		return err
 	}
 
 	if deleted > 0 {
-		slog.Info("cleanup tombstones", "deleted", deleted)
+		slog.Info("cleanup tombstones beyond per-feed limits", "deleted", deleted)
 	}
 
 	return nil
 }
 
-func cleanupTombstonesBefore(ctx context.Context, db *sql.DB, cutoff time.Time) (int64, error) {
-	result, err := db.ExecContext(ctx, "DELETE FROM tombstones WHERE deleted_at <= ?", cutoff)
+func cleanupTombstonesBeyondLimit(ctx context.Context, db *sql.DB) (int64, error) {
+	result, err := db.ExecContext(ctx, `
+WITH ranked AS (
+	SELECT
+		feed_id,
+		guid,
+		ROW_NUMBER() OVER (
+			PARTITION BY feed_id
+			ORDER BY deleted_at DESC, guid DESC
+		) AS tombstone_rank
+	FROM tombstones
+)
+DELETE FROM tombstones
+WHERE EXISTS (
+	SELECT 1
+	FROM ranked
+	JOIN feeds ON feeds.id = ranked.feed_id
+	WHERE ranked.feed_id = tombstones.feed_id
+	  AND ranked.guid = tombstones.guid
+	  AND ranked.tombstone_rank > feeds.tombstone_limit
+)
+	`)
 	if err != nil {
-		return 0, fmt.Errorf("delete expired tombstones: %w", err)
+		return 0, fmt.Errorf("delete tombstones beyond per-feed limit: %w", err)
 	}
 
 	deleted, err := result.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("count deleted tombstones: %w", err)
+		return 0, fmt.Errorf("count tombstones deleted beyond per-feed limit: %w", err)
 	}
 
 	return deleted, nil
@@ -1694,6 +1731,35 @@ SET sort_order = (
 	`)
 	if err != nil {
 		return fmt.Errorf("backfill feeds.sort_order values: %w", err)
+	}
+
+	return nil
+}
+
+func ensureFeedTombstoneLimitColumn(db *sql.DB) error {
+	var hasTombstoneLimit int
+
+	err := db.QueryRowContext(context.Background(), `
+SELECT COUNT(*)
+FROM pragma_table_info('feeds')
+WHERE name = 'tombstone_limit'
+	`).Scan(&hasTombstoneLimit)
+	if err != nil {
+		return fmt.Errorf("check feeds.tombstone_limit column: %w", err)
+	}
+
+	if hasTombstoneLimit > 0 {
+		return nil
+	}
+
+	statement := fmt.Sprintf(
+		"ALTER TABLE feeds ADD COLUMN tombstone_limit INTEGER NOT NULL DEFAULT %d",
+		MaxFeedItems,
+	)
+
+	_, err = db.ExecContext(context.Background(), statement)
+	if err != nil {
+		return fmt.Errorf("add feeds.tombstone_limit column: %w", err)
 	}
 
 	return nil

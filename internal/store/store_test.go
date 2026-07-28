@@ -122,7 +122,7 @@ func TestListPulseFeedIDsSkipsRecentlyRefreshed(t *testing.T) {
 	}
 }
 
-func TestInitAddsFeedSortOrderToExistingSchema(t *testing.T) {
+func TestInitAddsFeedColumnsToExistingSchema(t *testing.T) {
 	t.Parallel()
 
 	db := openLegacySchemaDB(t)
@@ -134,6 +134,8 @@ func TestInitAddsFeedSortOrderToExistingSchema(t *testing.T) {
 	}
 
 	assertHasSortOrderColumn(t, db)
+	assertTombstoneLimit(t, db, 1, MaxFeedItems)
+	assertTombstoneLimit(t, db, 2, MaxFeedItems)
 
 	feeds := mustListFeeds(t, db)
 
@@ -284,45 +286,159 @@ func TestCleanupReadItems(t *testing.T) {
 	}
 }
 
-func TestCleanupTombstonesRemovesOnlyExpiredRows(t *testing.T) {
+func TestCleanupTombstonesKeepsOldRowsBelowPerFeedLimit(t *testing.T) {
 	t.Parallel()
 
 	db := openTestDB(t)
 	feedID := mustUpsertFeed(t, db, "http://example.com/tombstones", "Tombstones")
-	cutoff := time.Now().UTC().Add(-tombstoneRetention)
+	old := time.Now().UTC().Add(-365 * 24 * time.Hour)
+
+	mustUpsertTestItems(t, db, feedID, sequentialItems(20))
 
 	_, err := db.ExecContext(context.Background(), `
 INSERT INTO tombstones (feed_id, guid, deleted_at)
-VALUES (?, 'expired', ?), (?, 'recent', ?)
-`, feedID, cutoff.Add(-time.Second), feedID, cutoff.Add(time.Second))
+VALUES (?, 'old-a', ?), (?, 'old-b', ?)
+`, feedID, old, feedID, old.Add(time.Second))
 	if err != nil {
 		t.Fatalf("insert tombstones: %v", err)
 	}
 
-	deleted, err := cleanupTombstonesBefore(context.Background(), db, cutoff)
+	deleted, err := cleanupTombstonesBeyondLimit(context.Background(), db)
 	if err != nil {
-		t.Fatalf("cleanupTombstonesBefore: %v", err)
+		t.Fatalf("cleanupTombstonesBeyondLimit: %v", err)
 	}
 
-	if deleted != 1 {
-		t.Fatalf("expected 1 deleted tombstone, got %d", deleted)
+	if deleted != 0 {
+		t.Fatalf("expected no deleted tombstones, got %d", deleted)
 	}
 
-	if existsInTombstones(t, db, feedID, "expired") {
-		t.Fatal("expected expired tombstone to be deleted")
+	if !existsInTombstones(t, db, feedID, "old-a") {
+		t.Fatal("expected first old tombstone to remain")
 	}
 
-	if !existsInTombstones(t, db, feedID, "recent") {
-		t.Fatal("expected recent tombstone to remain")
+	if !existsInTombstones(t, db, feedID, "old-b") {
+		t.Fatal("expected second old tombstone to remain")
 	}
+}
 
-	deleted, err = cleanupTombstonesBefore(context.Background(), db, cutoff)
+func TestCleanupTombstonesEnforcesPerFeedLimit(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	largeFeedID := mustUpsertFeed(t, db, "http://example.com/large-tombstones", "Large Tombstones")
+	smallFeedID := mustUpsertFeed(t, db, "http://example.com/small-tombstones", "Small Tombstones")
+	base := time.Now().UTC().Add(-time.Duration(MaxFeedItems+10) * time.Minute)
+
+	insertTestTombstones(t, db, largeFeedID, MaxFeedItems+2, base)
+	insertTestTombstones(t, db, smallFeedID, 22, base.Add(-24*time.Hour))
+	mustUpsertTestItems(t, db, smallFeedID, sequentialItems(20))
+
+	deleted, err := cleanupTombstonesBeyondLimit(context.Background(), db)
 	if err != nil {
-		t.Fatalf("second cleanupTombstonesBefore: %v", err)
+		t.Fatalf("cleanupTombstonesBeyondLimit: %v", err)
+	}
+
+	if deleted != 4 {
+		t.Fatalf("expected 4 deleted tombstones, got %d", deleted)
+	}
+
+	assertTombstoneCleanupState(t, db, largeFeedID, smallFeedID)
+
+	deleted, err = cleanupTombstonesBeyondLimit(context.Background(), db)
+	if err != nil {
+		t.Fatalf("second cleanupTombstonesBeyondLimit: %v", err)
 	}
 
 	if deleted != 0 {
 		t.Fatalf("expected idempotent cleanup, deleted %d additional tombstones", deleted)
+	}
+}
+
+func assertTombstoneCleanupState(t *testing.T, db *sql.DB, largeFeedID, smallFeedID int64) {
+	t.Helper()
+
+	if got := countTombstonesForFeed(t, db, largeFeedID); got != MaxFeedItems {
+		t.Fatalf("expected %d large-feed tombstones, got %d", MaxFeedItems, got)
+	}
+
+	if got := countTombstonesForFeed(t, db, smallFeedID); got != 20 {
+		t.Fatalf("expected 20 small-feed tombstones, got %d", got)
+	}
+
+	if existsInTombstones(t, db, largeFeedID, "tombstone-0000") {
+		t.Fatal("expected oldest large-feed tombstone to be deleted")
+	}
+
+	if existsInTombstones(t, db, largeFeedID, "tombstone-0001") {
+		t.Fatal("expected second-oldest large-feed tombstone to be deleted")
+	}
+
+	if !existsInTombstones(t, db, largeFeedID, "tombstone-0002") {
+		t.Fatal("expected retained large-feed boundary tombstone")
+	}
+
+	if existsInTombstones(t, db, smallFeedID, "tombstone-0000") {
+		t.Fatal("expected oldest small-feed tombstone to be deleted")
+	}
+
+	if !existsInTombstones(t, db, smallFeedID, "tombstone-0002") {
+		t.Fatal("expected retained small-feed boundary tombstone")
+	}
+}
+
+func TestCleanupTombstonesPreventsOldReadItemFromReturning(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/slow-feed", "Slow Feed")
+	published := time.Now().UTC().Add(-60 * 24 * time.Hour)
+	item := newGofeedItem(
+		"Previously read",
+		"http://example.com/previously-read",
+		"previously-read",
+		"<p>Summary</p>",
+		&published,
+	)
+
+	mustUpsertTestItems(t, db, feedID, []*gofeed.Item{item})
+	markTestItemRead(t, db, feedID, item.GUID, time.Now().UTC().Add(-31*time.Minute))
+
+	err := CleanupReadItems(db)
+	if err != nil {
+		t.Fatalf("CleanupReadItems: %v", err)
+	}
+
+	_, err = db.ExecContext(
+		context.Background(),
+		"UPDATE tombstones SET deleted_at = ? WHERE feed_id = ? AND guid = ?",
+		time.Now().UTC().Add(-31*24*time.Hour),
+		feedID,
+		item.GUID,
+	)
+	if err != nil {
+		t.Fatalf("age tombstone: %v", err)
+	}
+
+	err = CleanupTombstones(db)
+	if err != nil {
+		t.Fatalf("CleanupTombstones: %v", err)
+	}
+
+	inserted, err := UpsertItems(context.Background(), db, feedID, []*gofeed.Item{item})
+	if err != nil {
+		t.Fatalf("UpsertItems after tombstone cleanup: %v", err)
+	}
+
+	if inserted != 0 {
+		t.Fatalf("expected tombstoned item not to be reinserted, got %d inserted rows", inserted)
+	}
+
+	if existsByGUID(t, db, feedID, item.GUID) {
+		t.Fatal("expected previously read item to remain absent")
+	}
+
+	if !existsInTombstones(t, db, feedID, item.GUID) {
+		t.Fatal("expected old tombstone to remain")
 	}
 }
 
@@ -889,6 +1005,53 @@ WHERE feed_id = ? AND guid = ?
 	return count > 0
 }
 
+func countTombstonesForFeed(t *testing.T, db *sql.DB, feedID int64) int {
+	t.Helper()
+
+	var count int
+
+	err := db.QueryRowContext(
+		context.Background(),
+		"SELECT COUNT(*) FROM tombstones WHERE feed_id = ?",
+		feedID,
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("count tombstones for feed %d: %v", feedID, err)
+	}
+
+	return count
+}
+
+func insertTestTombstones(t *testing.T, db *sql.DB, feedID int64, count int, base time.Time) {
+	t.Helper()
+
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin tombstone insert transaction: %v", err)
+	}
+
+	defer rollbackTx(tx)
+
+	for index := range count {
+		_, err = tx.ExecContext(context.Background(), `
+INSERT INTO tombstones (feed_id, guid, deleted_at)
+VALUES (?, ?, ?)
+`,
+			feedID,
+			fmt.Sprintf("tombstone-%04d", index),
+			base.Add(time.Duration(index)*time.Minute),
+		)
+		if err != nil {
+			t.Fatalf("insert tombstone %d: %v", index, err)
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		t.Fatalf("commit tombstone insert transaction: %v", err)
+	}
+}
+
 func mustUpsertFeed(t *testing.T, db *sql.DB, feedURL, title string) int64 {
 	t.Helper()
 
@@ -995,6 +1158,25 @@ WHERE name = 'sort_order'
 
 	if hasSortOrder != 1 {
 		t.Fatal("expected sort_order column to be added")
+	}
+}
+
+func assertTombstoneLimit(t *testing.T, db *sql.DB, feedID int64, want int) {
+	t.Helper()
+
+	var limit int
+
+	err := db.QueryRowContext(
+		context.Background(),
+		"SELECT tombstone_limit FROM feeds WHERE id = ?",
+		feedID,
+	).Scan(&limit)
+	if err != nil {
+		t.Fatalf("query tombstone limit for feed %d: %v", feedID, err)
+	}
+
+	if limit != want {
+		t.Fatalf("expected tombstone limit %d for feed %d, got %d", want, feedID, limit)
 	}
 }
 
