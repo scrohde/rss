@@ -122,7 +122,7 @@ func TestListPulseFeedIDsSkipsRecentlyRefreshed(t *testing.T) {
 	}
 }
 
-func TestInitAddsFeedColumnsToExistingSchema(t *testing.T) {
+func TestInitAddsFeedSortOrderToExistingSchema(t *testing.T) {
 	t.Parallel()
 
 	db := openLegacySchemaDB(t)
@@ -134,8 +134,7 @@ func TestInitAddsFeedColumnsToExistingSchema(t *testing.T) {
 	}
 
 	assertHasSortOrderColumn(t, db)
-	assertTombstoneLimit(t, db, 1, MaxFeedItems)
-	assertTombstoneLimit(t, db, 2, MaxFeedItems)
+	assertNoTombstoneLimitColumn(t, db)
 
 	feeds := mustListFeeds(t, db)
 
@@ -286,14 +285,12 @@ func TestCleanupReadItems(t *testing.T) {
 	}
 }
 
-func TestCleanupTombstonesKeepsOldRowsBelowPerFeedLimit(t *testing.T) {
+func TestCleanupTombstonesKeepsOldRowsBelowFixedLimit(t *testing.T) {
 	t.Parallel()
 
 	db := openTestDB(t)
 	feedID := mustUpsertFeed(t, db, "http://example.com/tombstones", "Tombstones")
 	old := time.Now().UTC().Add(-365 * 24 * time.Hour)
-
-	mustUpsertTestItems(t, db, feedID, sequentialItems(20))
 
 	_, err := db.ExecContext(context.Background(), `
 INSERT INTO tombstones (feed_id, guid, deleted_at)
@@ -330,8 +327,7 @@ func TestCleanupTombstonesEnforcesPerFeedLimit(t *testing.T) {
 	base := time.Now().UTC().Add(-time.Duration(MaxFeedItems+10) * time.Minute)
 
 	insertTestTombstones(t, db, largeFeedID, MaxFeedItems+2, base)
-	insertTestTombstones(t, db, smallFeedID, 22, base.Add(-24*time.Hour))
-	mustUpsertTestItems(t, db, smallFeedID, sequentialItems(20))
+	insertTestTombstones(t, db, smallFeedID, MaxFeedItems+2, base.Add(-24*time.Hour))
 
 	deleted, err := cleanupTombstonesBeyondLimit(context.Background(), db)
 	if err != nil {
@@ -361,8 +357,8 @@ func assertTombstoneCleanupState(t *testing.T, db *sql.DB, largeFeedID, smallFee
 		t.Fatalf("expected %d large-feed tombstones, got %d", MaxFeedItems, got)
 	}
 
-	if got := countTombstonesForFeed(t, db, smallFeedID); got != 20 {
-		t.Fatalf("expected 20 small-feed tombstones, got %d", got)
+	if got := countTombstonesForFeed(t, db, smallFeedID); got != MaxFeedItems {
+		t.Fatalf("expected %d small-feed tombstones, got %d", MaxFeedItems, got)
 	}
 
 	if existsInTombstones(t, db, largeFeedID, "tombstone-0000") {
@@ -386,37 +382,43 @@ func assertTombstoneCleanupState(t *testing.T, db *sql.DB, largeFeedID, smallFee
 	}
 }
 
-func TestCleanupTombstonesPreventsOldReadItemFromReturning(t *testing.T) {
+func TestCleanupTombstonesPreventsEarlierOneItemGenerationFromReturning(t *testing.T) {
 	t.Parallel()
 
 	db := openTestDB(t)
 	feedID := mustUpsertFeed(t, db, "http://example.com/slow-feed", "Slow Feed")
-	published := time.Now().UTC().Add(-60 * 24 * time.Hour)
-	item := newGofeedItem(
-		"Previously read",
-		"http://example.com/previously-read",
-		"previously-read",
+	earlierPublished := time.Now().UTC().Add(-60 * 24 * time.Hour)
+	earlierItem := newGofeedItem(
+		"Earlier item",
+		"http://example.com/earlier-item",
+		"earlier-item",
 		"<p>Summary</p>",
-		&published,
+		&earlierPublished,
 	)
 
-	mustUpsertTestItems(t, db, feedID, []*gofeed.Item{item})
-	markTestItemRead(t, db, feedID, item.GUID, time.Now().UTC().Add(-31*time.Minute))
+	mustUpsertTestItems(t, db, feedID, []*gofeed.Item{earlierItem})
+	markTestItemRead(t, db, feedID, earlierItem.GUID, time.Now().UTC().Add(-31*time.Minute))
 
 	err := CleanupReadItems(db)
 	if err != nil {
-		t.Fatalf("CleanupReadItems: %v", err)
+		t.Fatalf("CleanupReadItems for earlier generation: %v", err)
 	}
 
-	_, err = db.ExecContext(
-		context.Background(),
-		"UPDATE tombstones SET deleted_at = ? WHERE feed_id = ? AND guid = ?",
-		time.Now().UTC().Add(-31*24*time.Hour),
-		feedID,
-		item.GUID,
+	laterPublished := time.Now().UTC().Add(-24 * time.Hour)
+	laterItem := newGofeedItem(
+		"Later item",
+		"http://example.com/later-item",
+		"later-item",
+		"<p>Summary</p>",
+		&laterPublished,
 	)
+
+	mustUpsertTestItems(t, db, feedID, []*gofeed.Item{laterItem})
+	markTestItemRead(t, db, feedID, laterItem.GUID, time.Now().UTC().Add(-31*time.Minute))
+
+	err = CleanupReadItems(db)
 	if err != nil {
-		t.Fatalf("age tombstone: %v", err)
+		t.Fatalf("CleanupReadItems for later generation: %v", err)
 	}
 
 	err = CleanupTombstones(db)
@@ -424,7 +426,7 @@ func TestCleanupTombstonesPreventsOldReadItemFromReturning(t *testing.T) {
 		t.Fatalf("CleanupTombstones: %v", err)
 	}
 
-	inserted, err := UpsertItems(context.Background(), db, feedID, []*gofeed.Item{item})
+	inserted, err := UpsertItems(context.Background(), db, feedID, []*gofeed.Item{earlierItem})
 	if err != nil {
 		t.Fatalf("UpsertItems after tombstone cleanup: %v", err)
 	}
@@ -433,12 +435,66 @@ func TestCleanupTombstonesPreventsOldReadItemFromReturning(t *testing.T) {
 		t.Fatalf("expected tombstoned item not to be reinserted, got %d inserted rows", inserted)
 	}
 
-	if existsByGUID(t, db, feedID, item.GUID) {
-		t.Fatal("expected previously read item to remain absent")
+	if existsByGUID(t, db, feedID, earlierItem.GUID) {
+		t.Fatal("expected earlier read item to remain absent")
 	}
 
-	if !existsInTombstones(t, db, feedID, item.GUID) {
-		t.Fatal("expected old tombstone to remain")
+	if !existsInTombstones(t, db, feedID, earlierItem.GUID) {
+		t.Fatal("expected earlier generation tombstone to remain")
+	}
+}
+
+func TestCleanupTombstonesShortFetchesCannotReduceRetention(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name         string
+		fetchedCount int
+	}{
+		{name: "one_item", fetchedCount: 1},
+		{name: "empty", fetchedCount: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			assertShortFetchKeepsTombstones(t, test.name, test.fetchedCount)
+		})
+	}
+}
+
+func assertShortFetchKeepsTombstones(t *testing.T, name string, fetchedCount int) {
+	t.Helper()
+
+	db := openTestDB(t)
+	feedID := mustUpsertFeed(t, db, "http://example.com/"+name, name)
+	base := time.Now().UTC().Add(-time.Hour)
+	tombstonedItem := newGofeedItem(
+		"Previously removed",
+		"http://example.com/previously-removed",
+		"tombstone-0000",
+		"<p>Summary</p>",
+		&base,
+	)
+
+	insertTestTombstones(t, db, feedID, 3, base)
+	mustUpsertTestItems(t, db, feedID, sequentialItems(fetchedCount))
+
+	err := CleanupTombstones(db)
+	if err != nil {
+		t.Fatalf("CleanupTombstones: %v", err)
+	}
+
+	inserted, err := UpsertItems(context.Background(), db, feedID, []*gofeed.Item{tombstonedItem})
+	if err != nil {
+		t.Fatalf("UpsertItems tombstoned item: %v", err)
+	}
+
+	if inserted != 0 {
+		t.Fatalf("expected retained tombstone to prevent resurrection, inserted %d item", inserted)
+	}
+
+	if got := countTombstonesForFeed(t, db, feedID); got != 3 {
+		t.Fatalf("expected all 3 tombstones to remain, got %d", got)
 	}
 }
 
@@ -1161,22 +1217,22 @@ WHERE name = 'sort_order'
 	}
 }
 
-func assertTombstoneLimit(t *testing.T, db *sql.DB, feedID int64, want int) {
+func assertNoTombstoneLimitColumn(t *testing.T, db *sql.DB) {
 	t.Helper()
 
-	var limit int
+	var hasTombstoneLimit int
 
-	err := db.QueryRowContext(
-		context.Background(),
-		"SELECT tombstone_limit FROM feeds WHERE id = ?",
-		feedID,
-	).Scan(&limit)
-	if err != nil {
-		t.Fatalf("query tombstone limit for feed %d: %v", feedID, err)
+	queryErr := db.QueryRowContext(context.Background(), `
+SELECT COUNT(*)
+FROM pragma_table_info('feeds')
+WHERE name = 'tombstone_limit'
+`).Scan(&hasTombstoneLimit)
+	if queryErr != nil {
+		t.Fatalf("check tombstone_limit column: %v", queryErr)
 	}
 
-	if limit != want {
-		t.Fatalf("expected tombstone limit %d for feed %d, got %d", want, feedID, limit)
+	if hasTombstoneLimit != 0 {
+		t.Fatal("expected tombstone_limit column not to be added")
 	}
 }
 
