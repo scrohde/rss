@@ -2502,16 +2502,19 @@ html[data-theme="dark"] .mobile-reader-body {
 
   .mobile-feed-section + .mobile-feed-section {
     position: relative;
+    margin-top: 16px;
+    padding-top: 12px;
   }
 
   .mobile-feed-section + .mobile-feed-section::before {
     content: "";
     position: absolute;
-    top: -1px;
-    right: 0;
+    top: 0;
     left: 0;
-    height: 1px;
-    background: linear-gradient(90deg, var(--mobile-button-border), transparent);
+    width: 44px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--accent);
     pointer-events: none;
   }
 

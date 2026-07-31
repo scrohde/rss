@@ -4490,12 +4490,17 @@ func mobileAggregateCompactSectionsExpression() string {
 			return false;
 		}
 		const firstBoundary = window.getComputedStyle(sections[0], "::before");
+		const secondSection = window.getComputedStyle(sections[1]);
 		const secondBoundary = window.getComputedStyle(sections[1], "::before");
 		if (
 			firstBoundary.content !== "none" ||
 			(secondBoundary.content !== '""' && secondBoundary.content !== "''") ||
-			secondBoundary.height !== "1px" ||
-			!secondBoundary.backgroundImage.includes("linear-gradient")
+			secondSection.marginTop !== "16px" ||
+			secondSection.paddingTop !== "12px" ||
+			secondBoundary.top !== "0px" ||
+			secondBoundary.width !== "44px" ||
+			secondBoundary.height !== "3px" ||
+			secondBoundary.backgroundColor === "rgba(0, 0, 0, 0)"
 		) {
 			return false;
 		}
