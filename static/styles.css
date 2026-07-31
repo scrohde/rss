@@ -2500,6 +2500,21 @@ html[data-theme="dark"] .mobile-reader-body {
     min-width: 0;
   }
 
+  .mobile-feed-section + .mobile-feed-section {
+    position: relative;
+  }
+
+  .mobile-feed-section + .mobile-feed-section::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    right: 0;
+    left: 0;
+    height: 1px;
+    background: linear-gradient(90deg, var(--mobile-button-border), transparent);
+    pointer-events: none;
+  }
+
   .mobile-feed-section-items {
     min-width: 0;
   }
