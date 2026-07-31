@@ -4498,7 +4498,7 @@ func mobileAggregateCompactSectionsExpression() string {
 			secondSection.marginTop !== "16px" ||
 			secondSection.paddingTop !== "12px" ||
 			secondBoundary.top !== "0px" ||
-			secondBoundary.width !== "44px" ||
+			secondBoundary.width !== "36px" ||
 			secondBoundary.height !== "3px" ||
 			secondBoundary.backgroundColor === "rgba(0, 0, 0, 0)"
 		) {
