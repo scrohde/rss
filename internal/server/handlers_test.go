@@ -4891,6 +4891,8 @@ func TestMobileAggregateUsesSavedFeedOrderAndSkipsCaughtUpFeeds(t *testing.T) {
 
 	body := rec.Body.String()
 	assertMobileFeedSectionOrder(t, body, priorityID, laterID)
+	assertContains(t, body, `aria-label="Priority Feed"`, "expected compact feed section accessible name")
+	assertNotContains(t, body, `class="mobile-feed-section-header"`, "expected redundant feed heading to be omitted")
 	assertNotContains(
 		t,
 		body,

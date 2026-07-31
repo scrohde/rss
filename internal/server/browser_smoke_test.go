@@ -806,6 +806,7 @@ func TestBrowserSmokeMobileAggregateFlows(t *testing.T) {
 		mobileAggregateSectionOrderExpression(fixture.highFeedID, fixture.laterFeedID),
 		"mobile aggregate saved feed order",
 	)
+	waitForJS(t, ctx, mobileAggregateCompactSectionsExpression(), "mobile aggregate compact feed sections")
 	waitForJS(
 		t,
 		ctx,
@@ -4476,6 +4477,30 @@ func mobileAggregateSectionOrderExpression(feedIDs ...int64) string {
 			.map((section) => section.dataset.feedId).join(",") === %q)()`,
 		expected,
 	)
+}
+
+func mobileAggregateCompactSectionsExpression() string {
+	return `(() => {
+		const list = document.querySelector(".mobile-stream-sections");
+		const sections = Array.from(document.querySelectorAll("[data-mobile-feed-section]"));
+		if (!list || sections.length < 2 || document.querySelector(".mobile-feed-section-header")) {
+			return false;
+		}
+		if (window.getComputedStyle(list).gap !== "0px") {
+			return false;
+		}
+		return sections.every((section) => {
+			const sectionStyle = window.getComputedStyle(section);
+			const card = section.querySelector(".mobile-card");
+			const source = card && card.querySelector(".mobile-card-source");
+			return section.getAttribute("aria-label") &&
+				sectionStyle.borderTopStyle === "none" &&
+				card &&
+				window.getComputedStyle(card).borderBottomStyle !== "none" &&
+				source &&
+				source.textContent.trim();
+		});
+	})()`
 }
 
 func mobileAggregateBoundedExpression(maxSections, maxItemsPerSection int) string {

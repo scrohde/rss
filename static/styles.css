@@ -2492,36 +2492,12 @@ html[data-theme="dark"] .mobile-reader-body {
   .mobile-stream-sections {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 0;
     min-width: 0;
   }
 
   .mobile-feed-section {
     min-width: 0;
-    border-top: 1px solid var(--panel-divider);
-  }
-
-  .mobile-feed-section-header {
-    padding: 14px 0 10px;
-    border-bottom: 1px solid var(--panel-divider);
-  }
-
-  .mobile-feed-section-kicker {
-    margin: 0 0 3px;
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .mobile-feed-section-header h2 {
-    margin: 0;
-    color: var(--accent-2);
-    font-family: "Space Grotesk", "DM Sans", sans-serif;
-    font-size: 19px;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
   }
 
   .mobile-feed-section-items {

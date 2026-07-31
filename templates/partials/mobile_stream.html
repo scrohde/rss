@@ -136,13 +136,9 @@
     id="mobile-feed-section-{{.FeedID}}"
     data-mobile-feed-section
     data-feed-id="{{.FeedID}}"
-    aria-labelledby="mobile-feed-section-title-{{.FeedID}}"
+    aria-label="{{.FeedTitle}}"
     tabindex="-1"
   >
-    <header class="mobile-feed-section-header">
-      <p class="mobile-feed-section-kicker">Feed</p>
-      <h2 id="mobile-feed-section-title-{{.FeedID}}">{{.FeedTitle}}</h2>
-    </header>
     <div class="mobile-feed-section-items" data-mobile-feed-page>
       {{range .Items}}
         <article class="mobile-card" id="mobile-card-{{.ID}}" data-mobile-item-id="{{.ID}}">
