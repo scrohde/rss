@@ -4489,6 +4489,16 @@ func mobileAggregateCompactSectionsExpression() string {
 		if (window.getComputedStyle(list).gap !== "0px") {
 			return false;
 		}
+		const firstBoundary = window.getComputedStyle(sections[0], "::before");
+		const secondBoundary = window.getComputedStyle(sections[1], "::before");
+		if (
+			firstBoundary.content !== "none" ||
+			(secondBoundary.content !== '""' && secondBoundary.content !== "''") ||
+			secondBoundary.height !== "1px" ||
+			!secondBoundary.backgroundImage.includes("linear-gradient")
+		) {
+			return false;
+		}
 		return sections.every((section) => {
 			const sectionStyle = window.getComputedStyle(section);
 			const card = section.querySelector(".mobile-card");
