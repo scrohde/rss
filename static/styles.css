@@ -789,14 +789,6 @@ body {
   z-index: 50;
 }
 
-.app:has(#content-panel.is-open) .main-panel {
-  overflow-y: hidden;
-}
-
-.app.is-content-panel-floating:has(#content-panel.is-open) .main-panel {
-  overflow-y: auto;
-}
-
 .feed-panel-resizer {
   width: 10px;
   cursor: col-resize;

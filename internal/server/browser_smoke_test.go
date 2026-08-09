@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
@@ -362,6 +363,111 @@ func TestBrowserSmokeReaderFlowsPanelResize(t *testing.T) {
 		"pulse.contentPanelWidth",
 		-40,
 	)
+}
+
+func TestBrowserSmokeReaderFlowsDockedItemsPanel(t *testing.T) {
+	app := newSmokeApp(t)
+	feedID := mustUpsertFeed(
+		t,
+		app,
+		"https://example.com/docked-items-panel.xml",
+		"Docked Items Panel",
+	)
+	base := time.Date(2026, time.January, 6, 12, 0, 0, 0, time.UTC)
+	feedItems := make([]*gofeed.Item, 0, 18)
+	for index := range 18 {
+		item := newSmokeItem(
+			fmt.Sprintf("Docked Item %02d", index+1),
+			fmt.Sprintf("https://example.com/docked-items-panel/%d", index+1),
+			fmt.Sprintf("docked-items-panel-%d", index+1),
+			base.Add(-time.Duration(index)*time.Minute),
+		)
+		if index == 0 {
+			item.Content = strings.Repeat(
+				"<p>Long reader content keeps the docked reader independently scrollable.</p>",
+				48,
+			)
+		}
+		feedItems = append(feedItems, item)
+	}
+	mustUpsertItems(t, app, feedID, feedItems)
+	items := mustListItems(t, app, feedID)
+	assertItemCount(t, items, len(feedItems))
+
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+
+	ctx := newSmokeBrowserContext(t)
+	runActions(
+		t,
+		ctx,
+		chromedp.EmulateViewport(1600, 700),
+		chromedp.Navigate(server.URL),
+		chromedp.WaitVisible("#feed-list", chromedp.ByQuery),
+	)
+	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready for docked items panel")
+	waitForJS(t, ctx, desktopLayoutExpression(), "desktop layout for docked items panel")
+
+	feedSelector := fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, feedID)
+	clickElement(t, ctx, feedSelector, "open docked items panel feed")
+	waitForJS(
+		t,
+		ctx,
+		elementPresentExpression(fmt.Sprintf(`#main-content #item-list[data-feed-id="%d"]`, feedID)),
+		"docked items panel feed list",
+	)
+
+	firstRowSelector := fmt.Sprintf("#item-%d", items[0].ID)
+	firstReaderButton := firstRowSelector + " .item-read-in-app"
+	runActions(t, ctx, chromedp.Click(firstReaderButton, chromedp.ByQuery))
+	waitForJS(t, ctx, contentPanelItemExpression(items[0].ID), "first docked reader item")
+	waitForJS(t, ctx, dockedPanelsScrollableExpression(items[0].ID), "independent docked scroll surfaces")
+
+	var wheelPoint struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	runActions(
+		t,
+		ctx,
+		chromedp.Evaluate(`(() => {
+			const main = document.querySelector(".main-panel");
+			const rect = main.getBoundingClientRect();
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+		})()`, &wheelPoint),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			if err := input.DispatchMouseEvent(input.MouseMoved, wheelPoint.X, wheelPoint.Y).Do(ctx); err != nil {
+				return err
+			}
+
+			return input.DispatchMouseEvent(input.MouseWheel, wheelPoint.X, wheelPoint.Y).
+				WithDeltaY(520).
+				Do(ctx)
+		}),
+	)
+	waitForJS(t, ctx, dockedItemsWheelScrollExpression(items[0].ID), "wheel-scroll docked items panel")
+
+	targetRowSelector := fmt.Sprintf("#item-%d", items[6].ID)
+	targetReaderButton := targetRowSelector + " .item-read-in-app"
+	runActions(t, ctx, chromedp.Click(targetReaderButton, chromedp.ByQuery))
+	waitForJS(t, ctx, contentPanelItemExpression(items[6].ID), "docked item control updates reader")
+	waitForJS(t, ctx, hasClassExpression(targetRowSelector, "is-expanded"), "new docked item expanded")
+	waitForJS(t, ctx, missingClassExpression(firstRowSelector, "is-expanded"), "previous docked item collapsed")
+
+	runActions(t, ctx, chromedp.Click("#content-panel [data-content-panel-full-toggle]", chromedp.ByQuery))
+	waitForJS(t, ctx, hasClassExpression(".app", "is-content-panel-floating"), "floating reader mode")
+
+	blockedRowSelector := fmt.Sprintf("#item-%d", items[7].ID)
+	blockedToggleSelector := blockedRowSelector + " .item-read-toggle"
+	waitForJS(
+		t,
+		ctx,
+		floatingBackdropCoversControlExpression(blockedToggleSelector),
+		"floating backdrop covers items control",
+	)
+	runActions(t, ctx, chromedp.Click(blockedToggleSelector, chromedp.ByQuery))
+	waitForJS(t, ctx, missingClassExpression("#content-panel", "is-open"), "floating outside click closes reader")
+	waitForJS(t, ctx, itemReadStateExpression(blockedRowSelector, "unread"), "floating backdrop blocks item control")
 }
 
 func TestBrowserSmokeReaderFlowsBreakpointTransitions(t *testing.T) {
@@ -4593,6 +4699,76 @@ func contentPanelItemExpression(itemID int64) string {
 			return !!article && article.getAttribute("data-item-id") === %q;
 		})()`,
 		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func dockedPanelsScrollableExpression(itemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			const app = document.querySelector(".app");
+			const main = document.querySelector(".main-panel");
+			const panel = document.querySelector("#content-panel.is-open");
+			const article = panel && panel.querySelector(".content-panel-article[data-item-id]");
+			if (!app || !main || !panel || !article ||
+				app.classList.contains("is-content-panel-floating") ||
+				article.getAttribute("data-item-id") !== %q ||
+				getComputedStyle(main).overflowY !== "auto" ||
+				getComputedStyle(panel).overflowY !== "auto" ||
+				main.scrollHeight <= main.clientHeight || panel.scrollHeight <= panel.clientHeight) {
+				return false;
+			}
+			panel.scrollTop = Math.min(180, panel.scrollHeight - panel.clientHeight);
+			window.__dockedReaderScrollTop = panel.scrollTop;
+			return panel.scrollTop > 0;
+		})()`,
+		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func dockedItemsWheelScrollExpression(itemID int64) string {
+	return fmt.Sprintf(
+		`(() => {
+			const main = document.querySelector(".main-panel");
+			const panel = document.querySelector("#content-panel.is-open");
+			const article = panel && panel.querySelector(".content-panel-article[data-item-id]");
+			return !!main && !!panel && !!article && main.scrollTop > 0 &&
+				article.getAttribute("data-item-id") === %q &&
+				Math.abs(panel.scrollTop - window.__dockedReaderScrollTop) <= 1;
+		})()`,
+		fmt.Sprintf("%d", itemID),
+	)
+}
+
+func floatingBackdropCoversControlExpression(selector string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const app = document.querySelector(".app.is-content-panel-floating");
+			const panel = document.querySelector("#content-panel.is-open");
+			const control = document.querySelector(%q);
+			if (!app || !panel || !control) return false;
+			control.scrollIntoView({ block: "center" });
+			const controlRect = control.getBoundingClientRect();
+			const panelRect = panel.getBoundingClientRect();
+			const controlX = controlRect.left + controlRect.width / 2;
+			const controlY = controlRect.top + controlRect.height / 2;
+			return controlRect.width > 0 && controlRect.height > 0 &&
+				controlX >= 0 && controlX <= innerWidth && controlY >= 0 && controlY <= innerHeight &&
+				(controlX < panelRect.left || controlX > panelRect.right ||
+					controlY < panelRect.top || controlY > panelRect.bottom);
+		})()`,
+		selector,
+	)
+}
+
+func itemReadStateExpression(rowSelector, state string) string {
+	return fmt.Sprintf(
+		`(() => {
+			const row = document.querySelector(%q);
+			const toggle = row && row.querySelector(".item-read-toggle");
+			return !!toggle && toggle.dataset.readState === %q;
+		})()`,
+		rowSelector,
+		state,
 	)
 }
 

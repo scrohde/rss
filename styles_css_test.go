@@ -69,7 +69,7 @@ func TestStylesGeneralMenuContracts(t *testing.T) {
 	}
 }
 
-func TestStylesContentPanelScrollbarSwitching(t *testing.T) {
+func TestStylesReaderPanelsScrollIndependently(t *testing.T) {
 	t.Parallel()
 
 	source := readStylesCSS(t)
@@ -86,12 +86,12 @@ func TestStylesContentPanelScrollbarSwitching(t *testing.T) {
 		t.Fatal("expected expanded content panel to enable vertical scrolling")
 	}
 
-	if !cssRuleContains(
+	if cssRuleContains(
 		source,
 		".app:has(#content-panel.is-open) .main-panel",
 		"overflow-y: hidden;",
 	) {
-		t.Fatal("expected main panel scrolling to be disabled when content panel is open")
+		t.Fatal("expected main panel scrolling to remain enabled when content panel is open")
 	}
 }
 
