@@ -237,6 +237,7 @@ Optional overrides:
 - `internal/store/` SQLite open/init and data access for feeds/items and auth state
 - `internal/feed/` feed fetch/refresh and refresh scheduling
 - `internal/content/` summary HTML rewriting, srcset normalization, and image proxy helpers
+- `internal/outbound/` shared outbound URL policy and destination-pinned HTTP transport
 - `internal/auth/` passkey registration/authentication service logic
 - `internal/opml/` OPML import/export parsing and rendering helpers
 - `internal/view/` template-facing view models and formatting builders

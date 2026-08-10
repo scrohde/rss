@@ -86,25 +86,6 @@
   </div>
 {{end}}
 
-{{define "item_content_panel"}}
-  <aside class="content-panel is-open" id="content-panel" aria-live="polite" tabindex="-1">
-    {{template "item_content_panel_actions" .}}
-    <article class="content-panel-article" data-item-id="{{.ID}}">
-      <header class="content-panel-header">
-        <a class="content-panel-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
-        <p class="content-panel-meta">{{.PublishedDisplay}}</p>
-      </header>
-      <div class="content-panel-body" data-reader-content="true" hx-disable>
-        {{if .HasContent}}
-          {{.ContentHTML}}
-        {{else}}
-          {{.SummaryHTML}}
-        {{end}}
-      </div>
-    </article>
-  </aside>
-{{end}}
-
 {{define "item_content_panel_oob"}}
   <aside class="content-panel is-open" id="content-panel" aria-live="polite" tabindex="-1" hx-swap-oob="outerHTML">
     {{template "item_content_panel_actions" .}}
