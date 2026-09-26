@@ -51,10 +51,34 @@ func UpdateFeedTitle(ctx context.Context, db *sql.DB, feedID int64, title string
 func DeleteFeed(ctx context.Context, db *sql.DB, feedID int64) error {
 	ctx = contextOrBackground(ctx)
 
-	_, err := db.ExecContext(ctx, "DELETE FROM feeds WHERE id = ?", feedID)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete feed transaction: %w", err)
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackTx(tx)
+		}
+	}()
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM reading_preference_today_feeds WHERE feed_id = ?", feedID)
+	if err != nil {
+		return fmt.Errorf("remove deleted feed from Today selections: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM feeds WHERE id = ?", feedID)
 	if err != nil {
 		return fmt.Errorf("delete feed: %w", err)
 	}
+
+	commitErr := tx.Commit()
+	if commitErr != nil {
+		return fmt.Errorf("commit delete feed transaction: %w", commitErr)
+	}
+
+	committed = true
 
 	return nil
 }

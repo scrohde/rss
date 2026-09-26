@@ -49,10 +49,11 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 	state := parseMobileAggregateState(r)
 
 	data := mobileReaderResponseData{
-		BackPath:     mobileStreamStatePath(topBar.SelectedFeedID, state),
-		MarkReadPath: mobileMarkReadItemPath(item.ID, topBar.SelectedFeedID, state),
-		Item:         item,
-		TopBar:       topBar,
+		ReadingPreferences: emptyReadingPreferences(),
+		BackPath:           mobileStreamStatePath(topBar.SelectedFeedID, state),
+		MarkReadPath:       mobileMarkReadItemPath(item.ID, topBar.SelectedFeedID, state),
+		Item:               item,
+		TopBar:             topBar,
 	}
 	a.renderMobileReader(w, r, &data)
 }
@@ -236,9 +237,9 @@ func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Hx-Replace-Url", mobileStreamStatePath(topBar.SelectedFeedID, state))
 
 		if isMobileStreamSelectorTrigger(r) {
-			a.renderTemplate(w, "mobile_stream_selector_response", data)
+			a.renderTemplateWithReadingPreferences(w, r, "mobile_stream_selector_response", &data)
 		} else {
-			a.renderTemplate(w, "mobile_stream_response", data)
+			a.renderTemplateWithReadingPreferences(w, r, "mobile_stream_response", &data)
 		}
 
 		return
@@ -268,7 +269,12 @@ func (a *App) mobileStreamResponseDataOrError(
 			return zero, false
 		}
 
-		return mobileStreamResponseData{Aggregate: nil, Items: items, TopBar: *topBar}, true
+		return mobileStreamResponseData{
+			ReadingPreferences: emptyReadingPreferences(),
+			Aggregate:          nil,
+			Items:              items,
+			TopBar:             *topBar,
+		}, true
 	}
 
 	aggregate, ok := a.mobileAggregateOrError(w, r, state, "failed to load unread items")
@@ -278,13 +284,18 @@ func (a *App) mobileStreamResponseDataOrError(
 		return zero, false
 	}
 
-	return mobileStreamResponseData{Aggregate: aggregate, Items: nil, TopBar: *topBar}, true
+	return mobileStreamResponseData{
+		ReadingPreferences: emptyReadingPreferences(),
+		Aggregate:          aggregate,
+		Items:              nil,
+		TopBar:             *topBar,
+	}, true
 }
 
 func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *mobileReaderResponseData) {
 	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
 		w.Header().Set("Hx-Push-Url", r.URL.RequestURI())
-		a.renderTemplate(w, "mobile_reader_response", data)
+		a.renderTemplateWithReadingPreferences(w, r, "mobile_reader_response", data)
 
 		return
 	}

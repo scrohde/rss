@@ -86,16 +86,17 @@ func (a *App) renderDesktopReader(w http.ResponseWriter, r *http.Request, feeds 
 	}
 
 	data := itemListResponseData{
-		ItemList:          itemList,
-		Continuation:      view.BuildFeedContinuation(selectedFeedID, feeds),
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		SelectedFeedID:    selectedFeedID,
-		FeedEditMode:      feedEditModeEnabled(r),
+		ReadingPreferences: emptyReadingPreferences(),
+		ItemList:           itemList,
+		Continuation:       view.BuildFeedContinuation(selectedFeedID, feeds),
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		SelectedFeedID:     selectedFeedID,
+		FeedEditMode:       feedEditModeEnabled(r),
 	}
 
 	w.Header().Set("Hx-Replace-Url", "/")
-	a.renderTemplate(w, "item_list_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "item_list_response", &data)
 }
 
 func (a *App) renderItemListResponse(w http.ResponseWriter, r *http.Request, feedID int64) {
@@ -119,14 +120,15 @@ func (a *App) renderItemListResponseWithFeeds(
 	}
 
 	data := itemListResponseData{
-		ItemList:          itemList,
-		Continuation:      feedContinuationOOB(feedID, feeds),
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		SelectedFeedID:    feedID,
-		FeedEditMode:      feedEditModeEnabled(r),
+		ReadingPreferences: emptyReadingPreferences(),
+		ItemList:           itemList,
+		Continuation:       feedContinuationOOB(feedID, feeds),
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		SelectedFeedID:     feedID,
+		FeedEditMode:       feedEditModeEnabled(r),
 	}
-	a.renderTemplate(w, "item_list_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "item_list_response", &data)
 }
 
 func (a *App) renderEmptyItemListResponseWithFeeds(
@@ -135,14 +137,15 @@ func (a *App) renderEmptyItemListResponseWithFeeds(
 	feeds []view.FeedView,
 ) {
 	data := itemListResponseData{
-		ItemList:          nil,
-		Continuation:      view.BuildFeedContinuation(0, nil),
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		SelectedFeedID:    0,
-		FeedEditMode:      feedEditModeEnabled(r),
+		ReadingPreferences: emptyReadingPreferences(),
+		ItemList:           nil,
+		Continuation:       view.BuildFeedContinuation(0, nil),
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		SelectedFeedID:     0,
+		FeedEditMode:       feedEditModeEnabled(r),
 	}
-	a.renderTemplate(w, "item_list_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "item_list_response", &data)
 }
 
 func (a *App) renderTemplate(w http.ResponseWriter, name string, data any) {
@@ -182,10 +185,16 @@ func (a *App) newFullPageData(r *http.Request) (fullPageData, error) {
 		return fullPageData{}, err
 	}
 
+	readingPreferences, err := store.GetReadingPreferences(r.Context(), a.db)
+	if err != nil {
+		return fullPageData{}, fmt.Errorf("load reading preferences: %w", err)
+	}
+
 	return fullPageData{
-		CSRFToken:       a.csrfTokenForRequest(r),
-		AppearanceTheme: theme,
-		ThemeReturnPath: r.URL.RequestURI(),
+		ReadingPreferences: readingPreferences,
+		CSRFToken:          a.csrfTokenForRequest(r),
+		AppearanceTheme:    theme,
+		ThemeReturnPath:    r.URL.RequestURI(),
 	}, nil
 }
 

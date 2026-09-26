@@ -27,19 +27,19 @@ func (a *App) handleSubscribe(w http.ResponseWriter, r *http.Request) {
 
 	feedID, err := a.subscribeAndStoreFeed(r.Context(), r.PostForm.Get("url"))
 	if err != nil {
-		a.renderSubscribeError(w, err)
+		a.renderSubscribeError(w, r, err)
 
 		return
 	}
 
 	data, err := a.buildSubscribeResponseData(r.Context(), r, feedID)
 	if err != nil {
-		a.renderSubscribeError(w, err)
+		a.renderSubscribeError(w, r, err)
 
 		return
 	}
 
-	a.renderTemplate(w, "subscribe_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "subscribe_response", &data)
 }
 
 func (a *App) subscribeAndStoreFeed(ctx context.Context, rawURL string) (int64, error) {
@@ -157,25 +157,26 @@ func (a *App) buildSubscribeResponseData(
 	itemList = attachFeedContinuation(itemList, feeds)
 
 	return subscribeResponseData{
-		Message:           "",
-		MessageClass:      "",
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		SelectedFeedID:    feedID,
-		ItemList:          itemList,
-		Update:            true,
-		FeedEditMode:      feedEditModeEnabled(r),
+		ReadingPreferences: emptyReadingPreferences(),
+		Message:            "",
+		MessageClass:       "",
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		SelectedFeedID:     feedID,
+		ItemList:           itemList,
+		Update:             true,
+		FeedEditMode:       feedEditModeEnabled(r),
 	}, nil
 }
 
-func (a *App) renderSubscribeError(w http.ResponseWriter, err error) {
+func (a *App) renderSubscribeError(w http.ResponseWriter, r *http.Request, err error) {
 	var data subscribeResponseData
 
 	data.Message = err.Error()
 	data.MessageClass = "error"
 	data.Update = false
 	data.FeedPulseStatuses = a.pulseStatusViews()
-	a.renderTemplate(w, "subscribe_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "subscribe_response", &data)
 }
 
 func (a *App) handleEnterFeedEditMode(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +194,7 @@ func (a *App) handleEnterFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = parseSelectedFeedID(r)
 	data.FeedEditMode = true
-	a.renderTemplate(w, "feed_list", data)
+	a.renderTemplateWithReadingPreferences(w, r, "feed_list_response", &data)
 }
 
 func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +212,7 @@ func (a *App) handleCancelFeedEditMode(w http.ResponseWriter, r *http.Request) {
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = parseSelectedFeedID(r)
 	data.FeedEditMode = false
-	a.renderTemplate(w, "feed_list", data)
+	a.renderTemplateWithReadingPreferences(w, r, "feed_list_response", &data)
 }
 
 func (a *App) handleSaveFeedEditMode(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +297,7 @@ func (a *App) renderFeedEditSaveResponse(
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.SelectedFeedID = selection.selectedFeedID
 	data.FeedEditMode = false
-	a.renderTemplate(w, "feed_edit_save_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "feed_edit_save_response", &data)
 }
 
 type feedTitleState struct {
@@ -555,7 +556,7 @@ func (a *App) handleFeedItemsPoll(w http.ResponseWriter, r *http.Request) {
 	data.LastError = lastError
 	data.SelectedFeedID = feedID
 	data.FeedEditMode = feedEditModeEnabled(r)
-	a.renderTemplate(w, "poll_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "poll_response", &data)
 }
 
 func (a *App) handleFeedItemsNew(w http.ResponseWriter, r *http.Request) {
@@ -697,17 +698,28 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := toggleReadResponseData{
-		Item:              item,
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		Continuation:      feedContinuationOOB(feedID, feeds),
-		SelectedFeedID:    feedID,
-		View:              currentView,
-		FeedEditMode:      feedEditModeEnabled(r),
-		UpdatePanel:       true,
+	data := a.toggleReadResponseData(r, &item, feeds, feedID, currentView)
+	a.renderTemplateWithReadingPreferences(w, r, "item_toggle_response", &data)
+}
+
+func (a *App) toggleReadResponseData(
+	r *http.Request,
+	item *view.ItemView,
+	feeds []view.FeedView,
+	feedID int64,
+	currentView string,
+) toggleReadResponseData {
+	return toggleReadResponseData{
+		ReadingPreferences: emptyReadingPreferences(),
+		Item:               *item,
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		Continuation:       feedContinuationOOB(feedID, feeds),
+		SelectedFeedID:     feedID,
+		View:               currentView,
+		FeedEditMode:       feedEditModeEnabled(r),
+		UpdatePanel:        true,
 	}
-	a.renderTemplate(w, "item_toggle_response", data)
 }
 
 //nolint:gosec // Mark-all-read logs include request-derived feed IDs for operational visibility.
@@ -887,18 +899,19 @@ func (a *App) renderPulseStatusResponseWithFeeds(
 ) {
 	selectedFeedID := parseSelectedFeedID(r)
 	data := pulseStatusResponseData{
-		Message:           message,
-		MessageClass:      className,
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		Continuation:      feedContinuationOOB(selectedFeedID, feeds),
-		SelectedFeedID:    selectedFeedID,
-		FeedEditMode:      feedEditModeEnabled(r),
-		Running:           running,
-		Initial:           initial,
+		ReadingPreferences: emptyReadingPreferences(),
+		Message:            message,
+		MessageClass:       className,
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		Continuation:       feedContinuationOOB(selectedFeedID, feeds),
+		SelectedFeedID:     selectedFeedID,
+		FeedEditMode:       feedEditModeEnabled(r),
+		Running:            running,
+		Initial:            initial,
 	}
 
-	a.renderTemplate(w, "pulse_status_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "pulse_status_response", &data)
 }
 
 func (a *App) startPulse(ctx context.Context, allFeedIDs, feedIDs []int64) bool {
@@ -1013,14 +1026,15 @@ func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := itemListResponseData{
-		ItemList:          itemList,
-		Continuation:      feedContinuationOOB(selectedFeedID, feeds),
-		Feeds:             feeds,
-		FeedPulseStatuses: a.pulseStatusViews(),
-		SelectedFeedID:    selectedFeedID,
-		FeedEditMode:      feedEditModeEnabled(r),
+		ReadingPreferences: emptyReadingPreferences(),
+		ItemList:           itemList,
+		Continuation:       feedContinuationOOB(selectedFeedID, feeds),
+		Feeds:              feeds,
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		SelectedFeedID:     selectedFeedID,
+		FeedEditMode:       feedEditModeEnabled(r),
 	}
-	a.renderTemplate(w, "delete_feed_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "delete_feed_response", &data)
 }
 
 type feedTitleUpdates struct {

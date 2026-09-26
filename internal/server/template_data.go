@@ -1,11 +1,15 @@
 package server
 
-import "rss/internal/view"
+import (
+	"rss/internal/store"
+	"rss/internal/view"
+)
 
 type fullPageData struct {
-	CSRFToken       string
-	AppearanceTheme string
-	ThemeReturnPath string
+	ReadingPreferences store.ReadingPreferences
+	CSRFToken          string
+	AppearanceTheme    string
+	ThemeReturnPath    string
 }
 
 type pageData struct {
@@ -22,14 +26,15 @@ type pageData struct {
 }
 
 type subscribeResponseData struct {
-	ItemList          *view.ItemListData
-	FeedPulseStatuses map[int64]*pulseFeedStatusView
-	Message           string
-	MessageClass      string
-	Feeds             []view.FeedView
-	SelectedFeedID    int64
-	Update            bool
-	FeedEditMode      bool
+	ReadingPreferences store.ReadingPreferences
+	ItemList           *view.ItemListData
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	Message            string
+	MessageClass       string
+	Feeds              []view.FeedView
+	SelectedFeedID     int64
+	Update             bool
+	FeedEditMode       bool
 }
 
 type newItemsResponseData struct {
@@ -39,46 +44,50 @@ type newItemsResponseData struct {
 }
 
 type pollResponseData struct {
-	FeedPulseStatuses map[int64]*pulseFeedStatusView
-	RefreshDisplay    string
-	LastError         string
-	Feeds             []view.FeedView
-	Continuation      view.FeedContinuationData
-	Banner            view.NewItemsData
-	SelectedFeedID    int64
-	FeedEditMode      bool
+	ReadingPreferences store.ReadingPreferences
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	RefreshDisplay     string
+	LastError          string
+	Feeds              []view.FeedView
+	Continuation       view.FeedContinuationData
+	Banner             view.NewItemsData
+	SelectedFeedID     int64
+	FeedEditMode       bool
 }
 
 type itemListResponseData struct {
-	ItemList          *view.ItemListData
-	FeedPulseStatuses map[int64]*pulseFeedStatusView
-	Feeds             []view.FeedView
-	Continuation      view.FeedContinuationData
-	SelectedFeedID    int64
-	FeedEditMode      bool
+	ReadingPreferences store.ReadingPreferences
+	ItemList           *view.ItemListData
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	Feeds              []view.FeedView
+	Continuation       view.FeedContinuationData
+	SelectedFeedID     int64
+	FeedEditMode       bool
 }
 
 type toggleReadResponseData struct {
-	FeedPulseStatuses map[int64]*pulseFeedStatusView
-	View              string
-	Feeds             []view.FeedView
-	Item              view.ItemView
-	Continuation      view.FeedContinuationData
-	SelectedFeedID    int64
-	FeedEditMode      bool
-	UpdatePanel       bool
+	ReadingPreferences store.ReadingPreferences
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	View               string
+	Feeds              []view.FeedView
+	Item               view.ItemView
+	Continuation       view.FeedContinuationData
+	SelectedFeedID     int64
+	FeedEditMode       bool
+	UpdatePanel        bool
 }
 
 type pulseStatusResponseData struct {
-	FeedPulseStatuses map[int64]*pulseFeedStatusView
-	Message           string
-	MessageClass      string
-	Feeds             []view.FeedView
-	Continuation      view.FeedContinuationData
-	SelectedFeedID    int64
-	FeedEditMode      bool
-	Running           bool
-	Initial           bool
+	ReadingPreferences store.ReadingPreferences
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	Message            string
+	MessageClass       string
+	Feeds              []view.FeedView
+	Continuation       view.FeedContinuationData
+	SelectedFeedID     int64
+	FeedEditMode       bool
+	Running            bool
+	Initial            bool
 }
 
 type itemExpandedResponseData struct {
@@ -97,16 +106,18 @@ type mobileTopBarData struct {
 }
 
 type mobileStreamResponseData struct {
-	Aggregate *mobileAggregateResponseData
-	Items     []view.ItemView
-	TopBar    mobileTopBarData
+	ReadingPreferences store.ReadingPreferences
+	Aggregate          *mobileAggregateResponseData
+	Items              []view.ItemView
+	TopBar             mobileTopBarData
 }
 
 type mobileReaderResponseData struct {
-	BackPath     string
-	MarkReadPath string
-	TopBar       mobileTopBarData
-	Item         view.ItemView
+	ReadingPreferences store.ReadingPreferences
+	BackPath           string
+	MarkReadPath       string
+	TopBar             mobileTopBarData
+	Item               view.ItemView
 }
 
 type mobileAggregateResponseData struct {
@@ -118,8 +129,9 @@ type mobileAggregateResponseData struct {
 }
 
 type mobileStreamSectionsResponseData struct {
-	Aggregate *mobileAggregateResponseData
-	TopBar    mobileTopBarData
+	ReadingPreferences store.ReadingPreferences
+	Aggregate          *mobileAggregateResponseData
+	TopBar             mobileTopBarData
 }
 
 type mobileFeedSectionData struct {
@@ -135,8 +147,13 @@ type mobileFeedSectionData struct {
 }
 
 type mobileFeedSectionResponseData struct {
-	Section mobileFeedSectionData
-	TopBar  mobileTopBarData
+	ReadingPreferences store.ReadingPreferences
+	Section            mobileFeedSectionData
+	TopBar             mobileTopBarData
+}
+
+type readingPreferencesResponseData struct {
+	ReadingPreferences store.ReadingPreferences
 }
 
 type authLoginPageData struct {

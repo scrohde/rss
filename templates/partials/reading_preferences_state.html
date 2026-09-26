@@ -1,0 +1,22 @@
+{{define "reading_preferences_state_values"}}
+  <span
+    data-show-exact-unread-counts="{{.ReadingPreferences.ShowExactUnreadCounts}}"
+    data-today-setup-completed="{{.ReadingPreferences.TodaySetupCompleted}}"
+  ></span>
+  {{range .ReadingPreferences.TodayFeedIDs}}
+    <span data-today-feed-id="{{.}}"></span>
+  {{end}}
+{{end}}
+{{define "reading_preferences_state"}}
+  <div id="reading-preferences-state" hidden>
+    {{template "reading_preferences_state_values" .}}
+  </div>
+{{end}}
+{{define "reading_preferences_state_oob"}}
+  <div id="reading-preferences-state" hx-swap-oob="outerHTML" hidden>
+    {{template "reading_preferences_state_values" .}}
+  </div>
+{{end}}
+{{define "reading_preferences_response"}}
+  {{template "reading_preferences_state_oob" .}}
+{{end}}

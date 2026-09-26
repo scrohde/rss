@@ -199,3 +199,7 @@
     </ul>
   {{end}}
 {{end}}
+{{define "feed_list_response"}}
+  {{template "feed_list" .}}
+  {{template "reading_preferences_state_oob" .}}
+{{end}}

@@ -232,11 +232,19 @@ func literalRenderedTemplates(t *testing.T, path string) []string {
 
 func literalTemplateRenderName(node ast.Node) (string, bool) {
 	call, ok := node.(*ast.CallExpr)
-	if !ok || len(call.Args) < 2 || !isTemplateRenderCall(call.Fun) {
+	if !ok || !isTemplateRenderCall(call.Fun) {
 		return "", false
 	}
 
-	nameLiteral, ok := call.Args[1].(*ast.BasicLit)
+	nameArgument := 1
+	if templateRenderNameArgumentIndex(call.Fun) == 2 {
+		nameArgument = 2
+	}
+	if len(call.Args) <= nameArgument {
+		return "", false
+	}
+
+	nameLiteral, ok := call.Args[nameArgument].(*ast.BasicLit)
 	if !ok || nameLiteral.Kind != token.STRING {
 		return "", false
 	}
@@ -246,12 +254,31 @@ func literalTemplateRenderName(node ast.Node) (string, bool) {
 	return name, err == nil
 }
 
+func templateRenderNameArgumentIndex(function ast.Expr) int {
+	name := ""
+	switch current := function.(type) {
+	case *ast.Ident:
+		name = current.Name
+	case *ast.SelectorExpr:
+		name = current.Sel.Name
+	}
+
+	if name == "renderTemplateWithReadingPreferences" {
+		return 2
+	}
+
+	return 1
+}
+
 func isTemplateRenderCall(function ast.Expr) bool {
 	switch current := function.(type) {
 	case *ast.Ident:
-		return current.Name == "renderTemplate" || current.Name == "ExecuteTemplate"
+		return current.Name == "renderTemplate" || current.Name == "renderTemplateWithReadingPreferences" ||
+			current.Name == "ExecuteTemplate"
 	case *ast.SelectorExpr:
-		return current.Sel.Name == "renderTemplate" || current.Sel.Name == "ExecuteTemplate"
+		return current.Sel.Name == "renderTemplate" ||
+			current.Sel.Name == "renderTemplateWithReadingPreferences" ||
+			current.Sel.Name == "ExecuteTemplate"
 	default:
 		return false
 	}

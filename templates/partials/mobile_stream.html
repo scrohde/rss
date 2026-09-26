@@ -128,6 +128,7 @@
   {{template "mobile_stream_sections" .Aggregate}}
   {{template "topbar_brand_slot_oob" .TopBar}}
   {{template "mobile_topbar_slot_oob" .TopBar}}
+  {{template "reading_preferences_state_oob" .}}
 {{end}}
 
 {{define "mobile_feed_section"}}
@@ -221,6 +222,7 @@
   {{template "mobile_feed_section" .Section}}
   {{template "topbar_brand_slot_oob" .TopBar}}
   {{template "mobile_topbar_slot_oob" .TopBar}}
+  {{template "reading_preferences_state_oob" .}}
 {{end}}
 
 {{define "mobile_empty"}}
@@ -239,9 +241,11 @@
   {{template "mobile_stream" .}}
   {{template "topbar_brand_slot_oob" .TopBar}}
   {{template "mobile_topbar_slot_oob" .TopBar}}
+  {{template "reading_preferences_state_oob" .}}
 {{end}}
 
 {{define "mobile_stream_selector_response"}}
   {{template "mobile_stream" .}}
   {{template "topbar_brand_slot_oob" .TopBar}}
+  {{template "reading_preferences_state_oob" .}}
 {{end}}

@@ -29,10 +29,13 @@ func (a *App) handleMobileStreamSections(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Hx-Push-Url", mobileStreamStatePath(0, state))
-	a.renderTemplate(w, "mobile_stream_sections_response", mobileStreamSectionsResponseData{
-		Aggregate: aggregate,
-		TopBar:    topBar,
-	})
+
+	data := mobileStreamSectionsResponseData{
+		ReadingPreferences: emptyReadingPreferences(),
+		Aggregate:          aggregate,
+		TopBar:             topBar,
+	}
+	a.renderTemplateWithReadingPreferences(w, r, "mobile_stream_sections_response", &data)
 }
 
 func (a *App) handleMobileFeedItems(w http.ResponseWriter, r *http.Request) {
@@ -200,10 +203,11 @@ func (a *App) renderMobileFeedSectionResponse(
 	}
 
 	data := mobileFeedSectionResponseData{
-		Section: section,
-		TopBar:  topBar,
+		ReadingPreferences: emptyReadingPreferences(),
+		Section:            section,
+		TopBar:             topBar,
 	}
-	a.renderTemplate(w, "mobile_feed_section_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "mobile_feed_section_response", &data)
 }
 
 func (a *App) mobileFeedSectionPageData(
@@ -293,10 +297,13 @@ func (a *App) renderMobileAggregateBatch(
 	w.Header().Set("Hx-Replace-Url", mobileStreamStatePath(0, state))
 	w.Header().Set("Hx-Retarget", "#mobile-stream-sections")
 	w.Header().Set("Hx-Reswap", reswap)
-	a.renderTemplate(w, "mobile_stream_sections_response", mobileStreamSectionsResponseData{
-		Aggregate: aggregate,
-		TopBar:    topBar,
-	})
+
+	data := mobileStreamSectionsResponseData{
+		ReadingPreferences: emptyReadingPreferences(),
+		Aggregate:          aggregate,
+		TopBar:             topBar,
+	}
+	a.renderTemplateWithReadingPreferences(w, r, "mobile_stream_sections_response", &data)
 }
 
 func (a *App) renderMobileAggregateRepairedBatch(

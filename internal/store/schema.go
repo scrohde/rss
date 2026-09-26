@@ -70,7 +70,7 @@ func Init(db *sql.DB) error {
 		return err
 	}
 
-	return nil
+	return ensureReadingPreferencesSchema(db)
 }
 
 func ensureFeedOrderColumn(db *sql.DB) error {

@@ -173,7 +173,7 @@ func (a *App) renderOPMLImportResponse(
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.Update = update
 	data.FeedEditMode = feedEditModeEnabled(r)
-	a.renderTemplate(w, "opml_import_response", data)
+	a.renderTemplateWithReadingPreferences(w, r, "opml_import_response", &data)
 }
 
 func opmlImportMessage(imported, skipped int, fallbackMessage string) string {
