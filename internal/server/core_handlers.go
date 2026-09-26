@@ -22,6 +22,7 @@ func feedEditModeEnabled(r *http.Request) bool {
 }
 
 func setFeedEditModeCookie(w http.ResponseWriter) {
+	// #nosec G124 -- Cookie attributes are assigned below; Secure follows the local HTTP/TLS policy.
 	cookie := new(http.Cookie)
 	cookie.Name = feedEditModeCookie
 	cookie.Value = "1"
@@ -34,6 +35,7 @@ func setFeedEditModeCookie(w http.ResponseWriter) {
 }
 
 func clearFeedEditModeCookie(w http.ResponseWriter) {
+	// #nosec G124 -- Cookie attributes are assigned below; Secure follows the local HTTP/TLS policy.
 	cookie := new(http.Cookie)
 	cookie.Name = feedEditModeCookie
 	cookie.Value = ""
@@ -45,6 +47,7 @@ func clearFeedEditModeCookie(w http.ResponseWriter) {
 	http.SetCookie(w, cookie)
 }
 
+//nolint:cyclop,gocognit,revive // Coordinates Today landing, explicit feeds, and full-page or HTMX rendering.
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	feeds, ok := a.listFeedsOrError(w, r)
 	if !ok {
@@ -200,6 +203,7 @@ func (a *App) newPageData(r *http.Request) (pageData, error) {
 
 	return pageData{
 		fullPageData:      base,
+		Today:             nil,
 		ItemList:          nil,
 		MobileStream:      nil,
 		MobileReader:      nil,

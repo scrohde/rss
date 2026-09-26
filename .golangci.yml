@@ -36,6 +36,8 @@ linters:
     - wsl
     - varnamelen
     - goconst
+    # Keep the existing exhaustruct policy and its reviewed inline exceptions.
+    - exhaustruct_v5
   enable:
     - wsl_v5
 

@@ -648,6 +648,7 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	if preferenceErr != nil {
 		t.Fatalf("enable exact unread counts: %v", preferenceErr)
 	}
+
 	feedID := fixture.feedID
 	newestID := fixture.newestID
 

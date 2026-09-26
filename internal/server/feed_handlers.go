@@ -463,6 +463,7 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
 	a.renderItemListResponse(w, r, feedID)
 }
 
@@ -692,7 +693,6 @@ func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
 	a.renderTemplate(w, "item_compact_response", item)
 }
 
-//nolint:gosec // Read toggle logs include request-derived view values for debugging.
 func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
@@ -771,7 +771,6 @@ func (a *App) toggleReadResponseData(
 	}
 }
 
-//nolint:gosec // Mark-all-read logs include request-derived feed IDs for operational visibility.
 func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
@@ -813,7 +812,6 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	a.renderItemListResponse(w, r, feedID)
 }
 
-//nolint:gosec // Undo logs include request-derived feed IDs for operational visibility.
 func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
@@ -851,7 +849,6 @@ func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	a.renderBulkReadUndoResponse(w, r, feedID)
 }
 
-//nolint:gosec // Sweep logs include request-derived feed IDs for operational visibility.
 func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
@@ -873,7 +870,6 @@ func (a *App) handleSweepRead(w http.ResponseWriter, r *http.Request) {
 	a.renderItemListResponse(w, r, feedID)
 }
 
-//nolint:gosec // Manual refresh logs include request-derived feed IDs for operational visibility.
 func (a *App) handleRefreshFeed(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
@@ -1045,7 +1041,6 @@ func (a *App) isPulseRunning() bool {
 	return a.pulseRunning
 }
 
-//nolint:gosec // Delete logs include request-derived feed IDs for operational visibility.
 func (a *App) handleDeleteFeed(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {

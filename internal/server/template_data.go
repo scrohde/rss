@@ -12,6 +12,7 @@ type fullPageData struct {
 	ReadingPreferences store.ReadingPreferences
 }
 
+//nolint:govet // Keep embedded page defaults first, as required by embeddedstructfieldcheck.
 type pageData struct {
 	fullPageData
 
@@ -98,33 +99,33 @@ type itemExpandedResponseData struct {
 }
 
 type mobileTopBarData struct {
+	PulsePath                string
 	SelectedFeedTitle        string
-	MarkAllReadUndoToken     string
 	CatchUpFeedTitle         string
 	CatchUpSurface           string
 	PulseLabel               string
 	PulsePendingLabel        string
-	PulsePath                string
+	MarkAllReadUndoToken     string
+	StreamPath               string
 	FeedOptions              []view.FeedView
-	SelectedFeedID           int64
 	CatchUpFeedID            int64
-	ShowExactUnreadCounts    bool
+	SelectedFeedID           int64
 	ShowCaughtUpSelectedFeed bool
 	TodayMode                bool
 	AllFeedsMode             bool
-	StreamPath               string
+	ShowExactUnreadCounts    bool
 }
 
 type mobileStreamResponseData struct {
-	ReadingPreferences store.ReadingPreferences
 	Aggregate          *mobileAggregateResponseData
+	TodaySettings      *todayViewData
+	TodayBatchIDs      string
 	Items              []view.ItemView
+	TodayCards         []mobileTodayCardData
+	ReadingPreferences store.ReadingPreferences
 	TopBar             mobileTopBarData
 	TodayMode          bool
-	TodayBatchIDs      string
-	TodaySettings      *todayViewData
 	AllFeedsMode       bool
-	TodayCards         []mobileTodayCardData
 }
 
 type mobileTodayCardData struct {
@@ -144,11 +145,11 @@ type todayViewData struct {
 }
 
 type mobileReaderResponseData struct {
-	ReadingPreferences store.ReadingPreferences
 	BackPath           string
 	MarkReadPath       string
-	TopBar             mobileTopBarData
+	ReadingPreferences store.ReadingPreferences
 	Item               view.ItemView
+	TopBar             mobileTopBarData
 }
 
 type mobileAggregateResponseData struct {
@@ -160,8 +161,8 @@ type mobileAggregateResponseData struct {
 }
 
 type mobileStreamSectionsResponseData struct {
-	ReadingPreferences store.ReadingPreferences
 	Aggregate          *mobileAggregateResponseData
+	ReadingPreferences store.ReadingPreferences
 	TopBar             mobileTopBarData
 }
 
@@ -184,10 +185,10 @@ type mobileFeedSectionResponseData struct {
 }
 
 type readingPreferencesResponseData struct {
-	ReadingPreferences store.ReadingPreferences
 	FeedPulseStatuses  map[int64]*pulseFeedStatusView
-	Feeds              []view.FeedView
 	MobileTopBar       *mobileTopBarData
+	Feeds              []view.FeedView
+	ReadingPreferences store.ReadingPreferences
 	SelectedFeedID     int64
 	FeedEditMode       bool
 }
@@ -208,6 +209,7 @@ type authSetupPageData struct {
 	AutoStartRegistration bool
 }
 
+//nolint:govet // Keep embedded page defaults first, as required by embeddedstructfieldcheck.
 type authSecurityPageData struct {
 	fullPageData
 

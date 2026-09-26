@@ -56,6 +56,7 @@ func (a *App) handleAuthTheme(w http.ResponseWriter, r *http.Request) {
 		redirectTarget = "/auth/security?message=" + url.QueryEscape("Appearance updated.")
 	}
 
+	// #nosec G710 -- authThemeRedirectTarget rejects absolute and protocol-relative destinations.
 	http.Redirect(w, r, redirectTarget, http.StatusSeeOther)
 }
 

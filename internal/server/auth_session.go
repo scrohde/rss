@@ -48,6 +48,7 @@ func emptySessionPrincipal() auth.SessionPrincipal {
 }
 
 func (a *App) setAuthSessionCookie(w http.ResponseWriter, value string) {
+	// #nosec G124 -- Cookie attributes are assigned below; Secure follows the local HTTP/TLS policy.
 	cookie := new(http.Cookie)
 	cookie.Name = a.authCookieName
 	cookie.Value = value
@@ -60,6 +61,7 @@ func (a *App) setAuthSessionCookie(w http.ResponseWriter, value string) {
 }
 
 func (a *App) clearAuthSessionCookie(w http.ResponseWriter) {
+	// #nosec G124 -- Cookie attributes are assigned below; Secure follows the local HTTP/TLS policy.
 	cookie := new(http.Cookie)
 	cookie.Name = a.authCookieName
 	cookie.Value = ""
@@ -85,6 +87,7 @@ func (a *App) setSetupUnlockCookie(w http.ResponseWriter) error {
 	value := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
 		base64.RawURLEncoding.EncodeToString(signature)
 
+	// #nosec G124 -- Cookie attributes are assigned below; Secure follows the local HTTP/TLS policy.
 	cookie := new(http.Cookie)
 	cookie.Name = a.authSetupCookieName
 	cookie.Value = value
@@ -101,6 +104,7 @@ func (a *App) setSetupUnlockCookie(w http.ResponseWriter) error {
 }
 
 func (a *App) clearSetupUnlockCookie(w http.ResponseWriter) {
+	// #nosec G124 -- Cookie attributes are assigned below; Secure follows the local HTTP/TLS policy.
 	cookie := new(http.Cookie)
 	cookie.Name = a.authSetupCookieName
 	cookie.Value = ""

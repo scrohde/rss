@@ -19,6 +19,7 @@ func (a *App) handleMobileStream(w http.ResponseWriter, r *http.Request) {
 	a.renderMobileStream(w, r)
 }
 
+//nolint:revive // Preserves normal and stable Today reader navigation with explicit error responses.
 func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
@@ -73,7 +74,7 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 	a.renderMobileReader(w, r, &data)
 }
 
-//nolint:nestif // Today card and reader branches intentionally preserve their stable-batch response modes.
+//nolint:nestif,gocognit,revive // Today card and reader branches preserve their stable-batch response modes.
 func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
@@ -167,7 +168,6 @@ func (a *App) handleMobilePulse(w http.ResponseWriter, r *http.Request) {
 	a.renderMobileStream(w, r)
 }
 
-//nolint:gosec // Mobile manual refresh logs include request-derived feed IDs for operational visibility.
 func (a *App) handleMobileRefreshFeed(w http.ResponseWriter, r *http.Request) {
 	feedID, ok := parsePathInt64(r, "feedID")
 	if !ok {
@@ -281,6 +281,7 @@ func (a *App) renderMobileStreamPreservingUndoFeed(w http.ResponseWriter, r *htt
 	a.renderMobileStreamResponse(w, r)
 }
 
+//nolint:gocognit,revive // Chooses history behavior and full-page or selector-specific HTMX responses.
 func (a *App) renderMobileStreamResponse(w http.ResponseWriter, r *http.Request) {
 	topBar, ok := a.mobileTopBarOrError(w, r, "failed to load feeds")
 	if !ok {
@@ -342,6 +343,10 @@ func (a *App) mobileStreamResponseDataOrError(
 			Items:              items,
 			TopBar:             *topBar,
 			AllFeedsMode:       isMobileAllFeedsRequest(r),
+			TodayMode:          false,
+			TodayBatchIDs:      "",
+			TodaySettings:      nil,
+			TodayCards:         nil,
 		}, true
 	}
 
@@ -358,6 +363,10 @@ func (a *App) mobileStreamResponseDataOrError(
 		Items:              nil,
 		TopBar:             *topBar,
 		AllFeedsMode:       isMobileAllFeedsRequest(r),
+		TodayMode:          false,
+		TodayBatchIDs:      "",
+		TodaySettings:      nil,
+		TodayCards:         nil,
 	}, true
 }
 
@@ -402,6 +411,7 @@ func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, e
 	if isMobileAllFeedsRequest(r) {
 		feedOptions = feeds
 	}
+
 	selectedFeedID := normalizeSelectedFeedID(parseSelectedFeedID(r), feeds)
 	selectedFeedTitle := feedTitleByID(selectedFeedID, feeds)
 
@@ -416,6 +426,7 @@ func (a *App) mobileTopBarData(r *http.Request) (mobileTopBarData, error) {
 	return a.mobileTopBarDataForState(r, parseMobileAggregateState(r))
 }
 
+//nolint:revive // Builds feed actions while preserving Today, All feeds, and active Undo context.
 func (a *App) mobileTopBarDataForState(
 	r *http.Request,
 	state mobileAggregateState,

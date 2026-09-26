@@ -3,6 +3,7 @@ package server
 import (
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -22,8 +23,8 @@ func (a *App) realIPFromRequest(r *http.Request) string {
 
 func (a *App) forwardedClientIP(forwarded, fallback string) string {
 	parts := strings.Split(forwarded, ",")
-	for index := len(parts) - 1; index >= 0; index-- {
-		candidate := net.ParseIP(strings.TrimSpace(parts[index]))
+	for _, part := range slices.Backward(parts) {
+		candidate := net.ParseIP(strings.TrimSpace(part))
 		if candidate == nil {
 			return fallback
 		}

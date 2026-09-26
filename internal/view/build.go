@@ -124,6 +124,7 @@ func BuildItemView(
 		HasSummary:       hasSummary,
 		HasContent:       hasContent,
 		IsExpanded:       false,
+		TodayMode:        false,
 	}
 }
 

@@ -112,6 +112,7 @@ func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func editModeCookie() *http.Cookie {
+	// #nosec G124 -- This is a client request cookie in a handler test.
 	cookie := new(http.Cookie)
 	cookie.Name = feedEditModeCookie
 	cookie.Value = "1"

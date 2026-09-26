@@ -181,6 +181,7 @@ func issueAuthSession(t *testing.T, app *App) authSessionFixture {
 		t.Fatalf("CreateSessionForUser: %v", err)
 	}
 
+	// #nosec G124 -- This is a client request cookie in a handler test.
 	cookie := new(http.Cookie)
 	cookie.Name = app.authCookieName
 	cookie.Value = issue.CookieValue

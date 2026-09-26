@@ -84,6 +84,7 @@ func (a *App) handleImportOPML(w http.ResponseWriter, r *http.Request) {
 func parseOPMLUpload(w http.ResponseWriter, r *http.Request) ([]opml.Subscription, string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxOPMLUploadBytes)
 
+	// #nosec G120 -- MaxBytesReader above bounds the complete request body.
 	parseErr := r.ParseMultipartForm(maxOPMLUploadBytes)
 	if parseErr != nil {
 		return nil, "invalid OPML upload"
@@ -285,7 +286,6 @@ func closeImageProxyBody(resp *http.Response) {
 	}
 }
 
-//nolint:gosec // Logged values are validated URL host/path for operational debugging.
 func isSuccessfulImageProxyResponse(resp *http.Response, target *url.URL) bool {
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 		return true
