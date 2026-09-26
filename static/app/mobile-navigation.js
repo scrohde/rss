@@ -76,9 +76,18 @@ const sanitizeReaderOrigin = (value) => {
     maximumScrollCoordinate,
   );
 
+  let streamURLIsSupported = streamURL.startsWith("/mobile/stream");
+  try {
+    const parsedStreamURL = new URL(streamURL, window.location.origin);
+    streamURLIsSupported ||=
+      parsedStreamURL.pathname === "/today" && parsedStreamURL.searchParams.get("layout") === "mobile";
+  } catch (_error) {
+    streamURLIsSupported = false;
+  }
+
   if (
     !navigationID ||
-    !streamURL.startsWith("/mobile/stream") ||
+    !streamURLIsSupported ||
     !/^\/mobile\/items\/\d+\/reader(?:\?|$)/.test(readerRequestPath) ||
     !itemID ||
     !Number.isInteger(cardIndex) ||

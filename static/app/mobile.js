@@ -19,7 +19,36 @@ const hasMobileContent = () =>
     document.querySelector("#main-content [data-mobile-stream='true'], #main-content [data-mobile-reader='true']"),
   );
 const hasCompleteMobileLayout = () =>
-  hasMobileContent() && Boolean(document.getElementById("mobile-stream-feed-filter"));
+  hasMobileContent() &&
+  (Boolean(document.getElementById("mobile-stream-feed-filter")) ||
+    Boolean(document.querySelector("#main-content [data-mobile-stream='true'][data-today-view='true']")) ||
+    Boolean(document.querySelector("#main-content [data-mobile-reader='true'][data-today-reader='true']")));
+
+const isTodayPath = (path) => {
+  try {
+    return new URL(path, window.location.origin).pathname === "/today";
+  } catch (_error) {
+    return false;
+  }
+};
+
+const todayLayoutPath = (layout) => {
+  const values = new URLSearchParams();
+  if (layout === "mobile") {
+    values.set("layout", "mobile");
+  }
+  values.set("transition", "1");
+
+  const todayView = document.querySelector("#main-content [data-today-view='true']");
+  const currentURL = new URL(window.location.href);
+  const batchIDs =
+    (todayView && todayView.dataset.todayBatchIds) || currentURL.searchParams.get("batch_ids") || "";
+  if (batchIDs) {
+    values.set("batch_ids", batchIDs);
+  }
+
+  return `/today?${values.toString()}`;
+};
 
 const normalizeFeedID = (value) => {
   const normalized = String(value || "").trim();
@@ -35,13 +64,16 @@ const currentMobileFeedID = () => {
 };
 
 const currentMobileStreamPath = () => {
-  if (document.querySelector("[data-mobile-stream='true']") && window.location.pathname === mobileStreamPath) {
+  if (
+    document.querySelector("[data-mobile-stream='true']") &&
+    (window.location.pathname === mobileStreamPath || window.location.pathname === "/today")
+  ) {
     return `${window.location.pathname}${window.location.search}`;
   }
 
   const readerBack = document.querySelector("[data-mobile-reader='true'] .mobile-reader-back");
   const backPath = readerBack ? readerBack.getAttribute("hx-get") : "";
-  return backPath && backPath.startsWith(mobileStreamPath) ? backPath : "";
+  return backPath && (backPath.startsWith(mobileStreamPath) || isTodayPath(backPath)) ? backPath : "";
 };
 
 const mobileFeedIDFromPath = (path) => {
@@ -96,6 +128,26 @@ const desiredLayout = () => {
     return "desktop";
   }
   return layoutMedia.matches ? "mobile" : "desktop";
+};
+
+const canonicalizeFullPageMobileTodayPath = () => {
+  const stream = document.querySelector(
+    "#main-content [data-mobile-stream='true'][data-today-view='true']",
+  );
+  if (!stream || window.location.pathname !== "/today") {
+    return;
+  }
+
+  const values = new URLSearchParams();
+  const batchIDs = stream.dataset.todayBatchIds || "";
+  if (batchIDs) {
+    values.set("batch_ids", batchIDs);
+  }
+  values.set("layout", "mobile");
+  const nextPath = `/today?${values.toString()}`;
+  if (`${window.location.pathname}${window.location.search}` !== nextPath) {
+    window.history.replaceState(window.history.state, "", nextPath);
+  }
 };
 
 const isContentTarget = (target) => {
@@ -298,11 +350,20 @@ const abortPendingTransition = () => {
 
 const loadMobileStream = () => {
   rememberDesktopFeed();
+  if (isTodayPath(`${window.location.pathname}${window.location.search}`)) {
+    startTransition("mobile", todayLayoutPath("mobile"));
+    return;
+  }
   startTransition("mobile", lastMobileStreamPath);
 };
 
 const loadDesktopReader = () => {
   rememberMobileFeed();
+  const streamPath = currentMobileStreamPath();
+  if (isTodayPath(streamPath)) {
+    startTransition("desktop", todayLayoutPath("desktop"));
+    return;
+  }
   const selectedFeedID = currentMobileFeedID() || lastDesktopFeedID || firstFeedID();
   startTransition("desktop", pathWithSelectedFeed(desktopReaderPath, selectedFeedID));
 };
@@ -344,6 +405,7 @@ export const bindMobileBootstrap = () => {
 
   const onReady = () => {
     layoutMedia = window.matchMedia(mobileLayoutQuery);
+    canonicalizeFullPageMobileTodayPath();
     if (typeof layoutMedia.addEventListener === "function") {
       layoutMedia.addEventListener("change", syncResponsiveLayout);
     } else if (typeof layoutMedia.addListener === "function") {

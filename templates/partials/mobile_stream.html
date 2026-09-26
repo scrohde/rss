@@ -1,5 +1,9 @@
 {{define "mobile_stream"}}
-  <section class="mobile-stream" data-mobile-stream="true">
+  <section
+    class="mobile-stream{{if .TodayMode}} today-mobile{{end}}"
+    data-mobile-stream="true"
+    {{if .TodayMode}}data-today-view="true" data-today-batch-ids="{{.TodayBatchIDs}}"{{end}}
+  >
     <div id="mobile-stream-content">
       <div class="mobile-pull-refresh" data-mobile-pull-refresh data-state="idle">
         <div class="mobile-pull-refresh-visual" aria-hidden="true">
@@ -19,6 +23,25 @@
           aria-atomic="true"
         ></span>
       </div>
+      {{if .TodayMode}}
+        {{template "today_mobile" .}}
+      {{else}}
+      {{if and .AllFeedsMode (eq .TopBar.SelectedFeedID 0)}}
+        <div class="mobile-stream-navigation">
+          <h1>All feeds</h1>
+          <a
+            id="mobile-today-all-feeds"
+            class="chip ghost"
+            href="/today?layout=mobile"
+            data-app-htmx="true"
+            hx-get="/today?layout=mobile"
+            hx-push-url="true"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+        >Today</a>
+        </div>
+        {{template "mobile_all_feed_list" .TopBar}}
+      {{end}}
       {{if .Aggregate}}
         {{template "mobile_stream_sections" .Aggregate}}
       {{else if .Items}}
@@ -34,7 +57,7 @@
                   class="mobile-card-open"
                   type="button"
                   data-app-htmx="true"
-                  hx-get="/mobile/items/{{.ID}}/reader{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
+                    hx-get="/mobile/items/{{.ID}}/reader{{if $.AllFeedsMode}}?view=all{{if gt $.TopBar.SelectedFeedID 0}}&amp;selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}{{else if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
                   hx-target="#main-content"
                   hx-swap="innerHTML"
                 >
@@ -46,7 +69,7 @@
                   aria-label="Mark {{.Title}} read"
                   title="Mark read"
                   data-app-htmx="true"
-                  hx-post="/mobile/items/{{.ID}}/read{{if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
+                  hx-post="/mobile/items/{{.ID}}/read{{if $.AllFeedsMode}}?view=all{{if gt $.TopBar.SelectedFeedID 0}}&amp;selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}{{else if gt $.TopBar.SelectedFeedID 0}}?selected_feed_id={{$.TopBar.SelectedFeedID}}{{end}}"
                   hx-target="#main-content"
                   hx-swap="innerHTML"
                 >
@@ -68,8 +91,39 @@
       {{else}}
         {{template "mobile_empty" .}}
       {{end}}
+      {{end}}
     </div>
   </section>
+{{end}}
+
+{{define "mobile_all_feed_list"}}
+  <nav class="mobile-all-feed-list" aria-label="All subscriptions">
+    <ul>
+      {{range .FeedOptions}}
+        <li>
+          <a
+            id="mobile-all-feed-selection-{{.ID}}"
+            href="/mobile/stream?view=all&amp;selected_feed_id={{.ID}}"
+            data-app-htmx="true"
+            hx-get="/mobile/stream?view=all&amp;selected_feed_id={{.ID}}"
+            hx-push-url="/mobile/stream?view=all&amp;selected_feed_id={{.ID}}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+          >
+            <span>{{.Title}}</span>
+            <span
+              class="mobile-all-feed-count"
+              aria-label="{{if eq .UnreadCount 0}}Caught up{{else if eq .UnreadCount 1}}1 unread story{{else}}{{.UnreadCount}} unread stories{{end}}"
+            >
+              {{if eq .UnreadCount 0}}Caught up{{else if $.ShowExactUnreadCounts}}{{.UnreadCount}} unread{{else}}New{{end}}
+            </span>
+          </a>
+        </li>
+      {{else}}
+        <li>No subscriptions yet.</li>
+      {{end}}
+    </ul>
+  </nav>
 {{end}}
 
 {{define "mobile_stream_sections"}}

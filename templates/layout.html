@@ -143,8 +143,14 @@
                 {{end}}
                 <input type="hidden" name="enabled" value="false">
                 <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
-                {{if .MobileTopBar}}
+                {{if or .MobileTopBar .Today}}
                   <input type="hidden" name="mobile_view" value="true">
+                {{end}}
+                {{if and .MobileTopBar .MobileTopBar.AllFeedsMode}}
+                  <input type="hidden" name="view" value="all">
+                {{end}}
+                {{if or .Today (and .MobileTopBar .MobileTopBar.TodayMode)}}
+                  <input type="hidden" name="today_mode" value="true">
                 {{end}}
                 <label class="topbar-shortcuts-reading-option">
                   <input

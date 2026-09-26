@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"rss/internal/feed"
@@ -47,17 +48,32 @@ func (a *App) handleMobileReader(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state := parseMobileAggregateState(r)
+	backPath := mobileStreamStatePathForRequest(r, topBar.SelectedFeedID, state)
+
+	markReadPath := mobileMarkReadItemPathForRequest(r, item.ID, topBar.SelectedFeedID, state)
+	if isTodayMobileReaderRequest(r) {
+		batchIDs, valid := parseTodayBatchIDs(r.URL.Query().Get("batch_ids"))
+		if !valid {
+			http.Error(w, "invalid Today batch IDs", http.StatusBadRequest)
+
+			return
+		}
+
+		backPath = todayPath(batchIDs, true)
+		markReadPath = mobileMarkReadItemPathForRequest(r, item.ID, 0, state)
+	}
 
 	data := mobileReaderResponseData{
 		ReadingPreferences: emptyReadingPreferences(),
-		BackPath:           mobileStreamStatePath(topBar.SelectedFeedID, state),
-		MarkReadPath:       mobileMarkReadItemPath(item.ID, topBar.SelectedFeedID, state),
+		BackPath:           backPath,
+		MarkReadPath:       markReadPath,
 		Item:               item,
 		TopBar:             topBar,
 	}
 	a.renderMobileReader(w, r, &data)
 }
 
+//nolint:nestif // Today card and reader branches intentionally preserve their stable-batch response modes.
 func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
 	itemID, ok := parsePathInt64(r, "itemID")
 	if !ok {
@@ -73,6 +89,35 @@ func (a *App) handleMobileMarkRead(w http.ResponseWriter, r *http.Request) {
 	err := store.MarkItemRead(r.Context(), a.db, itemID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "failed to mark item as read", http.StatusInternalServerError)
+
+		return
+	}
+
+	if isTodayMobileReaderRequest(r) {
+		if r.URL.Query().Get("card") == "1" {
+			item, itemErr := store.GetItem(r.Context(), a.db, itemID)
+			if itemErr != nil {
+				http.Error(w, "failed to load Today story", http.StatusInternalServerError)
+
+				return
+			}
+
+			batchIDs, valid := parseTodayBatchIDs(r.URL.Query().Get("batch_ids"))
+			if !valid {
+				http.Error(w, "invalid Today batch IDs", http.StatusBadRequest)
+
+				return
+			}
+
+			a.renderTemplate(w, "today_mobile_card_response", mobileTodayCardData{
+				Item:         item,
+				BatchIDsText: todayBatchIDsText(batchIDs),
+			})
+
+			return
+		}
+
+		a.renderMobileToday(w, r)
 
 		return
 	}
@@ -221,6 +266,12 @@ func wrapMobilePulseContextErr(ctx context.Context) error {
 }
 
 func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("today") == "1" {
+		a.renderMobileToday(w, r)
+
+		return
+	}
+
 	a.clearMarkAllReadUndoExcept(parseSelectedFeedID(r))
 	a.renderMobileStreamResponse(w, r)
 }
@@ -244,7 +295,12 @@ func (a *App) renderMobileStreamResponse(w http.ResponseWriter, r *http.Request)
 	}
 
 	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
-		w.Header().Set("Hx-Replace-Url", mobileStreamStatePath(topBar.SelectedFeedID, state))
+		trigger := r.Header.Get("Hx-Trigger")
+		if trigger == "mobile-today-all-feeds" || strings.HasPrefix(trigger, "mobile-all-feed-selection-") {
+			w.Header().Set("Hx-Push-Url", mobileStreamStatePathForRequest(r, topBar.SelectedFeedID, state))
+		} else {
+			w.Header().Set("Hx-Replace-Url", mobileStreamStatePathForRequest(r, topBar.SelectedFeedID, state))
+		}
 
 		if isMobileStreamSelectorTrigger(r) {
 			a.renderTemplateWithReadingPreferences(w, r, "mobile_stream_selector_response", &data)
@@ -285,6 +341,7 @@ func (a *App) mobileStreamResponseDataOrError(
 			Aggregate:          nil,
 			Items:              items,
 			TopBar:             *topBar,
+			AllFeedsMode:       isMobileAllFeedsRequest(r),
 		}, true
 	}
 
@@ -300,6 +357,7 @@ func (a *App) mobileStreamResponseDataOrError(
 		Aggregate:          aggregate,
 		Items:              nil,
 		TopBar:             *topBar,
+		AllFeedsMode:       isMobileAllFeedsRequest(r),
 	}, true
 }
 
@@ -341,6 +399,9 @@ func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, e
 	}
 
 	feedOptions := unreadFeedOptions(feeds)
+	if isMobileAllFeedsRequest(r) {
+		feedOptions = feeds
+	}
 	selectedFeedID := normalizeSelectedFeedID(parseSelectedFeedID(r), feeds)
 	selectedFeedTitle := feedTitleByID(selectedFeedID, feeds)
 
@@ -370,7 +431,12 @@ func (a *App) mobileTopBarDataForState(
 		state,
 	)
 
-	return mobileTopBarData{
+	selectorPath := "/mobile/stream"
+	if isMobileAllFeedsRequest(r) {
+		selectorPath = "/mobile/stream?view=all"
+	}
+
+	topBar := mobileTopBarData{
 		FeedOptions:              selection.Options,
 		PulseLabel:               refreshAction.Label,
 		PulsePendingLabel:        refreshAction.PendingLabel,
@@ -379,7 +445,19 @@ func (a *App) mobileTopBarDataForState(
 		SelectedFeedID:           selection.FeedID,
 		ShowExactUnreadCounts:    false,
 		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
-	}, nil
+		TodayMode:                r.URL.Query().Get("today") == "1" || isTodayMobileLayoutRequest(r),
+		AllFeedsMode:             isMobileAllFeedsRequest(r),
+		StreamPath:               selectorPath,
+	}
+	if topBar.TodayMode {
+		topBar.PulseLabel = "Refresh Today stories"
+		topBar.PulsePendingLabel = "Refreshing Today stories"
+		topBar.PulsePath = mobileTodayPulsePath()
+	} else if topBar.AllFeedsMode {
+		topBar.PulsePath = mobilePulseStatePathForRequest(r, selection.FeedID, state)
+	}
+
+	return topBar, nil
 }
 
 func shouldShowCaughtUpSelectedFeed(selection mobileStreamSelection) bool {

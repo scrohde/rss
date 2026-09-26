@@ -89,12 +89,82 @@ func mobileStreamStatePath(selectedFeedID int64, state mobileAggregateState) str
 	return pathWithQuery("/mobile/stream", mobileAggregateStateValues(state))
 }
 
+func mobileStreamStatePathForRequest(
+	r *http.Request,
+	selectedFeedID int64,
+	state mobileAggregateState,
+) string {
+	if !isMobileAllFeedsRequest(r) {
+		return mobileStreamStatePath(selectedFeedID, state)
+	}
+
+	values := make(url.Values)
+	if selectedFeedID > 0 {
+		values.Set("selected_feed_id", strconv.FormatInt(selectedFeedID, 10))
+	} else {
+		addMobileAggregateStateValues(values, state)
+	}
+
+	values.Set("view", "all")
+
+	return pathWithQuery("/mobile/stream", values)
+}
+
+func mobileMarkReadItemPathForRequest(
+	r *http.Request,
+	itemID int64,
+	selectedFeedID int64,
+	state mobileAggregateState,
+) string {
+	if isTodayMobileReaderRequest(r) {
+		ids, _ := parseTodayBatchIDs(r.URL.Query().Get("batch_ids"))
+		values := make(url.Values)
+		values.Set("today", "1")
+
+		if len(ids) > 0 {
+			values.Set("batch_ids", todayBatchIDsText(ids))
+		}
+
+		return pathWithQuery(fmt.Sprintf("/mobile/items/%d/read", itemID), values)
+	}
+
+	values := make(url.Values)
+	if selectedFeedID > 0 {
+		values.Set("selected_feed_id", strconv.FormatInt(selectedFeedID, 10))
+	} else {
+		addMobileAggregateStateValues(values, state)
+	}
+
+	if isMobileAllFeedsRequest(r) {
+		values.Set("view", "all")
+	}
+
+	return pathWithQuery(fmt.Sprintf("/mobile/items/%d/read", itemID), values)
+}
+
 func mobilePulseStatePath(selectedFeedID int64, state mobileAggregateState) string {
 	if selectedFeedID > 0 {
 		return mobilePulsePath(selectedFeedID)
 	}
 
 	return pathWithQuery("/mobile/pulse", mobileAggregateStateValues(state))
+}
+
+func mobilePulseStatePathForRequest(r *http.Request, selectedFeedID int64, state mobileAggregateState) string {
+	if !isMobileAllFeedsRequest(r) {
+		return mobilePulseStatePath(selectedFeedID, state)
+	}
+
+	values := make(url.Values)
+	if selectedFeedID > 0 {
+		values.Set("selected_feed_id", strconv.FormatInt(selectedFeedID, 10))
+	} else {
+		addMobileAggregateStateValues(values, state)
+	}
+
+	values.Set("view", "all")
+
+	return pathWithQuery("/mobile/pulse", values)
 }
 
 func mobileReaderItemPath(itemID, selectedFeedID int64, state mobileAggregateState) string {

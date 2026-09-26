@@ -1,0 +1,222 @@
+{{define "today_view"}}
+  <section
+    class="today-view"
+    data-today-view="true"
+    data-today-batch-ids="{{.BatchIDsText}}"
+    aria-labelledby="today-title"
+  >
+    <header class="today-header">
+      <div>
+        <h1 id="today-title">Today</h1>
+        <p>From the last 24 hours.</p>
+      </div>
+      <button
+        class="today-refresh chip ghost"
+        type="button"
+        data-app-htmx="true"
+        hx-get="/today?refresh=1"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+        aria-label="Refresh Today stories"
+      >Refresh</button>
+    </header>
+
+    <div class="today-actions">
+      {{template "today_feed_preferences" .}}
+      {{template "today_all_feeds" .}}
+    </div>
+
+    {{if eq (len .ReadingPreferences.TodayFeedIDs) 0}}
+      <section class="today-empty empty-state" aria-labelledby="today-empty-title">
+        <h2 id="today-empty-title">No feeds selected for Today</h2>
+        <p>Choose feeds above to build a small, recent reading batch.</p>
+        {{if eq (len .Feeds) 0}}
+          <p>Subscribe to a feed from the menu, then choose it for Today.</p>
+        {{end}}
+      </section>
+    {{else if eq (len .Items) 0}}
+      <section class="today-empty empty-state" aria-labelledby="today-empty-title">
+        <h2 id="today-empty-title">No recent unread stories</h2>
+        <p>There are no unread stories from your selected feeds in the last 24 hours.</p>
+        <p>Use Choose feeds or All feeds above to find another place to read.</p>
+      </section>
+    {{else}}
+      <div class="today-batch" data-today-batch-ids="{{.BatchIDsText}}" aria-label="Today stories">
+        {{range .Items}}
+          <article class="today-item">
+            <p class="today-item-source">{{.FeedTitle}}</p>
+            {{template "item_compact" .}}
+          </article>
+        {{end}}
+      </div>
+    {{end}}
+  </section>
+{{end}}
+
+{{define "today_feed_preferences"}}
+  <details
+    id="today-choose-feeds"
+    class="today-disclosure today-choose-feeds"
+    {{if eq (len .SelectedFeeds) 0}}open{{end}}
+  >
+    <summary>Choose feeds</summary>
+    <form method="post" action="/preferences/reading/today-feeds" class="today-feed-form">
+      {{if .CSRFToken}}
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      {{end}}
+      <input type="hidden" name="return_to" value="/today">
+      <fieldset>
+        <legend>Choose subscriptions for Today</legend>
+        {{if .Feeds}}
+          {{range .Feeds}}
+            <label class="today-feed-choice">
+              <input type="checkbox" name="feed_id" value="{{.ID}}" {{if index $.SelectedFeeds .ID}}checked{{end}}>
+              <span>{{.Title}}</span>
+            </label>
+          {{end}}
+        {{else}}
+          <p>No subscriptions yet. Subscribe to a feed from the menu first.</p>
+        {{end}}
+      </fieldset>
+      <button class="chip" type="submit">Save Today feeds</button>
+    </form>
+  </details>
+{{end}}
+
+{{define "today_all_feeds"}}
+  <details id="today-all-feeds" class="today-disclosure today-all-feeds">
+    <summary>All feeds</summary>
+    <ul class="today-feed-list" aria-label="All subscriptions">
+      {{range .Feeds}}
+        <li>
+          <a
+            class="today-feed-link"
+            href="/feeds/{{.ID}}/items?from_today=1"
+            data-app-htmx="true"
+            hx-get="/feeds/{{.ID}}/items?from_today=1"
+            hx-push-url="/feeds/{{.ID}}/items?from_today=1"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+          >
+            <span>{{.Title}}</span>
+            <span class="today-feed-count">
+              {{if eq .UnreadCount 0}}
+                Caught up
+              {{else if $.ReadingPreferences.ShowExactUnreadCounts}}
+                {{.UnreadCount}} unread
+              {{else}}
+                New
+              {{end}}
+            </span>
+          </a>
+        </li>
+      {{else}}
+        <li class="today-feed-list-empty">No subscriptions yet.</li>
+      {{end}}
+    </ul>
+  </details>
+{{end}}
+
+{{define "today_response"}}
+  {{template "today_view" .}}
+  {{template "desktop_topbar_slots_oob"}}
+  {{template "reading_preferences_state_oob" .}}
+{{end}}
+
+{{define "today_mobile"}}
+      <header class="today-mobile-header">
+        <div>
+          <h1>Today</h1>
+          <p>From the last 24 hours.</p>
+        </div>
+        <a
+          id="mobile-today-all-feeds"
+          class="chip ghost"
+          href="/mobile/stream?view=all"
+          data-app-htmx="true"
+          hx-get="/mobile/stream?view=all"
+          hx-push-url="true"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
+        >All feeds</a>
+      </header>
+
+      <div class="today-mobile-actions">
+        {{template "today_feed_preferences" .TodaySettings}}
+      </div>
+
+      {{if eq (len .TodaySettings.ReadingPreferences.TodayFeedIDs) 0}}
+        <section class="mobile-empty today-mobile-empty" aria-labelledby="today-mobile-empty-title">
+          <h2 id="today-mobile-empty-title">No feeds selected for Today</h2>
+          <p>Choose feeds above to build a small, recent reading batch.</p>
+          {{if eq (len .TodaySettings.Feeds) 0}}
+            <p>Subscribe to a feed from the menu, then choose it for Today.</p>
+          {{end}}
+        </section>
+      {{else if eq (len .Items) 0}}
+        <section class="mobile-empty today-mobile-empty" aria-labelledby="today-mobile-empty-title">
+          <h2 id="today-mobile-empty-title">No recent unread stories</h2>
+          <p>There are no unread stories from your selected feeds in the last 24 hours.</p>
+          <p>Use Choose feeds or All feeds above to find another place to read.</p>
+        </section>
+      {{else}}
+        <div class="mobile-stream-list today-mobile-list" data-today-batch-ids="{{.TodayBatchIDs}}">
+          {{range .TodayCards}}
+            {{template "today_mobile_card" .}}
+          {{end}}
+        </div>
+      {{end}}
+{{end}}
+
+{{define "today_mobile_card"}}
+  <article
+    class="mobile-card today-mobile-card {{if .Item.IsRead}}is-read{{end}}"
+    id="mobile-card-{{.Item.ID}}"
+    data-mobile-item-id="{{.Item.ID}}"
+  >
+    <div class="mobile-card-meta">
+      <span class="mobile-card-source">{{.Item.FeedTitle}}</span>
+      <span class="mobile-card-time" title="{{.Item.PublishedDisplay}}">{{.Item.PublishedCompact}}</span>
+    </div>
+    <div class="mobile-card-title-row">
+      {{if .Item.IsRead}}
+        <span class="mobile-card-title">{{.Item.Title}}</span>
+        <span class="today-mobile-read-label" role="status">Read</span>
+      {{else}}
+        <button
+          class="mobile-card-open"
+          type="button"
+          data-app-htmx="true"
+          hx-get="/mobile/items/{{.Item.ID}}/reader?today=1&amp;batch_ids={{.BatchIDsText}}"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
+        >
+          <span class="mobile-card-title">{{.Item.Title}}</span>
+        </button>
+        <button
+          class="mobile-card-mark-read"
+          type="button"
+          aria-label="Mark {{.Item.Title}} read"
+          title="Mark read"
+          data-app-htmx="true"
+          hx-post="/mobile/items/{{.Item.ID}}/read?today=1&amp;card=1&amp;batch_ids={{.BatchIDsText}}"
+          hx-target="closest article"
+          hx-swap="outerHTML"
+        >
+          <span class="sr-only">Mark read</span>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      {{end}}
+    </div>
+    {{if .Item.CompactPreview}}
+      <div class="mobile-card-summary"><p>{{.Item.CompactPreview}}</p></div>
+    {{end}}
+  </article>
+{{end}}
+
+{{define "today_mobile_card_response"}}
+  {{template "today_mobile_card" .}}
+{{end}}

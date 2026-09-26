@@ -450,7 +450,49 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.clearMarkAllReadUndoExcept(feedID)
+
+	if r.URL.Query().Get("from_today") == "1" {
+		if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
+			w.Header().Set("Hx-Push-Url", r.URL.RequestURI())
+			a.renderItemListResponse(w, r, feedID)
+
+			return
+		}
+
+		a.renderFeedItemsPage(w, r, feedID)
+
+		return
+	}
 	a.renderItemListResponse(w, r, feedID)
+}
+
+func (a *App) renderFeedItemsPage(w http.ResponseWriter, r *http.Request, feedID int64) {
+	page, err := a.newPageData(r)
+	if err != nil {
+		http.Error(w, "failed to load page state", http.StatusInternalServerError)
+
+		return
+	}
+
+	feeds, err := store.ListFeeds(r.Context(), a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
+		return
+	}
+
+	itemList, ok := a.itemListOrError(w, r, feedID, feeds)
+	if !ok {
+		return
+	}
+
+	page.Feeds = feeds
+	page.ItemList = itemList
+	page.FeedPulseStatuses = a.pulseStatusViews()
+	page.SelectedFeedID = feedID
+	page.FeedEditMode = feedEditModeEnabled(r)
+	page.ThemeReturnPath = r.URL.RequestURI()
+	a.renderTemplate(w, "index", page)
 }
 
 func (a *App) handleContinueFeed(w http.ResponseWriter, r *http.Request) {
@@ -608,6 +650,7 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request) {
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
 	item.IsExpanded = true
+	item.TodayMode = r.URL.Query().Get("today") == "1"
 
 	var collapseItem *view.ItemView
 
@@ -617,6 +660,7 @@ func (a *App) handleItemExpanded(w http.ResponseWriter, r *http.Request) {
 		if collapsedErr == nil {
 			collapsedItem.IsActive = false
 			collapsedItem.IsExpanded = false
+			collapsedItem.TodayMode = item.TodayMode
 			collapseItem = &collapsedItem
 		}
 	}
@@ -644,6 +688,7 @@ func (a *App) handleItemCompact(w http.ResponseWriter, r *http.Request) {
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
 	item.IsExpanded = false
+	item.TodayMode = r.URL.Query().Get("today") == "1"
 	a.renderTemplate(w, "item_compact_response", item)
 }
 
@@ -690,6 +735,8 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 
 	item.IsActive = parseSelectedItemID(r) == item.ID
 	item.IsExpanded = currentView == "expanded"
+	todayMode := r.URL.Query().Get("today") == "1"
+	item.TodayMode = todayMode
 
 	feeds, err := store.ListFeeds(r.Context(), a.db)
 	if err != nil {
@@ -699,6 +746,7 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := a.toggleReadResponseData(r, &item, feeds, feedID, currentView)
+	data.TodayMode = todayMode
 	a.renderTemplateWithReadingPreferences(w, r, "item_toggle_response", &data)
 }
 
@@ -719,6 +767,7 @@ func (a *App) toggleReadResponseData(
 		View:               currentView,
 		FeedEditMode:       feedEditModeEnabled(r),
 		UpdatePanel:        true,
+		TodayMode:          r.URL.Query().Get("today") == "1",
 	}
 }
 

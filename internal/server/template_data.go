@@ -15,6 +15,7 @@ type fullPageData struct {
 type pageData struct {
 	fullPageData
 
+	Today             *todayViewData
 	ItemList          *view.ItemListData
 	MobileStream      *mobileStreamResponseData
 	MobileReader      *mobileReaderResponseData
@@ -75,6 +76,7 @@ type toggleReadResponseData struct {
 	SelectedFeedID     int64
 	FeedEditMode       bool
 	UpdatePanel        bool
+	TodayMode          bool
 }
 
 type pulseStatusResponseData struct {
@@ -104,6 +106,9 @@ type mobileTopBarData struct {
 	SelectedFeedID           int64
 	ShowExactUnreadCounts    bool
 	ShowCaughtUpSelectedFeed bool
+	TodayMode                bool
+	AllFeedsMode             bool
+	StreamPath               string
 }
 
 type mobileStreamResponseData struct {
@@ -111,6 +116,27 @@ type mobileStreamResponseData struct {
 	Aggregate          *mobileAggregateResponseData
 	Items              []view.ItemView
 	TopBar             mobileTopBarData
+	TodayMode          bool
+	TodayBatchIDs      string
+	TodaySettings      *todayViewData
+	AllFeedsMode       bool
+	TodayCards         []mobileTodayCardData
+}
+
+type mobileTodayCardData struct {
+	BatchIDsText string
+	Item         view.ItemView
+}
+
+type todayViewData struct {
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	SelectedFeeds      map[int64]bool
+	CSRFToken          string
+	BatchIDsText       string
+	Items              []view.ItemView
+	Feeds              []view.FeedView
+	BatchIDs           []int64
+	ReadingPreferences store.ReadingPreferences
 }
 
 type mobileReaderResponseData struct {

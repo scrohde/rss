@@ -124,6 +124,7 @@ func (a *App) registerCoreRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", a.handleHealthz)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", a.staticHandler))
 	mux.HandleFunc("GET /{$}", a.handleIndex)
+	mux.HandleFunc("GET /today", a.handleToday)
 	mux.HandleFunc("POST /preferences/reading/counts", a.handleSetShowExactUnreadCounts)
 	mux.HandleFunc("POST /preferences/reading/today-feeds", a.handleSetTodayFeedIDs)
 	mux.HandleFunc("GET /opml/export", a.handleExportOPML)

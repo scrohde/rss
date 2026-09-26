@@ -1,5 +1,9 @@
 {{define "mobile_reader"}}
-  <section class="mobile-reader" data-mobile-reader="true">
+  <section
+    class="mobile-reader"
+    data-mobile-reader="true"
+    {{if .TopBar.TodayMode}}data-today-reader="true"{{end}}
+  >
     <div class="mobile-reader-actions" role="group" aria-label="Reader actions">
       <button
         class="mobile-reader-back mobile-reader-fab"

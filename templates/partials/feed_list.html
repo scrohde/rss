@@ -46,6 +46,15 @@
     </div>
   </div>
   <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
+  <a
+    class="today-sidebar-link"
+    href="/today"
+    data-app-htmx="true"
+    hx-get="/today"
+    hx-push-url="/today"
+    hx-target="#main-content"
+    hx-swap="innerHTML"
+  >Today</a>
   {{if .FeedEditMode}}
     <p class="feed-edit-hint">Rename, reorder, or mark feeds for removal. Save to apply changes.</p>
     <form

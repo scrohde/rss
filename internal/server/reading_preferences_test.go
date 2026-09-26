@@ -185,10 +185,18 @@ func requireReadingPreferencesVisibleToSession(t *testing.T, app *App, cookie *h
 	indexRequest.AddCookie(cookie)
 	indexResponse := httptest.NewRecorder()
 	app.Routes().ServeHTTP(indexResponse, indexRequest)
-	if indexResponse.Code != http.StatusOK {
-		t.Fatalf("expected second session index status 200, got %d", indexResponse.Code)
+	if indexResponse.Code != http.StatusSeeOther || indexResponse.Header().Get("Location") != "/today" {
+		t.Fatalf("expected second session index to land on Today, got %d: %q",
+			indexResponse.Code, indexResponse.Header().Get("Location"))
 	}
-	requireReadingPreferenceSnippets(t, indexResponse.Body.String(), []string{
+	todayRequest := readingPreferenceRequest(http.MethodGet, "/today", nil)
+	todayRequest.AddCookie(cookie)
+	todayResponse := httptest.NewRecorder()
+	app.Routes().ServeHTTP(todayResponse, todayRequest)
+	if todayResponse.Code != http.StatusOK {
+		t.Fatalf("expected Today page status 200, got %d", todayResponse.Code)
+	}
+	requireReadingPreferenceSnippets(t, todayResponse.Body.String(), []string{
 		`id="reading-preferences-state"`,
 		`data-show-exact-unread-counts="true"`,
 		`data-today-setup-completed="true"`,

@@ -50,6 +50,10 @@ func (data *toggleReadResponseData) setReadingPreferences(preferences store.Read
 	data.ReadingPreferences = preferences
 }
 
+func (data *todayViewData) setReadingPreferences(preferences store.ReadingPreferences) {
+	data.ReadingPreferences = preferences
+}
+
 func (data *pulseStatusResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
 }
@@ -57,6 +61,9 @@ func (data *pulseStatusResponseData) setReadingPreferences(preferences store.Rea
 func (data *mobileStreamResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
 	data.TopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
+	if data.TodaySettings != nil {
+		data.TodaySettings.setReadingPreferences(preferences)
+	}
 }
 
 func (data *mobileReaderResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
@@ -235,6 +242,12 @@ func (a *App) renderReadingPreferencesHTMXResponse(w http.ResponseWriter, r *htt
 	if r.PostForm.Get("mobile_view") == "true" {
 		if !a.setMobileReadingPreferencesTopBar(w, r, &data) {
 			return
+		}
+		if r.PostForm.Get("today_mode") == "true" {
+			data.MobileTopBar.TodayMode = true
+			data.MobileTopBar.PulseLabel = "Refresh Today stories"
+			data.MobileTopBar.PulsePendingLabel = "Refreshing Today stories"
+			data.MobileTopBar.PulsePath = mobileTodayPulsePath()
 		}
 	}
 	a.renderTemplateWithReadingPreferences(w, r, "reading_preferences_response", &data)

@@ -54,10 +54,23 @@
 {{end}}
 
 {{define "mobile_topbar_selector"}}
+  {{if .TodayMode}}
+    <span class="mobile-today-label" aria-current="page">Today</span>
+  {{else}}
+    <div class="mobile-stream-topbar-controls">
+      <a
+        class="mobile-today-link"
+        href="/today?layout=mobile"
+        data-app-htmx="true"
+        hx-get="/today?layout=mobile"
+        hx-push-url="true"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+      >Today</a>
   <form
     class="mobile-stream-filter"
     method="get"
-    action="/mobile/stream"
+    action="{{.StreamPath}}"
   >
     <label class="sr-only" for="mobile-stream-feed-filter">Filter unread stream by feed</label>
     <select
@@ -67,7 +80,7 @@
       aria-label="Filter unread stream by feed"
       aria-describedby="mobile-feed-count-description"
       data-app-htmx="true"
-      hx-get="/mobile/stream"
+      hx-get="{{.StreamPath}}"
       hx-include="closest form"
       hx-target="#main-content"
       hx-replace-url="true"
@@ -80,14 +93,16 @@
       {{end}}
       {{range .FeedOptions}}
         <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>
-          {{.Title}}{{if $.ShowExactUnreadCounts}} ({{.UnreadCount}} unread){{else}} (New){{end}}
-      </option>
+          {{.Title}}{{if eq .UnreadCount 0}} (Caught up){{else if $.ShowExactUnreadCounts}} ({{.UnreadCount}} unread){{else}} (New){{end}}
+        </option>
       {{end}}
     </select>
     <span id="mobile-feed-count-description" class="sr-only">
       New means the feed has unread items, regardless of article age. Exact totals appear in options when enabled.
     </span>
   </form>
+  </div>
+  {{end}}
 {{end}}
 
 {{define "mobile_topbar_slot"}}

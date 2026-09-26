@@ -51,6 +51,27 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	preferences, err := store.GetReadingPreferences(r.Context(), a.db)
+	if err != nil {
+		http.Error(w, "failed to load reading preferences", http.StatusInternalServerError)
+
+		return
+	}
+
+	if preferences.TodaySetupCompleted && !r.URL.Query().Has("selected_feed_id") &&
+		parseCatchUpResultFeedID(r) == 0 {
+		if isHTMXRequest(r) {
+			w.Header().Set("Hx-Redirect", "/today")
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		http.Redirect(w, r, "/today", http.StatusSeeOther)
+
+		return
+	}
+
 	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
 		a.renderDesktopReader(w, r, feeds)
 

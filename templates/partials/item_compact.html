@@ -6,7 +6,7 @@
     data-has-content="{{if .HasReaderContent}}true{{else}}false{{end}}"
     data-app-htmx="true"
     {{if .HasReaderContent}}
-      hx-get="/items/{{.ID}}"
+      hx-get="{{if .TodayMode}}/items/{{.ID}}?today=1{{else}}/items/{{.ID}}{{end}}"
       hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
       hx-swap="outerHTML"

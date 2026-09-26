@@ -5,7 +5,7 @@
       type="button"
       aria-label="Read {{.Title}} in Pulse"
       data-app-htmx="true"
-      hx-get="/items/{{.ID}}"
+      hx-get="{{if .TodayMode}}/items/{{.ID}}?today=1{{else}}/items/{{.ID}}{{end}}"
       hx-vals='{"selected_item_id":"item-{{.ID}}"}'
       hx-target="#item-{{.ID}}"
       hx-swap="outerHTML"
@@ -48,8 +48,8 @@
     title="{{if .IsRead}}Mark unread{{else}}Mark read{{end}}"
     data-read-state="{{if .IsRead}}read{{else}}unread{{end}}"
     data-app-htmx="true"
-    hx-post="/items/{{.ID}}/toggle"
-    hx-vals='{"view":"compact"}'
+    hx-post="{{if .TodayMode}}/items/{{.ID}}/toggle?today=1{{else}}/items/{{.ID}}/toggle{{end}}"
+    hx-vals='{"view":"{{if .IsExpanded}}expanded{{else}}compact{{end}}"}'
     hx-target="#item-{{.ID}}"
     hx-swap="outerHTML"
   >

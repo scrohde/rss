@@ -42,6 +42,7 @@ type ItemView struct {
 	HasSummary       bool
 	HasContent       bool
 	IsExpanded       bool
+	TodayMode        bool
 }
 
 // NewItemsData is template data for the new-items banner.
