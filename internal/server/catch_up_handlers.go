@@ -78,6 +78,7 @@ func (a *App) handleCatchUp(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
 	result, token, err := a.applyCatchUp(r, feedID, cutoff)
 	if err != nil {
 		slog.Error("catch-up apply failed", "feed_id", feedID, "err", err)
@@ -123,11 +124,13 @@ func (a *App) respondCatchUp(
 
 	if isHTMXRequest(r) {
 		setCatchUpAppliedHeaders(w, feedID, affectedCount, cutoffValue, undoToken)
+
 		if mobileSurface {
 			a.renderMobileStreamPreservingUndoFeed(w, r, feedID)
 
 			return
 		}
+
 		a.renderItemListResponse(w, r, feedID)
 
 		return
@@ -179,6 +182,7 @@ func setCatchUpAppliedHeaders(w http.ResponseWriter, feedID int64, affectedCount
 			UndoToken:     undoToken,
 		},
 	}
+
 	encoded, err := json.Marshal(event)
 	if err != nil {
 		return
@@ -203,12 +207,14 @@ func catchUpResultURL(feedID int64, affectedCount int, cutoff time.Time) string 
 func parseCatchUpResultFeedID(r *http.Request) int64 {
 	query := r.URL.Query()
 	countValue := strings.TrimSpace(query.Get(catchUpPreviewCountField))
+
 	count, err := strconv.Atoi(countValue)
 	if err != nil || count < 0 {
 		return 0
 	}
 
 	cutoffValue := strings.TrimSpace(query.Get("catch_up_cutoff"))
+
 	cutoff, err := time.Parse(time.RFC3339Nano, cutoffValue)
 	if err != nil || cutoff.IsZero() {
 		return 0
@@ -229,10 +235,12 @@ func mobileCatchUpResultURL(
 	cutoff time.Time,
 ) string {
 	path := mobileStreamStatePath(selectedFeedID, state)
+
 	parsedPath, err := url.Parse(path)
 	if err != nil {
 		return "/mobile/stream"
 	}
+
 	query := parsedPath.Query()
 	query.Set(catchUpPreviewCountField, strconv.Itoa(affectedCount))
 	query.Set("catch_up_cutoff", cutoff.Format(time.RFC3339Nano))

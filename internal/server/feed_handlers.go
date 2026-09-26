@@ -785,6 +785,7 @@ func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
+
 		a.clearMarkAllReadUndoToken(feedID, token)
 
 		slog.Info("feed items bulk-read undo applied", "feed_id", feedID, "items", len(unreadItemIDs))

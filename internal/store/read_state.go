@@ -167,6 +167,7 @@ func MarkUnreadItemsBefore(
 	if commitErr != nil {
 		return CatchUpResult{}, fmt.Errorf("commit catch-up transaction for feed %d: %w", feedID, commitErr)
 	}
+
 	committed = true
 
 	return CatchUpResult{
@@ -194,6 +195,7 @@ RETURNING id
 //nolint:revive // Both iteration and close errors must abort the enclosing transaction.
 func catchUpChangedItemIDs(rows *sql.Rows, feedID int64) ([]int64, error) {
 	changedItemIDs := make([]int64, 0)
+
 	for rows.Next() {
 		var itemID int64
 
@@ -216,9 +218,11 @@ func catchUpChangedItemIDs(rows *sql.Rows, feedID int64) ([]int64, error) {
 
 	rowsErr := rows.Err()
 	closeErr := rows.Close()
+
 	if rowsErr != nil {
 		return nil, fmt.Errorf("iterate catch-up items for feed %d: %w", feedID, rowsErr)
 	}
+
 	if closeErr != nil {
 		return nil, fmt.Errorf("close catch-up item rows for feed %d: %w", feedID, closeErr)
 	}

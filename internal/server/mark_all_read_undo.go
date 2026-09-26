@@ -147,6 +147,7 @@ func (a *App) generateUndoToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	if token == "" {
 		return "", errEmptyUndoToken
 	}

@@ -6,10 +6,10 @@ import (
 )
 
 type fullPageData struct {
-	ReadingPreferences store.ReadingPreferences
 	CSRFToken          string
 	AppearanceTheme    string
 	ThemeReturnPath    string
+	ReadingPreferences store.ReadingPreferences
 }
 
 type pageData struct {
@@ -26,12 +26,12 @@ type pageData struct {
 }
 
 type subscribeResponseData struct {
-	ReadingPreferences store.ReadingPreferences
 	ItemList           *view.ItemListData
 	FeedPulseStatuses  map[int64]*pulseFeedStatusView
 	Message            string
 	MessageClass       string
 	Feeds              []view.FeedView
+	ReadingPreferences store.ReadingPreferences
 	SelectedFeedID     int64
 	Update             bool
 	FeedEditMode       bool

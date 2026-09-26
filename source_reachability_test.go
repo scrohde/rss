@@ -240,6 +240,7 @@ func literalTemplateRenderName(node ast.Node) (string, bool) {
 	if templateRenderNameArgumentIndex(call.Fun) == 2 {
 		nameArgument = 2
 	}
+
 	if len(call.Args) <= nameArgument {
 		return "", false
 	}
@@ -255,12 +256,15 @@ func literalTemplateRenderName(node ast.Node) (string, bool) {
 }
 
 func templateRenderNameArgumentIndex(function ast.Expr) int {
-	name := ""
+	var name string
+
 	switch current := function.(type) {
 	case *ast.Ident:
 		name = current.Name
 	case *ast.SelectorExpr:
 		name = current.Sel.Name
+	default:
+		return 1
 	}
 
 	if name == "renderTemplateWithReadingPreferences" {
