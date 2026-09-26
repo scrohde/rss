@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+// CatchUpResult describes the exact unread items changed by a date-cutoff
+// operation.
+type CatchUpResult struct {
+	ChangedItemIDs []int64
+	AffectedCount  int
+}
+
 // ToggleRead is part of the store package API.
 func ToggleRead(ctx context.Context, db *sql.DB, itemID int64) error {
 	ctx = contextOrBackground(ctx)
@@ -105,6 +112,118 @@ func MarkAllReadWithUndo(ctx context.Context, db *sql.DB, feedID int64) ([]int64
 	}
 
 	return unreadItemIDs, nil
+}
+
+// CountUnreadItemsBefore returns the unread item count for a feed whose
+// publication time, or ingestion time when publication is missing, is strictly
+// before cutoff.
+func CountUnreadItemsBefore(ctx context.Context, db *sql.DB, feedID int64, cutoff time.Time) (int, error) {
+	ctx = contextOrBackground(ctx)
+
+	var count int
+
+	err := db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM items
+WHERE feed_id = ?
+	AND read_at IS NULL
+	AND COALESCE(published_at, created_at) < ?
+	`, feedID, cutoff.UTC()).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count unread items before cutoff for feed %d: %w", feedID, err)
+	}
+
+	return count, nil
+}
+
+// MarkUnreadItemsBefore marks the currently eligible unread feed items read in
+// one transaction and returns only IDs actually changed by the update.
+func MarkUnreadItemsBefore(
+	ctx context.Context,
+	db *sql.DB,
+	feedID int64,
+	cutoff time.Time,
+) (CatchUpResult, error) {
+	ctx = contextOrBackground(ctx)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return CatchUpResult{}, fmt.Errorf("begin catch-up transaction for feed %d: %w", feedID, err)
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackTx(tx)
+		}
+	}()
+
+	changedItemIDs, err := markUnreadItemsBeforeTx(ctx, tx, feedID, cutoff)
+	if err != nil {
+		return CatchUpResult{}, err
+	}
+
+	commitErr := tx.Commit()
+	if commitErr != nil {
+		return CatchUpResult{}, fmt.Errorf("commit catch-up transaction for feed %d: %w", feedID, commitErr)
+	}
+	committed = true
+
+	return CatchUpResult{
+		ChangedItemIDs: changedItemIDs,
+		AffectedCount:  len(changedItemIDs),
+	}, nil
+}
+
+func markUnreadItemsBeforeTx(ctx context.Context, tx *sql.Tx, feedID int64, cutoff time.Time) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `
+UPDATE items
+SET read_at = ?
+WHERE feed_id = ?
+	AND read_at IS NULL
+	AND COALESCE(published_at, created_at) < ?
+RETURNING id
+	`, time.Now().UTC(), feedID, cutoff.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("mark unread items before cutoff for feed %d: %w", feedID, err)
+	}
+
+	return catchUpChangedItemIDs(rows, feedID)
+}
+
+//nolint:revive // Both iteration and close errors must abort the enclosing transaction.
+func catchUpChangedItemIDs(rows *sql.Rows, feedID int64) ([]int64, error) {
+	changedItemIDs := make([]int64, 0)
+	for rows.Next() {
+		var itemID int64
+
+		scanErr := rows.Scan(&itemID)
+		if scanErr != nil {
+			closeErr := rows.Close()
+			if closeErr != nil {
+				return nil, fmt.Errorf(
+					"scan catch-up item for feed %d: %w",
+					feedID,
+					errors.Join(scanErr, closeErr),
+				)
+			}
+
+			return nil, fmt.Errorf("scan catch-up item for feed %d: %w", feedID, scanErr)
+		}
+
+		changedItemIDs = append(changedItemIDs, itemID)
+	}
+
+	rowsErr := rows.Err()
+	closeErr := rows.Close()
+	if rowsErr != nil {
+		return nil, fmt.Errorf("iterate catch-up items for feed %d: %w", feedID, rowsErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close catch-up item rows for feed %d: %w", feedID, closeErr)
+	}
+
+	return changedItemIDs, nil
 }
 
 func markAllReadWithUndoTx(ctx context.Context, tx *sql.Tx, feedID int64) ([]int64, error) {

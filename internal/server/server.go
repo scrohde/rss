@@ -48,6 +48,7 @@ type App struct {
 	authRateLimiter            *authRateLimiter
 	authTrustedProxies         []*net.IPNet
 	markAllReadUndoTokenByFeed map[int64]string
+	undoTokenGenerator         func() (string, error)
 	pulseStatuses              map[int64]pulseFeedStatusEntry
 	authSetupCookieName        string
 	authCookieName             string
@@ -88,6 +89,7 @@ func New(db *sql.DB, tmpl *template.Template) *App {
 	app.authCookieSecure = false
 	app.markAllReadUndoByToken = make(map[string]markAllReadUndoState)
 	app.markAllReadUndoTokenByFeed = make(map[int64]string)
+	app.undoTokenGenerator = newMarkAllReadUndoToken
 
 	return app
 }
@@ -144,6 +146,8 @@ func (a *App) registerFeedRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /feeds/{feedID}/items/poll", a.handleFeedItemsPoll)
 	mux.HandleFunc("POST /feeds/{feedID}/items/read", a.handleMarkAllRead)
 	mux.HandleFunc("POST /feeds/{feedID}/items/read/undo", a.handleUndoMarkAllRead)
+	mux.HandleFunc("GET /feeds/{feedID}/items/catch-up/preview", a.handleCatchUpPreview)
+	mux.HandleFunc("POST /feeds/{feedID}/items/catch-up", a.handleCatchUp)
 	mux.HandleFunc("POST /feeds/{feedID}/items/sweep", a.handleSweepRead)
 	mux.HandleFunc("GET /items/{itemID}", a.handleItemExpanded)
 	mux.HandleFunc("GET /items/{itemID}/compact", a.handleItemCompact)

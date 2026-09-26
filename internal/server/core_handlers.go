@@ -65,6 +65,15 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	data.Feeds = feeds
 	data.FeedPulseStatuses = a.pulseStatusViews()
 	data.FeedEditMode = feedEditModeEnabled(r)
+	data.SelectedFeedID = normalizeSelectedFeedID(parseCatchUpResultFeedID(r), feeds)
+	if data.SelectedFeedID > 0 {
+		itemList, itemListOK := a.itemListOrError(w, r, data.SelectedFeedID, feeds)
+		if !itemListOK {
+			return
+		}
+
+		data.ItemList = itemList
+	}
 	a.renderTemplate(w, "index", data)
 }
 

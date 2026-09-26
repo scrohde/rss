@@ -221,6 +221,16 @@ func wrapMobilePulseContextErr(ctx context.Context) error {
 }
 
 func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
+	a.clearMarkAllReadUndoExcept(parseSelectedFeedID(r))
+	a.renderMobileStreamResponse(w, r)
+}
+
+func (a *App) renderMobileStreamPreservingUndoFeed(w http.ResponseWriter, r *http.Request, feedID int64) {
+	a.clearMarkAllReadUndoExcept(feedID)
+	a.renderMobileStreamResponse(w, r)
+}
+
+func (a *App) renderMobileStreamResponse(w http.ResponseWriter, r *http.Request) {
 	topBar, ok := a.mobileTopBarOrError(w, r, "failed to load feeds")
 	if !ok {
 		return

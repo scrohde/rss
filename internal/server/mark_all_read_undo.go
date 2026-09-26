@@ -3,15 +3,21 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"rss/internal/view"
 )
 
 type markAllReadUndoState struct {
-	unreadItemIDs []int64
-	feedID        int64
+	changedItemIDs []int64
+	feedID         int64
 }
+
+var (
+	errMissingMarkAllReadUndoToken = errors.New("missing mark-all-read undo token")
+	errEmptyUndoToken              = errors.New("undo token generator returned an empty token")
+)
 
 func (a *App) attachMarkAllReadUndo(itemList *view.ItemListData) *view.ItemListData {
 	if itemList == nil {
@@ -30,16 +36,15 @@ func (a *App) attachMarkAllReadUndo(itemList *view.ItemListData) *view.ItemListD
 	return itemList
 }
 
-func (a *App) storeMarkAllReadUndo(feedID int64, unreadItemIDs []int64) (string, error) {
-	if len(unreadItemIDs) == 0 {
+func (a *App) storeMarkAllReadUndo(feedID int64, changedItemIDs []int64, token string) error {
+	if len(changedItemIDs) == 0 {
 		a.clearMarkAllReadUndo(feedID)
 
-		return "", nil
+		return nil
 	}
 
-	token, err := newMarkAllReadUndoToken()
-	if err != nil {
-		return "", err
+	if token == "" {
+		return errMissingMarkAllReadUndoToken
 	}
 
 	a.markAllReadUndoMu.Lock()
@@ -50,12 +55,12 @@ func (a *App) storeMarkAllReadUndo(feedID int64, unreadItemIDs []int64) (string,
 	}
 
 	a.markAllReadUndoByToken[token] = markAllReadUndoState{
-		feedID:        feedID,
-		unreadItemIDs: append([]int64(nil), unreadItemIDs...),
+		feedID:         feedID,
+		changedItemIDs: append([]int64(nil), changedItemIDs...),
 	}
 	a.markAllReadUndoTokenByFeed[feedID] = token
 
-	return token, nil
+	return nil
 }
 
 func (a *App) clearMarkAllReadUndo(feedID int64) {
@@ -88,20 +93,22 @@ func (a *App) activeMarkAllReadUndo(feedID int64) (string, markAllReadUndoState,
 
 	token, ok := a.markAllReadUndoTokenByFeed[feedID]
 	if !ok {
-		return "", markAllReadUndoState{feedID: 0, unreadItemIDs: nil}, false
+		return "", markAllReadUndoState{feedID: 0, changedItemIDs: nil}, false
 	}
 
 	state, ok := a.markAllReadUndoByToken[token]
 	if !ok || state.feedID != feedID {
 		delete(a.markAllReadUndoTokenByFeed, feedID)
 
-		return "", markAllReadUndoState{feedID: 0, unreadItemIDs: nil}, false
+		return "", markAllReadUndoState{feedID: 0, changedItemIDs: nil}, false
 	}
+
+	state.changedItemIDs = append([]int64(nil), state.changedItemIDs...)
 
 	return token, state, true
 }
 
-func (a *App) consumeMarkAllReadUndo(feedID int64, token string) ([]int64, bool) {
+func (a *App) markAllReadUndoForToken(feedID int64, token string) ([]int64, bool) {
 	a.markAllReadUndoMu.Lock()
 	defer a.markAllReadUndoMu.Unlock()
 
@@ -110,14 +117,41 @@ func (a *App) consumeMarkAllReadUndo(feedID int64, token string) ([]int64, bool)
 		return nil, false
 	}
 
+	return append([]int64(nil), state.changedItemIDs...), true
+}
+
+func (a *App) clearMarkAllReadUndoToken(feedID int64, token string) {
+	a.markAllReadUndoMu.Lock()
+	defer a.markAllReadUndoMu.Unlock()
+
+	state, ok := a.markAllReadUndoByToken[token]
+	if !ok || state.feedID != feedID {
+		return
+	}
+
 	delete(a.markAllReadUndoByToken, token)
 
 	currentToken, hasToken := a.markAllReadUndoTokenByFeed[feedID]
 	if hasToken && currentToken == token {
 		delete(a.markAllReadUndoTokenByFeed, feedID)
 	}
+}
 
-	return append([]int64(nil), state.unreadItemIDs...), true
+func (a *App) generateUndoToken() (string, error) {
+	generator := a.undoTokenGenerator
+	if generator == nil {
+		generator = newMarkAllReadUndoToken
+	}
+
+	token, err := generator()
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return "", errEmptyUndoToken
+	}
+
+	return token, nil
 }
 
 func newMarkAllReadUndoToken() (string, error) {

@@ -731,6 +731,13 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := a.generateUndoToken()
+	if err != nil {
+		http.Error(w, "failed to prepare undo", http.StatusInternalServerError)
+
+		return
+	}
+
 	unreadItemIDs, err := store.MarkAllReadWithUndo(r.Context(), a.db, feedID)
 	if err != nil {
 		http.Error(w, "failed to update items", http.StatusInternalServerError)
@@ -738,7 +745,7 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = a.storeMarkAllReadUndo(feedID, unreadItemIDs)
+	err = a.storeMarkAllReadUndo(feedID, unreadItemIDs, token)
 	if err != nil {
 		http.Error(w, "failed to prepare undo", http.StatusInternalServerError)
 
@@ -765,12 +772,12 @@ func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
 
 	token := strings.TrimSpace(r.FormValue("undo_token"))
 	if token == "" {
-		a.renderItemListResponse(w, r, feedID)
+		a.renderBulkReadUndoResponse(w, r, feedID)
 
 		return
 	}
 
-	unreadItemIDs, ok := a.consumeMarkAllReadUndo(feedID, token)
+	unreadItemIDs, ok := a.markAllReadUndoForToken(feedID, token)
 	if ok {
 		err := store.MarkItemsUnread(r.Context(), a.db, feedID, unreadItemIDs)
 		if err != nil {
@@ -778,11 +785,12 @@ func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
+		a.clearMarkAllReadUndoToken(feedID, token)
 
-		slog.Info("feed items mark-all undo applied", "feed_id", feedID, "items", len(unreadItemIDs))
+		slog.Info("feed items bulk-read undo applied", "feed_id", feedID, "items", len(unreadItemIDs))
 	}
 
-	a.renderItemListResponse(w, r, feedID)
+	a.renderBulkReadUndoResponse(w, r, feedID)
 }
 
 //nolint:gosec // Sweep logs include request-derived feed IDs for operational visibility.
