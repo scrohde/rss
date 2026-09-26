@@ -29,6 +29,16 @@
         </div>
       </div>
       <div class="item-actions">
+        <button
+          class="chip ghost"
+          type="button"
+          aria-haspopup="dialog"
+          aria-controls="catch-up-dialog-{{.Feed.ID}}"
+          data-catch-up-open
+        >
+          Catch up
+        </button>
+        {{template "catch_up_dialog" .}}
         <div class="mark-all-read-action" data-mark-all-read-action>
           <button
             class="chip ghost"
@@ -57,6 +67,12 @@
           >
             Undo
           </button>
+          {{if .MarkAllReadUndoToken}}
+            <span class="bulk-read-undo-help">
+              Undo lasts while you stay in this feed. Leaving it, clearing read items, another bulk action,
+              or restarting Pulse removes it.
+            </span>
+          {{end}}
         </div>
         <button
           class="items-sweep-button"
@@ -80,6 +96,14 @@
         </button>
       </div>
     </div>
+    <p
+      class="catch-up-notice"
+      data-catch-up-notice
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    ></p>
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
     <div

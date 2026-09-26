@@ -34,9 +34,12 @@ func LoadItemList(
 
 	return &view.ItemListData{
 		MarkAllReadUndoToken: "",
+		CatchUpFeedTitle:     "",
 		Feed:                 feed,
 		Items:                items,
 		NewestID:             newestID,
+		CatchUpFeedID:        0,
+		CatchUpSurface:       "",
 		NewItems:             view.NewItemsData{FeedID: feed.ID, Count: 0, SwapOOB: false},
 		Continuation:         view.BuildFeedContinuation(feed.ID, nil),
 	}, nil

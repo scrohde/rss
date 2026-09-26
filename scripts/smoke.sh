@@ -14,7 +14,7 @@ export GOCACHE="$GO_BUILD_CACHE"
 SMOKE_PATTERN='TestBrowserSmoke('
 SMOKE_PATTERN+='UnreadCountPreferenceAndDisclosure|TodayResponsiveNavigationAndAccessibility|'
 SMOKE_PATTERN+='AuthLoginSwitchesFromConditionalToExplicit|AuthLoginUnsupportedFallback|'
-SMOKE_PATTERN+='InactiveFeedContentBoundary|ReaderFlows|PulseIndicatorFlows|Mobile)'
+SMOKE_PATTERN+='InactiveFeedContentBoundary|ReaderFlows|PulseIndicatorFlows|CatchUpDesktopAndMobile|Mobile)'
 
 echo "==> go test -tags=smoke -count=1 ./internal/server -run ${SMOKE_PATTERN}"
 go test -tags=smoke -count=1 ./internal/server -run "${SMOKE_PATTERN}" "$@"

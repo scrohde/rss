@@ -188,7 +188,7 @@ func setCatchUpAppliedHeaders(w http.ResponseWriter, feedID int64, affectedCount
 		return
 	}
 
-	w.Header().Set("Hx-Trigger", string(encoded))
+	w.Header().Set("Hx-Trigger-After-Swap", string(encoded))
 }
 
 func slogCatchUpApplied(feedID int64, affectedCount int, cutoff string) {

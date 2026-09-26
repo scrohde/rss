@@ -55,9 +55,12 @@ type NewItemsData struct {
 // ItemListData is template data for a feed and its item list.
 type ItemListData struct {
 	MarkAllReadUndoToken string
+	CatchUpFeedTitle     string
+	CatchUpSurface       string
 	Items                []ItemView
 	Feed                 FeedView
 	Continuation         FeedContinuationData
 	NewItems             NewItemsData
+	CatchUpFeedID        int64
 	NewestID             int64
 }

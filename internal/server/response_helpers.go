@@ -54,6 +54,9 @@ func attachFeedContinuation(itemList *view.ItemListData, feeds []view.FeedView) 
 		return nil
 	}
 
+	itemList.CatchUpFeedID = itemList.Feed.ID
+	itemList.CatchUpFeedTitle = itemList.Feed.Title
+	itemList.CatchUpSurface = "desktop"
 	itemList.Continuation = view.BuildFeedContinuation(itemList.Feed.ID, feeds)
 
 	return itemList

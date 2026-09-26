@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"testing"
 	"time"
@@ -84,7 +85,7 @@ func TestCatchUpPreviewAndApplyExposeRecalculatedResult(t *testing.T) {
 
 	var events map[string]catchUpAppliedEvent
 
-	decodeErr := json.Unmarshal([]byte(response.Header().Get("Hx-Trigger")), &events)
+	decodeErr := json.Unmarshal([]byte(response.Header().Get("Hx-Trigger-After-Swap")), &events)
 	if decodeErr != nil {
 		t.Fatalf("decode Catch up event: %v", decodeErr)
 	}
@@ -107,6 +108,7 @@ func TestCatchUpPreviewAndApplyExposeRecalculatedResult(t *testing.T) {
 	assertUnreadStateByGUID(t, app, otherFeedID, "other", false)
 }
 
+//nolint:funlen // Exercises the mobile stream and its feed-scoped undo response.
 func TestCatchUpMobileSurfaceUsesMobileStreamAndUndoResponse(t *testing.T) {
 	t.Parallel()
 
@@ -132,11 +134,24 @@ func TestCatchUpMobileSurfaceUsesMobileStreamAndUndoResponse(t *testing.T) {
 	assertResponseCode(t, apply, "mobile catch-up apply")
 	assertContains(t, apply.Body.String(), `data-mobile-stream="true"`, "expected mobile stream response")
 	assertNotContains(t, apply.Body.String(), `class="items"`, "expected desktop item-list response to be skipped")
+	assertContains(
+		t,
+		apply.Body.String(),
+		`data-mobile-feed-actions`,
+		"expected selected feed actions to remain visible",
+	)
+	assertContains(t, apply.Body.String(), `data-mark-all-read-undo-button`, "expected mobile undo after Catch up")
+	assertContains(
+		t,
+		apply.Body.String(),
+		"Undo lasts while you stay in this feed",
+		"expected mobile undo lifetime help",
+	)
 	assertUnreadStateByGUID(t, app, feedID, "mobile-story", true)
 
 	var events map[string]catchUpAppliedEvent
 
-	decodeErr := json.Unmarshal([]byte(apply.Header().Get("Hx-Trigger")), &events)
+	decodeErr := json.Unmarshal([]byte(apply.Header().Get("Hx-Trigger-After-Swap")), &events)
 	if decodeErr != nil {
 		t.Fatalf("decode mobile Catch up event: %v", decodeErr)
 	}
@@ -156,6 +171,215 @@ func TestCatchUpMobileSurfaceUsesMobileStreamAndUndoResponse(t *testing.T) {
 	assertContains(t, undo.Body.String(), `data-mobile-stream="true"`, "expected mobile stream after undo")
 	assertContains(t, undo.Body.String(), "Mobile story", "expected undo to restore the story in the mobile stream")
 	assertUnreadStateByGUID(t, app, feedID, "mobile-story", false)
+}
+
+func TestCatchUpDialogAndMobileReadActionsRenderForSelectedFeed(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "http://example.com/catch-up-controls", "Catch up controls")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Unread",
+		"https://example.com/catch-up-controls-story",
+		"catch-up-controls",
+		time.Now().UTC(),
+	)
+
+	desktop := getRequest(app, fmt.Sprintf("/feeds/%d/items", feedID))
+	assertResponseCode(t, desktop, "desktop Catch up controls")
+	assertContains(t, desktop.Body.String(), `data-catch-up-open`, "expected desktop Catch up opener")
+	assertContains(t, desktop.Body.String(), `aria-haspopup="dialog"`, "expected accessible desktop dialog opener")
+	assertContains(t, desktop.Body.String(), `aria-labelledby="catch-up-title-`, "expected dialog title reference")
+	assertContains(t, desktop.Body.String(), `name="range"`, "expected preset selector")
+	assertContains(t, desktop.Body.String(), `value="7" selected`, "expected seven-day default preset")
+	assertContains(t, desktop.Body.String(), `value="30"`, "expected thirty-day preset")
+	assertContains(t, desktop.Body.String(), `value="custom"`, "expected custom-date option")
+	assertContains(t, desktop.Body.String(), `data-mark-all-read-button`, "expected Mark all read to remain available")
+
+	mobile := getRequest(app, fmt.Sprintf("/mobile/stream?selected_feed_id=%d", feedID))
+	assertResponseCode(t, mobile, "mobile selected-feed Catch up controls")
+	assertContains(t, mobile.Body.String(), `data-mobile-feed-actions`, "expected mobile per-feed actions")
+	assertContains(t, mobile.Body.String(), `value="mobile"`, "expected mobile Catch up surface")
+	assertContains(t, mobile.Body.String(), `data-catch-up-open`, "expected mobile Catch up opener")
+	assertContains(t, mobile.Body.String(), `data-mark-all-read-button`, "expected mobile Mark all read action")
+}
+
+func TestMobileMarkAllReadKeepsItsUndoFlow(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "http://example.com/mobile-mark-all", "Mobile Mark all")
+	mustUpsertSingleStory(
+		t,
+		app,
+		feedID,
+		"Mobile Mark all story",
+		"https://example.com/mobile-mark-all-story",
+		"mobile-mark-all",
+		time.Now().UTC(),
+	)
+
+	form := url.Values{
+		catchUpSurfaceField: {catchUpMobileSurface},
+		formSelectedFeedID:  {strconv.FormatInt(feedID, 10)},
+	}
+	markAll := postHTMXFormRequest(app, fmt.Sprintf("/feeds/%d/items/read", feedID), form)
+	assertResponseCode(t, markAll, "mobile Mark all read")
+	assertContains(t, markAll.Body.String(), `data-mobile-stream="true"`, "expected mobile stream after Mark all read")
+	assertContains(
+		t,
+		markAll.Body.String(),
+		`data-mark-all-read-undo-button`,
+		"expected mobile undo after Mark all read",
+	)
+	assertUnreadStateByGUID(t, app, feedID, "mobile-mark-all", true)
+
+	tokenMatch := regexp.MustCompile(`name="undo_token" value="([0-9a-f]+)"`).FindStringSubmatch(markAll.Body.String())
+	if len(tokenMatch) != expectedTwoItems {
+		t.Fatal("expected mobile Mark all read response to include its undo token")
+	}
+
+	undoForm := url.Values{
+		"undo_token":        {tokenMatch[1]},
+		catchUpSurfaceField: {catchUpMobileSurface},
+		formSelectedFeedID:  {strconv.FormatInt(feedID, 10)},
+	}
+	undo := postHTMXFormRequest(app, fmt.Sprintf("/feeds/%d/items/read/undo", feedID), undoForm)
+	assertResponseCode(t, undo, "mobile Mark all read undo")
+	assertContains(t, undo.Body.String(), "Mobile Mark all story", "expected mobile undo to restore the item")
+	assertUnreadStateByGUID(t, app, feedID, "mobile-mark-all", false)
+}
+
+func TestCatchUpZeroAffectedItemsClearsOldUndoAndReportsZero(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "http://example.com/catch-up-zero", "Catch up zero")
+	old := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	newer := old.AddDate(0, 0, 10)
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{
+		newGofeedItem("Old", "https://example.com/catch-up-zero-old", "catch-up-zero-old", "", &old),
+		newGofeedItem("Newer", "https://example.com/catch-up-zero-new", "catch-up-zero-new", "", &newer),
+	})
+
+	first := postHTMXFormRequest(
+		app,
+		fmt.Sprintf("/feeds/%d/items/catch-up", feedID),
+		url.Values{catchUpCutoffField: {newer.Format(time.RFC3339Nano)}},
+	)
+	assertResponseCode(t, first, "initial Catch up before zero-result apply")
+	firstToken := extractUndoToken(t, first.Body.String())
+
+	zero := postHTMXFormRequest(
+		app,
+		fmt.Sprintf("/feeds/%d/items/catch-up", feedID),
+		url.Values{catchUpCutoffField: {old.Add(-time.Minute).Format(time.RFC3339Nano)}},
+	)
+	assertResponseCode(t, zero, "zero-result Catch up apply")
+
+	if got := zero.Header().Get("X-Catch-Up-Affected-Count"); got != "0" {
+		t.Fatalf("expected zero affected items, got %q", got)
+	}
+
+	var events map[string]catchUpAppliedEvent
+
+	err := json.Unmarshal([]byte(zero.Header().Get("Hx-Trigger-After-Swap")), &events)
+	if err != nil {
+		t.Fatalf("decode zero-result Catch up event: %v", err)
+	}
+
+	if got := events[catchUpResultEvent].AffectedCount; got != 0 {
+		t.Fatalf("expected zero-result event count 0, got %d", got)
+	}
+
+	if token, ok := app.activeMarkAllReadUndo(feedID); ok {
+		t.Fatalf("expected zero-result bulk action to invalidate prior undo token %q", token)
+	}
+
+	staleUndo := postFormRequest(
+		app,
+		fmt.Sprintf("/feeds/%d/items/read/undo", feedID),
+		url.Values{"undo_token": {firstToken}},
+	)
+	assertResponseCode(t, staleUndo, "undo after zero-result bulk action")
+	assertUnreadStateByGUID(t, app, feedID, "catch-up-zero-old", true)
+	assertUnreadStateByGUID(t, app, feedID, "catch-up-zero-new", false)
+}
+
+//nolint:funlen // Covers the complete selected-feed navigation and stale-undo journey.
+func TestMobileCatchUpNavigationInvalidatesUndo(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	firstFeedID := mustUpsertFeed(t, app, "http://example.com/catch-up-mobile-one", "Mobile one")
+	secondFeedID := mustUpsertFeed(t, app, "http://example.com/catch-up-mobile-two", "Mobile two")
+	cutoff := time.Now().UTC()
+	mustUpsertSingleStory(
+		t,
+		app,
+		firstFeedID,
+		"First",
+		"https://example.com/mobile-one",
+		"mobile-one",
+		cutoff.Add(-time.Hour),
+	)
+	mustUpsertSingleStory(
+		t,
+		app,
+		secondFeedID,
+		"Second",
+		"https://example.com/mobile-two",
+		"mobile-two",
+		cutoff.Add(-time.Hour),
+	)
+
+	applyForm := url.Values{
+		catchUpCutoffField:  {cutoff.Format(time.RFC3339Nano)},
+		catchUpSurfaceField: {catchUpMobileSurface},
+		formSelectedFeedID:  {strconv.FormatInt(firstFeedID, 10)},
+	}
+	apply := postHTMXFormRequest(app, fmt.Sprintf("/feeds/%d/items/catch-up", firstFeedID), applyForm)
+	assertResponseCode(t, apply, "mobile Catch up before feed navigation")
+	assertContains(t, apply.Body.String(), `data-mark-all-read-undo-button`, "expected undo before mobile navigation")
+
+	otherFeed := getRequest(app, fmt.Sprintf("/mobile/stream?selected_feed_id=%d", secondFeedID))
+	assertResponseCode(t, otherFeed, "select another mobile feed")
+
+	returned := getRequest(app, fmt.Sprintf("/mobile/stream?selected_feed_id=%d", firstFeedID))
+	assertResponseCode(t, returned, "return to original mobile feed")
+	assertNotContains(
+		t,
+		returned.Body.String(),
+		`data-mark-all-read-undo-button`,
+		"expected navigation to invalidate mobile undo",
+	)
+
+	var events map[string]catchUpAppliedEvent
+
+	err := json.Unmarshal([]byte(apply.Header().Get("Hx-Trigger-After-Swap")), &events)
+	if err != nil {
+		t.Fatalf("decode mobile navigation Catch up event: %v", err)
+	}
+
+	token := events[catchUpResultEvent].UndoToken
+	if token == "" {
+		t.Fatal("expected mobile Catch up response to expose an undo token")
+	}
+
+	stale := postFormRequest(
+		app,
+		fmt.Sprintf("/feeds/%d/items/read/undo", firstFeedID),
+		url.Values{
+			"undo_token":        {token},
+			catchUpSurfaceField: {catchUpMobileSurface},
+			formSelectedFeedID:  {strconv.FormatInt(firstFeedID, 10)},
+		},
+	)
+	assertResponseCode(t, stale, "stale mobile Catch up undo")
+	assertUnreadStateByGUID(t, app, firstFeedID, "mobile-one", true)
 }
 
 func TestCatchUpFullPageApplyRedirectsWithResult(t *testing.T) {

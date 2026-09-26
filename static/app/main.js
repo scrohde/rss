@@ -11,6 +11,7 @@ import { bindMobileReaderNavigation } from "./mobile-navigation.js";
 import { bindMobilePullRefresh } from "./mobile-pull-refresh.js";
 import { bindKeyboardShortcuts } from "./keyboard.js";
 import { bindHTMXLifecycle } from "./htmx.js";
+import { bindCatchUpControls } from "./catch-up.js";
 
 configurePanelFocus({
   isFeedEditMode: feed.isFeedEditMode,
@@ -42,6 +43,7 @@ bindHTMXLifecycle({
   feed,
   content,
 });
+bindCatchUpControls();
 
 bindMobileReaderNavigation();
 bindMobilePullRefresh();

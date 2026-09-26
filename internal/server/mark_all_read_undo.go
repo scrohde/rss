@@ -24,7 +24,7 @@ func (a *App) attachMarkAllReadUndo(itemList *view.ItemListData) *view.ItemListD
 		return nil
 	}
 
-	token, _, ok := a.activeMarkAllReadUndo(itemList.Feed.ID)
+	token, ok := a.activeMarkAllReadUndo(itemList.Feed.ID)
 	if !ok {
 		itemList.MarkAllReadUndoToken = ""
 
@@ -87,25 +87,23 @@ func (a *App) clearMarkAllReadUndoExcept(feedID int64) {
 	}
 }
 
-func (a *App) activeMarkAllReadUndo(feedID int64) (string, markAllReadUndoState, bool) {
+func (a *App) activeMarkAllReadUndo(feedID int64) (string, bool) {
 	a.markAllReadUndoMu.Lock()
 	defer a.markAllReadUndoMu.Unlock()
 
 	token, ok := a.markAllReadUndoTokenByFeed[feedID]
 	if !ok {
-		return "", markAllReadUndoState{feedID: 0, changedItemIDs: nil}, false
+		return "", false
 	}
 
 	state, ok := a.markAllReadUndoByToken[token]
 	if !ok || state.feedID != feedID {
 		delete(a.markAllReadUndoTokenByFeed, feedID)
 
-		return "", markAllReadUndoState{feedID: 0, changedItemIDs: nil}, false
+		return "", false
 	}
 
-	state.changedItemIDs = append([]int64(nil), state.changedItemIDs...)
-
-	return token, state, true
+	return token, true
 }
 
 func (a *App) markAllReadUndoForToken(feedID int64, token string) ([]int64, bool) {

@@ -99,11 +99,15 @@ type itemExpandedResponseData struct {
 
 type mobileTopBarData struct {
 	SelectedFeedTitle        string
+	MarkAllReadUndoToken     string
+	CatchUpFeedTitle         string
+	CatchUpSurface           string
 	PulseLabel               string
 	PulsePendingLabel        string
 	PulsePath                string
 	FeedOptions              []view.FeedView
 	SelectedFeedID           int64
+	CatchUpFeedID            int64
 	ShowExactUnreadCounts    bool
 	ShowCaughtUpSelectedFeed bool
 	TodayMode                bool

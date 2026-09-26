@@ -42,6 +42,69 @@
         </div>
         {{template "mobile_all_feed_list" .TopBar}}
       {{end}}
+      {{if gt .TopBar.SelectedFeedID 0}}
+        <div
+          class="mobile-feed-actions"
+          data-mobile-feed-actions
+          data-feed-id="{{.TopBar.SelectedFeedID}}"
+        >
+          <div class="mobile-feed-action-buttons">
+            {{if not .TopBar.MarkAllReadUndoToken}}
+              <form
+                class="mobile-bulk-read-form"
+                data-app-htmx="true"
+                hx-post="/feeds/{{.TopBar.SelectedFeedID}}/items/read"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+              >
+                <input type="hidden" name="surface" value="mobile">
+                <input type="hidden" name="selected_feed_id" value="{{.TopBar.SelectedFeedID}}">
+                <button class="chip ghost" type="submit" data-mark-all-read-button>Mark all read</button>
+              </form>
+            {{end}}
+            <button
+              class="chip ghost"
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls="catch-up-dialog-{{.TopBar.SelectedFeedID}}"
+              data-catch-up-open
+            >
+              Catch up
+            </button>
+            {{template "catch_up_dialog" .TopBar}}
+            {{if .TopBar.MarkAllReadUndoToken}}
+              <form
+                class="mobile-bulk-read-form"
+                data-app-htmx="true"
+                hx-post="/feeds/{{.TopBar.SelectedFeedID}}/items/read/undo"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+              >
+                <input type="hidden" name="surface" value="mobile">
+                <input type="hidden" name="selected_feed_id" value="{{.TopBar.SelectedFeedID}}">
+                <input type="hidden" name="undo_token" value="{{.TopBar.MarkAllReadUndoToken}}">
+                <button class="chip ghost mark-all-read-undo" type="submit" data-mark-all-read-undo-button>
+                  Undo
+                </button>
+              </form>
+            {{end}}
+          </div>
+          {{if .TopBar.MarkAllReadUndoToken}}
+            <p class="bulk-read-undo-help">
+              Undo lasts while you stay in this feed. Leaving it, clearing read items, another bulk action,
+              or restarting Pulse removes it.
+            </p>
+          {{end}}
+          <p
+            class="catch-up-notice"
+            data-catch-up-notice
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            hidden
+          ></p>
+        </div>
+      {{end}}
       {{if .Aggregate}}
         {{template "mobile_stream_sections" .Aggregate}}
       {{else if .Items}}

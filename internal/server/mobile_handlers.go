@@ -437,7 +437,11 @@ func (a *App) mobileTopBarDataForState(
 	}
 
 	topBar := mobileTopBarData{
+		CatchUpFeedID:            selection.FeedID,
+		CatchUpFeedTitle:         selection.FeedTitle,
+		CatchUpSurface:           catchUpMobileSurface,
 		FeedOptions:              selection.Options,
+		MarkAllReadUndoToken:     "",
 		PulseLabel:               refreshAction.Label,
 		PulsePendingLabel:        refreshAction.PendingLabel,
 		PulsePath:                refreshAction.Path,
@@ -449,6 +453,12 @@ func (a *App) mobileTopBarDataForState(
 		AllFeedsMode:             isMobileAllFeedsRequest(r),
 		StreamPath:               selectorPath,
 	}
+	if selection.FeedID > 0 {
+		if token, ok := a.activeMarkAllReadUndo(selection.FeedID); ok {
+			topBar.MarkAllReadUndoToken = token
+		}
+	}
+
 	if topBar.TodayMode {
 		topBar.PulseLabel = "Refresh Today stories"
 		topBar.PulsePendingLabel = "Refreshing Today stories"

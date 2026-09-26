@@ -803,6 +803,13 @@ func (a *App) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("feed items marked read", "feed_id", feedID)
 
+	if isMobileCatchUpSurface(r) {
+		w.Header().Set("Hx-Trigger-After-Swap", "pulse:mark-all-read-applied")
+		a.renderMobileStreamPreservingUndoFeed(w, r, feedID)
+
+		return
+	}
+
 	a.renderItemListResponse(w, r, feedID)
 }
 
@@ -836,6 +843,7 @@ func (a *App) handleUndoMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		}
 
 		a.clearMarkAllReadUndoToken(feedID, token)
+		w.Header().Set("Hx-Trigger-After-Swap", "pulse:bulk-read-undone")
 
 		slog.Info("feed items bulk-read undo applied", "feed_id", feedID, "items", len(unreadItemIDs))
 	}
