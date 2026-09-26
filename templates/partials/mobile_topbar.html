@@ -65,6 +65,7 @@
       id="mobile-stream-feed-filter"
       name="selected_feed_id"
       aria-label="Filter unread stream by feed"
+      aria-describedby="mobile-feed-count-description"
       data-app-htmx="true"
       hx-get="/mobile/stream"
       hx-include="closest form"
@@ -78,9 +79,14 @@
         <option value="{{.SelectedFeedID}}" selected>{{.SelectedFeedTitle}} (caught up)</option>
       {{end}}
       {{range .FeedOptions}}
-        <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>{{.Title}}</option>
+        <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>
+          {{.Title}}{{if $.ShowExactUnreadCounts}} ({{.UnreadCount}} unread){{else}} (New){{end}}
+      </option>
       {{end}}
     </select>
+    <span id="mobile-feed-count-description" class="sr-only">
+      New means the feed has unread items, regardless of article age. Exact totals appear in options when enabled.
+    </span>
   </form>
 {{end}}
 

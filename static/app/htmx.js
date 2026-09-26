@@ -7,6 +7,8 @@ import {
 } from "./panel-focus.js";
 
 export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
+  let preservedFocusElement = null;
+
   const processSharedTopbarHTMX = () => {
     if (typeof htmx === "undefined" || typeof htmx.process !== "function") {
       return;
@@ -107,9 +109,22 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
     setPendingPanelFocus(null);
   });
 
+  document.body.addEventListener("htmx:beforeRequest", (event) => {
+    const trigger = event && event.detail ? event.detail.elt : null;
+    if (!trigger || !trigger.closest || !trigger.closest('[data-preserve-focus="true"]')) {
+      return;
+    }
+
+    preservedFocusElement = document.activeElement;
+  });
+
   document.body.addEventListener("htmx:afterSwap", (event) => {
     clearFeedDragState();
     hydrateSwappedContent(event.target);
+    const trigger = event && event.detail ? event.detail.elt : null;
+    if (trigger && trigger.dataset && trigger.dataset.preserveFocus === "true") {
+      return;
+    }
     const swapTarget = event && event.detail ? event.detail.target : null;
     if (swapTarget && swapTarget.id === "feed-list" && isFeedEditMode()) {
       focusFeedEditTitleInput();
@@ -188,6 +203,10 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
 
   document.body.addEventListener("htmx:afterSettle", () => {
     syncDisplayedFeedSelection();
+    if (preservedFocusElement && document.contains(preservedFocusElement)) {
+      preservedFocusElement.focus({ preventScroll: true });
+    }
+    preservedFocusElement = null;
     if (state.pendingPanelFocus !== "content") {
       return;
     }

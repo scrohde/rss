@@ -1284,13 +1284,13 @@ func assertToggleReadFeedListBody(t *testing.T, body string) {
 	assertNotContains(
 		t,
 		body,
-		`feed-count">2`,
+		`class="feed-count-exact">2</span>`,
 		"expected unread count to decrease",
 	)
 	assertContains(
 		t,
 		body,
-		`feed-count">1`,
+		`class="feed-count-exact">1</span>`,
 		"expected unread count to be 1",
 	)
 	assertContains(

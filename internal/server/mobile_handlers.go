@@ -260,6 +260,7 @@ func (a *App) renderMobileStreamResponse(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	data.TopBar.ShowExactUnreadCounts = page.ReadingPreferences.ShowExactUnreadCounts
 	page.MobileTopBar = &data.TopBar
 	page.MobileStream = &data
 	a.renderTemplate(w, "index", page)
@@ -315,6 +316,7 @@ func (a *App) renderMobileReader(w http.ResponseWriter, r *http.Request, data *m
 		return
 	}
 
+	data.TopBar.ShowExactUnreadCounts = page.ReadingPreferences.ShowExactUnreadCounts
 	page.MobileTopBar = &data.TopBar
 	page.MobileReader = data
 	a.renderTemplate(w, "index", page)
@@ -375,6 +377,7 @@ func (a *App) mobileTopBarDataForState(
 		PulsePath:                refreshAction.Path,
 		SelectedFeedTitle:        selection.FeedTitle,
 		SelectedFeedID:           selection.FeedID,
+		ShowExactUnreadCounts:    false,
 		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
 	}, nil
 }

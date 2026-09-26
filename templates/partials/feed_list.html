@@ -131,6 +131,8 @@
           <li class="feed-row">
             <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}"
               data-feed-order="{{.SortOrder}}"
+              data-show-exact-unread-counts="{{$.ReadingPreferences.ShowExactUnreadCounts}}"
+              aria-describedby="feed-unread-description-{{.ID}}"
               data-app-htmx="true"
               hx-get="/feeds/{{.ID}}/items"
               hx-target="#main-content"
@@ -147,8 +149,31 @@
                 <span class="feed-pulse-indicator none" aria-hidden="true"></span>
               {{end}}
               <span class="feed-title">{{.Title}}</span>
-              <span class="feed-count">{{.UnreadCount}}</span>
+              <span class="feed-count" aria-hidden="true">
+                <span class="feed-count-new">New</span>
+                <span class="feed-count-exact">{{.UnreadCount}}</span>
+              </span>
             </button>
+            {{if not $.ReadingPreferences.ShowExactUnreadCounts}}
+              <details class="feed-details">
+                <summary aria-label="Unread details for {{.Title}}">
+                  <span aria-hidden="true">i</span>
+                </summary>
+                <div class="feed-details-panel">
+                  <p class="feed-details-count">
+                    {{.UnreadCount}} unread {{if eq .UnreadCount 1}}item{{else}}items{{end}}
+                  </p>
+                  <p>New means this feed has unread items, regardless of article age.</p>
+                </div>
+              </details>
+            {{end}}
+            <span class="sr-only" id="feed-unread-description-{{.ID}}">
+              {{.UnreadCount}} unread {{if eq .UnreadCount 1}}item{{else}}items{{end}}.
+              {{if not $.ReadingPreferences.ShowExactUnreadCounts}}
+                New means this feed has unread items, regardless of article age. Exact totals are available on focus or
+                in feed details.
+              {{end}}
+            </span>
           </li>
         {{end}}
       {{end}}
@@ -188,7 +213,6 @@
                       <span class="feed-pulse-indicator none" aria-hidden="true"></span>
                     {{end}}
                     <span class="feed-title">{{.Title}}</span>
-                    <span class="feed-count">{{.UnreadCount}}</span>
                   </button>
                 </li>
               {{end}}

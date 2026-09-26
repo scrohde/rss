@@ -300,6 +300,11 @@ func TestToggleReadUpdatesFeedList(t *testing.T) {
 
 	app := newTestApp(t)
 
+	preferenceErr := store.SetShowExactUnreadCounts(context.Background(), app.db, true)
+	if preferenceErr != nil {
+		t.Fatalf("enable exact unread counts: %v", preferenceErr)
+	}
+
 	feedID := mustUpsertFeed(t, app, exampleRSSURL, "Toggle Feed")
 	mustUpsertItems(t, app, feedID, []*gofeed.Item{{
 		Title:           "One",

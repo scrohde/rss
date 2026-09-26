@@ -102,6 +102,7 @@ type mobileTopBarData struct {
 	PulsePath                string
 	FeedOptions              []view.FeedView
 	SelectedFeedID           int64
+	ShowExactUnreadCounts    bool
 	ShowCaughtUpSelectedFeed bool
 }
 
@@ -154,6 +155,11 @@ type mobileFeedSectionResponseData struct {
 
 type readingPreferencesResponseData struct {
 	ReadingPreferences store.ReadingPreferences
+	FeedPulseStatuses  map[int64]*pulseFeedStatusView
+	Feeds              []view.FeedView
+	MobileTopBar       *mobileTopBarData
+	SelectedFeedID     int64
+	FeedEditMode       bool
 }
 
 type authLoginPageData struct {

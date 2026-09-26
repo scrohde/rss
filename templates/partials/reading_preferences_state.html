@@ -19,4 +19,18 @@
 {{end}}
 {{define "reading_preferences_response"}}
   {{template "reading_preferences_state_oob" .}}
+  <p
+    id="reading-preference-status"
+    class="topbar-shortcuts-reading-status"
+    aria-live="polite"
+    hx-swap-oob="innerHTML"
+  >
+    {{if .ReadingPreferences.ShowExactUnreadCounts}}Unread counts are on.{{else}}Unread counts are off.{{end}}
+  </p>
+  <div id="feed-list" hx-swap-oob="innerHTML">
+    {{template "feed_list" .}}
+  </div>
+  {{if .MobileTopBar}}
+    {{template "mobile_topbar_slot_oob" .MobileTopBar}}
+  {{end}}
 {{end}}

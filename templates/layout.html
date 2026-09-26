@@ -120,6 +120,61 @@
             {{end}}
             <section
               class="topbar-shortcuts-section"
+              data-menu-section="reading"
+              aria-labelledby="topbar-menu-reading-title"
+            >
+              <h3
+                class="topbar-shortcuts-title topbar-shortcuts-title-secondary"
+                id="topbar-menu-reading-title"
+              >Reading preferences</h3>
+              <form
+                class="topbar-shortcuts-reading-form"
+                method="post"
+                action="/preferences/reading/counts"
+                data-app-htmx="true"
+                data-preserve-focus="true"
+                hx-post="/preferences/reading/counts"
+                hx-trigger="change"
+                {{if .MobileTopBar}}hx-include="#mobile-stream-feed-filter"{{else}}hx-include="#selected-feed-id"{{end}}
+                hx-swap="none"
+              >
+                {{if .CSRFToken}}
+                  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                {{end}}
+                <input type="hidden" name="enabled" value="false">
+                <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
+                {{if .MobileTopBar}}
+                  <input type="hidden" name="mobile_view" value="true">
+                {{end}}
+                <label class="topbar-shortcuts-reading-option">
+                  <input
+                    id="show-unread-counts"
+                    type="checkbox"
+                    name="enabled"
+                    value="true"
+                    aria-describedby="reading-counts-help reading-preference-status"
+                    {{if .ReadingPreferences.ShowExactUnreadCounts}}checked{{end}}
+                  >
+                  <span>Show unread counts</span>
+                </label>
+                <p id="reading-counts-help" class="topbar-shortcuts-reading-help">
+                  Feeds with unread items show New by default. Turn this on to see exact totals.
+                </p>
+                <p
+                  id="reading-preference-status"
+                  class="topbar-shortcuts-reading-status"
+                  aria-live="polite"
+                >
+                  {{if .ReadingPreferences.ShowExactUnreadCounts}}
+                    Unread counts are on.
+                  {{else}}
+                    Unread counts are off.
+                  {{end}}
+                </p>
+              </form>
+            </section>
+            <section
+              class="topbar-shortcuts-section"
               data-menu-section="feeds"
               aria-labelledby="topbar-menu-feeds-title"
             >

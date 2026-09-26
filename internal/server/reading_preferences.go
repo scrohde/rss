@@ -29,6 +29,9 @@ func (data *fullPageData) setReadingPreferences(preferences store.ReadingPrefere
 
 func (data *pageData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
+	if data.MobileTopBar != nil {
+		data.MobileTopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
+	}
 }
 
 func (data *subscribeResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
@@ -53,22 +56,29 @@ func (data *pulseStatusResponseData) setReadingPreferences(preferences store.Rea
 
 func (data *mobileStreamResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
+	data.TopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
 }
 
 func (data *mobileReaderResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
+	data.TopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
 }
 
 func (data *mobileStreamSectionsResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
+	data.TopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
 }
 
 func (data *mobileFeedSectionResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
+	data.TopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
 }
 
 func (data *readingPreferencesResponseData) setReadingPreferences(preferences store.ReadingPreferences) {
 	data.ReadingPreferences = preferences
+	if data.MobileTopBar != nil {
+		data.MobileTopBar.ShowExactUnreadCounts = preferences.ShowExactUnreadCounts
+	}
 }
 
 func (a *App) renderTemplateWithReadingPreferences(
@@ -193,8 +203,7 @@ func parseTodayFeedIDs(values []string) ([]int64, bool) {
 
 func (a *App) finishReadingPreferenceSave(w http.ResponseWriter, r *http.Request) {
 	if isHTMXRequest(r) {
-		data := readingPreferencesResponseData{ReadingPreferences: emptyReadingPreferences()}
-		a.renderTemplateWithReadingPreferences(w, r, "reading_preferences_response", &data)
+		a.renderReadingPreferencesHTMXResponse(w, r)
 
 		return
 	}
@@ -205,6 +214,47 @@ func (a *App) finishReadingPreferenceSave(w http.ResponseWriter, r *http.Request
 	}
 	//nolint:gosec // Redirect targets are validated as same-origin absolute paths below.
 	http.Redirect(w, r, redirectTarget, http.StatusSeeOther)
+}
+
+func (a *App) renderReadingPreferencesHTMXResponse(w http.ResponseWriter, r *http.Request) {
+	feeds, err := store.ListFeeds(r.Context(), a.db)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
+		return
+	}
+
+	data := readingPreferencesResponseData{
+		ReadingPreferences: emptyReadingPreferences(),
+		FeedPulseStatuses:  a.pulseStatusViews(),
+		Feeds:              feeds,
+		MobileTopBar:       nil,
+		SelectedFeedID:     normalizeSelectedFeedID(parseSelectedFeedID(r), feeds),
+		FeedEditMode:       feedEditModeEnabled(r),
+	}
+	if r.PostForm.Get("mobile_view") == "true" {
+		if !a.setMobileReadingPreferencesTopBar(w, r, &data) {
+			return
+		}
+	}
+	a.renderTemplateWithReadingPreferences(w, r, "reading_preferences_response", &data)
+}
+
+func (a *App) setMobileReadingPreferencesTopBar(
+	w http.ResponseWriter,
+	r *http.Request,
+	data *readingPreferencesResponseData,
+) bool {
+	topBar, err := a.mobileTopBarData(r)
+	if err != nil {
+		http.Error(w, "failed to load feeds", http.StatusInternalServerError)
+
+		return false
+	}
+
+	data.MobileTopBar = &topBar
+
+	return true
 }
 
 func readingPreferencesRedirectTarget(raw string) string {

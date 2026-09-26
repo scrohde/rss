@@ -467,6 +467,42 @@ body {
   margin: 0 0 12px;
 }
 
+.topbar-shortcuts-reading-form {
+  display: grid;
+  gap: 8px;
+}
+
+.topbar-shortcuts-reading-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.topbar-shortcuts-reading-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.topbar-shortcuts-reading-option input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.topbar-shortcuts-reading-help,
+.topbar-shortcuts-reading-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .topbar-shortcuts-theme-status {
   min-height: 1.1em;
   margin: 0;
@@ -1144,7 +1180,8 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 }
 
 .feed-link {
-  width: 100%;
+  flex: 1 1 0;
+  width: auto;
   border: 1px solid transparent;
   background: transparent;
   padding: 8px 10px;
@@ -1227,6 +1264,95 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   font-size: 11px;
   color: var(--muted);
   flex: 0 0 auto;
+}
+
+.feed-count-new,
+.feed-count-exact {
+  display: inline;
+}
+
+.feed-count-exact {
+  display: none;
+}
+
+.feed-link[data-show-exact-unread-counts="true"] .feed-count-new {
+  display: none;
+}
+
+.feed-link[data-show-exact-unread-counts="true"] .feed-count-exact,
+.feed-link[data-show-exact-unread-counts="false"]:hover .feed-count-exact,
+.feed-link[data-show-exact-unread-counts="false"]:focus-visible .feed-count-exact {
+  display: inline;
+}
+
+.feed-link[data-show-exact-unread-counts="false"]:hover .feed-count-new,
+.feed-link[data-show-exact-unread-counts="false"]:focus-visible .feed-count-new {
+  display: none;
+}
+
+.feed-details {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.feed-details[open] {
+  flex: 1 0 100%;
+}
+
+.feed-details summary {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--icon-button-border);
+  border-radius: 8px;
+  background: var(--icon-button-bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.feed-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.feed-details summary:hover,
+.feed-details summary:focus-visible {
+  color: var(--accent);
+  border-color: var(--focus-ring);
+}
+
+.feed-details summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.feed-details-panel {
+  width: min(100%, 320px);
+  margin-top: 6px;
+  padding: 9px 11px;
+  border: 1px solid var(--panel-divider);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--panel-shadow);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.feed-details-panel p {
+  margin: 0;
+}
+
+.feed-details-panel p + p {
+  margin-top: 4px;
+}
+
+.feed-details-count {
+  font-weight: 700;
 }
 
 .feed-empty {

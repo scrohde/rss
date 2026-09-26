@@ -116,6 +116,9 @@ func TestReadingPreferenceHTMXSaveReturnsUpdatedState(t *testing.T) {
 		`hx-swap-oob="outerHTML"`,
 		`data-show-exact-unread-counts="true"`,
 		`data-today-setup-completed="false"`,
+		`id="feed-list" hx-swap-oob="innerHTML"`,
+		`id="reading-preference-status"`,
+		"Unread counts are on.",
 	})
 }
 

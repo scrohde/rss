@@ -1169,7 +1169,7 @@ func feedUnreadCountExpression(feedID int64, want string) string {
 			if (!feed) {
 				return false;
 			}
-			const count = feed.querySelector(".feed-count");
+			const count = feed.querySelector(".feed-count-exact");
 			return !!count && count.textContent.trim() === %q;
 		})()`,
 		fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, feedID),

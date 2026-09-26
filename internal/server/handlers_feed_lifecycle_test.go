@@ -603,7 +603,7 @@ func assertInitialPollBanner(t *testing.T, body string) {
 		`id="item-last-error"`,
 		"expected last error OOB update",
 	)
-	assertContains(t, body, `feed-count">2`, "expected unread count to be 2")
+	assertContains(t, body, `class="feed-count-exact">2</span>`, "expected opted-in unread count to be 2")
 }
 
 func addThirdPollItem(t *testing.T, app *App, feedID int64, base time.Time) {
@@ -627,7 +627,7 @@ func assertUpdatedPollBanner(t *testing.T, body string) {
 		"New items (1)",
 		"expected banner to show new items",
 	)
-	assertContains(t, body, `feed-count">3`, "expected unread count to be 3")
+	assertContains(t, body, `class="feed-count-exact">3</span>`, "expected opted-in unread count to be 3")
 }
 
 func assertNewItemsResponse(t *testing.T, body string) {
@@ -643,6 +643,11 @@ func TestPollingAndNewItemsBanner(t *testing.T) {
 	base := time.Now().UTC().Add(-2 * time.Hour)
 	app := newTestApp(t)
 	fixture := seedPollingFeed(t, app, base)
+
+	preferenceErr := store.SetShowExactUnreadCounts(context.Background(), app.db, true)
+	if preferenceErr != nil {
+		t.Fatalf("enable exact unread counts: %v", preferenceErr)
+	}
 	feedID := fixture.feedID
 	newestID := fixture.newestID
 
