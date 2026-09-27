@@ -172,3 +172,45 @@ func todayReaderOriginExpression(itemID int64) string {
 			!!history.state && history.state.pulseMobileReaderNavigationID === origin.navigationID;
 	})()`, todayPath([]int64{itemID}, true), strconv.FormatInt(itemID, 10))
 }
+
+//nolint:funlen // Exercises keyboard selection, reader focus, and read-state swaps as one journey.
+func TestBrowserSmokeTodayKeyboardShortcuts(t *testing.T) {
+	app := newSmokeApp(t)
+	feedID := mustUpsertFeed(t, app, "https://example.com/keys.xml", "Keyboard feed")
+	now := time.Now().UTC()
+	mustUpsertItems(t, app, feedID, []*gofeed.Item{
+		newSmokeItem("First story", "https://example.com/first", "first", now.Add(-time.Hour)),
+		newSmokeItem("Second story", "https://example.com/second", "second", now.Add(-2*time.Hour)),
+	})
+	items := mustListItems(t, app, feedID)
+	requireNoErr(t, store.SetTodayFeedIDs(context.Background(), app.db, []int64{feedID}), "select feeds: %v")
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+	ctx := newSmokeBrowserContext(t)
+	runActions(t, ctx, chromedp.EmulateViewport(1365, 900), chromedp.Navigate(server.URL+"/today"))
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "Today list receives keyboard focus")
+	first := fmt.Sprintf("#item-%d", items[0].ID)
+	second := fmt.Sprintf("#item-%d", items[1].ID)
+	waitForJS(t, ctx, hasClassExpression(first, "is-active"), "first story is active")
+	runActions(t, ctx, chromedp.KeyEvent("j"))
+	waitForJS(t, ctx, hasClassExpression(second, "is-active"), "j selects next story")
+	runActions(t, ctx, chromedp.KeyEvent("k"))
+	waitForJS(t, ctx, hasClassExpression(first, "is-active"), "k selects previous story")
+	runActions(t, ctx, chromedp.KeyEvent(kb.ArrowDown))
+	waitForJS(t, ctx, hasClassExpression(second, "is-active"), "down selects next story")
+	runActions(t, ctx, chromedp.KeyEvent(kb.ArrowUp), chromedp.KeyEvent("l"))
+	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "l opens the reader")
+	waitForJS(t, ctx, htmxSettledExpression(), "reader expansion settles")
+	runActions(t, ctx, chromedp.KeyEvent("h"))
+	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "h returns to Today")
+	waitForJS(t, ctx, htmxSettledExpression(), "reader collapse settles before read shortcut")
+	runActions(t, ctx, chromedp.KeyEvent("h"), chromedp.KeyEvent("r"))
+	waitForJS(t, ctx, hasClassExpression(first, "is-read"), "r marks the active story read")
+	waitForJS(t, ctx, hasClassExpression(second, "is-active"), "read action advances within the batch")
+	waitForJS(t, ctx, fmt.Sprintf(`document.querySelector(%q)?.getAttribute("hx-get").includes("today=1")`, first),
+		"read-state swap preserves Today context")
+	runActions(t, ctx, chromedp.KeyEvent("k"), chromedp.KeyEvent("r"))
+	waitForJS(t, ctx, missingClassExpression(first, "is-read"), "r can restore the read story to unread")
+	runActions(t, ctx, chromedp.KeyEvent(kb.Enter))
+	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "Enter opens the active Today story")
+}

@@ -329,7 +329,8 @@ const requestToggleRead = (row, view, selectedItemId) => {
     return false;
   }
   const selected = selectedItemId || state.activeId;
-  htmx.ajax("POST", `/items/${itemID}/toggle`, {
+  const todayQuery = row.closest("[data-today-view]") ? "?today=1" : "";
+  htmx.ajax("POST", `/items/${itemID}/toggle${todayQuery}`, {
     source: row,
     target: `#${row.id}`,
     swap: "outerHTML",

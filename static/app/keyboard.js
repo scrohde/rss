@@ -116,7 +116,9 @@ export const bindKeyboardShortcuts = ({
             content.collapseContentPanelToItems();
             break;
           }
-          feed.focusFeedPanel();
+          if (!document.querySelector(".today-view")) {
+            feed.focusFeedPanel();
+          }
           break;
         }
         content.toggleExpanded(false);
@@ -126,7 +128,7 @@ export const bindKeyboardShortcuts = ({
         content.openActiveSource();
         break;
       case "enter": {
-        if (event.target && event.target.closest && event.target.closest("a, button")) {
+        if (event.target && event.target.closest && event.target.closest("a, button, summary")) {
           break;
         }
         if (

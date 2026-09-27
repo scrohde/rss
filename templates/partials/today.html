@@ -41,7 +41,13 @@
         <p>Use Choose feeds or All feeds above to find another place to read.</p>
       </section>
     {{else}}
-      <div class="today-batch" data-today-batch-ids="{{.BatchIDsText}}" aria-label="Today stories">
+      <div
+        class="today-batch"
+        id="item-list"
+        tabindex="-1"
+        data-today-batch-ids="{{.BatchIDsText}}"
+        aria-label="Today stories"
+      >
         {{range .Items}}
           <article class="today-item">
             <p class="today-item-source">{{.FeedTitle}}</p>

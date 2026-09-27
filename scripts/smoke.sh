@@ -12,7 +12,7 @@ mkdir -p "$GO_BUILD_CACHE"
 export GOCACHE="$GO_BUILD_CACHE"
 
 SMOKE_PATTERN='TestBrowserSmoke('
-SMOKE_PATTERN+='UnreadCountPreferenceAndDisclosure|TodayResponsiveNavigationAndAccessibility|TodayEmptySetupNavigation|'
+SMOKE_PATTERN+='UnreadCountPreferenceAndDisclosure|TodayResponsiveNavigationAndAccessibility|TodayEmptySetupNavigation|TodayKeyboardShortcuts|'
 SMOKE_PATTERN+='AuthLoginSwitchesFromConditionalToExplicit|AuthLoginUnsupportedFallback|'
 SMOKE_PATTERN+='InactiveFeedContentBoundary|ReaderFlows|PulseIndicatorFlows|CatchUpDesktopAndMobile|Mobile)'
 

@@ -170,7 +170,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       }
       event.detail.headers["X-CSRF-Token"] = csrfToken;
     }
-    if (!event.detail.parameters.selected_item_id) {
+    if (!event.detail.parameters.selected_item_id && !source.matches(".today-feed-link")) {
       if (sourceRow && sourceRow.id) {
         event.detail.parameters.selected_item_id = sourceRow.id;
         state.activeId = sourceRow.id;
