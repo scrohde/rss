@@ -12,7 +12,7 @@ import (
 )
 
 //nolint:cyclop,funlen,gocognit,revive // One scenario covers selection, eligibility, and query purity.
-func TestListTodayItemsUsesSelectedFeedsAndEffectiveTimeWindow(t *testing.T) {
+func TestListTodayItemsUsesAllFeedsAndEffectiveTimeWindow(t *testing.T) {
 	t.Parallel()
 
 	db := openTestDB(t)
@@ -78,8 +78,8 @@ UPDATE items SET created_at = ? WHERE feed_id = ? AND guid = 'missing'
 		t.Fatalf("ListTodayItems without selections: %v", err)
 	}
 
-	if len(items) != 0 {
-		t.Fatalf("expected no stories without selected feeds, got %#v", items)
+	if len(items) != 6 {
+		t.Fatalf("expected all eligible stories without setup, got %#v", items)
 	}
 
 	selectedFeedIDs := []int64{
@@ -110,13 +110,14 @@ UPDATE items SET created_at = ? WHERE feed_id = ? AND guid = 'missing'
 		t.Fatalf("ListTodayItems: %v", err)
 	}
 
-	wantTitles := []string{"At now", "One hour", "Missing publication", "Six hours", "At lower boundary"}
+	wantTitles := []string{"Unselected", "At now", "One hour", "Missing publication", "Six hours", "At lower boundary"}
 
 	if len(items) != len(wantTitles) {
 		t.Fatalf("expected %d Today stories, got %d: %#v", len(wantTitles), len(items), items)
 	}
 
 	wantFeedIDs := map[string]int64{
+		"Unselected":          otherFeedID,
 		"At now":              selectedFeedID,
 		"One hour":            hourFeedID,
 		"Missing publication": missingFeedID,
@@ -125,6 +126,7 @@ UPDATE items SET created_at = ? WHERE feed_id = ? AND guid = 'missing'
 	}
 
 	wantFeedTitles := map[string]string{
+		"Unselected":          "Other",
 		"At now":              "Selected",
 		"One hour":            "One hour",
 		"Missing publication": "Missing publication",

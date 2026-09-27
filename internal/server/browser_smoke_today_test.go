@@ -27,7 +27,7 @@ func TestBrowserSmokeTodayEmptySetupNavigation(t *testing.T) {
 	waitForJS(t, ctx, htmxReadyExpression(), "sidebar ready")
 	clickElement(t, ctx, ".today-sidebar-link", "open Today before setup")
 	waitForJS(t, ctx, desktopTodayLayoutExpression(), "Today setup has visible reading width")
-	waitForJS(t, ctx, textPresentExpression("No feeds selected for Today"), "first-time setup is displayed")
+	waitForJS(t, ctx, textPresentExpression("No recent unread stories"), "Today works without setup")
 }
 
 //nolint:funlen,revive // One browser journey covers Today setup, feed exits, responsive navigation, and history.
@@ -65,17 +65,13 @@ func TestBrowserSmokeTodayResponsiveNavigationAndAccessibility(t *testing.T) {
 	waitForJS(t, ctx, textPresentExpression("Today Smoke Story"), "recent story appears with its source")
 	waitForJS(t, ctx, todayAccessibilityExpression(), "setup and feed controls expose accessible names")
 
-	runActions(t, ctx, chromedp.Focus("#today-choose-feeds > summary", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
-	waitForJS(t, ctx, detailsOpenExpression("#today-choose-feeds"), "keyboard opens Choose feeds")
-	runActions(t, ctx, chromedp.Focus("#today-all-feeds > summary", chromedp.ByQuery), chromedp.KeyEvent(kb.Enter))
-	waitForJS(t, ctx, detailsOpenExpression("#today-all-feeds"), "keyboard opens All feeds")
-	waitForJS(t, ctx, textPresentExpression("Caught Up Smoke Feed"), "All feeds includes a zero-unread subscription")
-
-	feedPath := fmt.Sprintf("/feeds/%d/items?from_today=1", zeroFeedID)
-	clickElement(t, ctx, fmt.Sprintf(`.today-feed-link[href="%s"]`, feedPath), "select a feed from Today")
-	waitForJS(t, ctx, requestURIExpression(feedPath), "feed choice is pushed as a normal reader URL")
-	waitForJS(t, ctx, textPresentExpression("Caught Up Smoke Feed"), "normal reader opens the selected feed")
-	waitForJS(t, ctx, elementAbsentExpression(`[data-today-view="true"]`), "normal feed selection exits Today mode")
+	clickElement(t, ctx, "[data-feed-more-toggle]", "show caught-up feeds in sidebar")
+	clickElement(t, ctx, fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, zeroFeedID), "select a feed from Today")
+	waitForJS(t, ctx, elementAbsentExpression(`[data-today-view="true"]`), "feed selection exits Today")
+	waitForJS(t, ctx, textPresentExpression("Caught Up Smoke Feed"), "selected feed opens")
+	clickElement(t, ctx, ".today-sidebar-link", "return to Today")
+	waitForJS(t, ctx, desktopTodayLayoutExpression(), "sidebar persists after HTMX navigation")
+	waitForJS(t, ctx, elementAbsentExpression(".feed-link.active"), "Today clears prior feed selection")
 
 	runActions(t, ctx, chromedp.EmulateViewport(390, 844), chromedp.Navigate(server.URL+"/today?layout=mobile"))
 	waitForJS(t, ctx, htmxReadyExpression(), "HTMX ready on mobile Today reload")
@@ -133,7 +129,7 @@ func desktopTodayLayoutExpression() string {
 		const today = document.querySelector(".today-view");
 		const bounds = today?.getBoundingClientRect();
 		return !!app && !!feedPanel && document.querySelector(".today-view") &&
-			getComputedStyle(feedPanel).display === "none" &&
+			getComputedStyle(feedPanel).display !== "none" &&
 			getComputedStyle(app).display === "grid" && bounds.width > 500 &&
 			bounds.left >= 0 && bounds.right <= innerWidth;
 	})()`
@@ -141,22 +137,21 @@ func desktopTodayLayoutExpression() string {
 
 func todayAccessibilityExpression() string {
 	return `(() => {
-		const choose = document.querySelector("#today-choose-feeds > summary");
-		const fieldset = document.querySelector("#today-choose-feeds fieldset");
-		const allFeeds = document.querySelector("#today-all-feeds > summary");
-		const source = document.querySelector(".today-item-source");
-		return !!choose && choose.textContent.trim() === "Choose feeds" &&
-			!!fieldset && !!fieldset.querySelector("legend") && !!allFeeds &&
-			allFeeds.textContent.trim() === "All feeds" && !!source && source.textContent.trim().length > 0;
+        const source = document.querySelector(".today-item-source");
+        const today = document.querySelector(".today-sidebar-link");
+        const title = document.querySelector(".feed-link .feed-title");
+        return !document.querySelector("#today-choose-feeds") && !document.querySelector("#today-all-feeds") &&
+            !!source && !!today && !!title &&
+            Math.abs(title.getBoundingClientRect().left - today.getBoundingClientRect().left - 11) < 2;
 	})()`
 }
 
 func todayMobileAccessibilityExpression() string {
 	return `(() => {
-		const choose = document.querySelector("#today-choose-feeds > summary");
+		const choose = document.querySelector("#today-choose-feeds");
 		const link = document.querySelector("#mobile-today-all-feeds");
 		const read = document.querySelector(".today-mobile-card .mobile-card-mark-read");
-		return !!choose && !!link && link.textContent.trim() === "All feeds" &&
+		return !choose && !!link && link.textContent.trim() === "All feeds" &&
 			!!read && read.getAttribute("aria-label") === "Mark Today Smoke Story read" &&
 			!!document.querySelector(".today-mobile-header h1");
 	})()`

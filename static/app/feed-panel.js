@@ -341,6 +341,14 @@ const setSelectedFeed = (feedButton) => {
 };
 
 export const syncDisplayedFeedSelection = () => {
+  if (document.querySelector(".today-view")) {
+    getFeedList()?.querySelectorAll(".feed-link.active").forEach((link) => link.classList.remove("active"));
+    const input = getSelectedFeedInput();
+    if (input) {
+      input.value = "0";
+    }
+    return false;
+  }
   const displayedFeedID = getDisplayedFeedID();
   if (!displayedFeedID || isFeedEditMode()) {
     return false;

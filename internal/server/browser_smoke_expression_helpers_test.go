@@ -1199,7 +1199,7 @@ func desktopPulseIndicatorsExpression(fixture smokeFixture) string {
 				}
 				const style = window.getComputedStyle(feed);
 				const columns = style.gridTemplateColumns.split(" ");
-				return columns.length === 3 && Math.round(parseFloat(columns[0])) === 10;
+				return columns.length === 3 && Math.round(parseFloat(columns[1])) === 10;
 			});
 		})()`,
 		fmt.Sprintf("%d", fixture.primaryFeedID),

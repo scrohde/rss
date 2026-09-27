@@ -34,7 +34,6 @@ WITH ranked_today_items AS (
 		) AS feed_rank
 	FROM items AS i
 	JOIN feeds AS f ON f.id = i.feed_id
-	JOIN reading_preference_today_feeds AS selection ON selection.feed_id = i.feed_id
 	WHERE i.read_at IS NULL
 	  AND COALESCE(i.published_at, i.created_at) >= ?
 	  AND COALESCE(i.published_at, i.created_at) <= ?
@@ -59,7 +58,7 @@ FROM selected_today_items
 ORDER BY CAST(effective_at AS TEXT) DESC, id DESC
 `
 
-// ListTodayItems returns the bounded unread batch from the owner's selected Today feeds.
+// ListTodayItems returns the bounded unread batch from the all subscribed feeds.
 func ListTodayItems(ctx context.Context, db *sql.DB, now time.Time) ([]view.ItemView, error) {
 	ctx = contextOrBackground(ctx)
 	now = now.UTC()

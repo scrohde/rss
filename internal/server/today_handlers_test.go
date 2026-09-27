@@ -15,30 +15,28 @@ import (
 	"rss/internal/store"
 )
 
-func TestTodaySetupEmptyStatesAndAllFeedDirectory(t *testing.T) {
+func TestTodayIncludesAllFeedsWithoutSetup(t *testing.T) {
 	t.Parallel()
-
 	app := newTestApp(t)
-	selectedFeedID := mustUpsertFeed(t, app, "https://example.com/today-selected", "Selected for Today")
-	zeroFeedID := mustUpsertFeed(t, app, "https://example.com/today-zero", "Caught-up feed")
-
-	unconfigured := getRequest(app, "/today")
-	assertResponseCode(t, unconfigured, "unconfigured Today page")
-	assertContains(t, unconfigured.Body.String(), "No feeds selected for Today", "expected initial setup empty state")
-	assertContains(t, unconfigured.Body.String(), `name="feed_id" value="`+strconv.FormatInt(selectedFeedID, 10)+`"`,
-		"expected all feeds to be selectable before Today setup")
-	assertContains(t, unconfigured.Body.String(), "All feeds", "expected all-feed disclosure")
-
-	err := store.SetTodayFeedIDs(context.Background(), app.db, []int64{selectedFeedID})
-	requireNoErr(t, err, "save initial Today feed selection: %v")
-
+	feedID := mustUpsertFeed(t, app, "https://example.com/today", "Today feed")
 	empty := getRequest(app, "/today")
-	assertResponseCode(t, empty, "selected Today page without recent items")
-	assertContains(t, empty.Body.String(), "No recent unread stories", "expected recent-story empty state")
-	assertContains(t, empty.Body.String(), "Caught-up feed", "expected zero-unread feed in all-feed list")
-	assertContains(t, empty.Body.String(), "Caught up", "expected zero-unread feed label")
-	assertContains(t, empty.Body.String(), fmt.Sprintf(`href="/feeds/%d/items?from_today=1"`, zeroFeedID),
-		"expected feed selection to restore the normal reading URL")
+	assertContains(t, empty.Body.String(), "No recent unread stories", "expected empty state without setup")
+	mustUpsertSingleStory(t, app, feedID, "Recent story", "https://example.com/story", "story",
+		time.Now().UTC().Add(-time.Hour))
+
+	requireNoErr(t, store.SetTodayFeedIDs(context.Background(), app.db, []int64{feedID}), "save legacy selection: %v")
+	newFeedID := mustUpsertFeed(t, app, "https://example.com/new-feed", "New feed")
+	mustUpsertSingleStory(t, app, newFeedID, "New feed story", "https://example.com/new-story", "new-story",
+		time.Now().UTC().Add(-time.Hour))
+
+	for _, path := range []string{"/today", "/today?layout=mobile"} {
+		response := getRequest(app, path)
+		assertResponseCode(t, response, "Today without setup")
+		assertContains(t, response.Body.String(), "Recent story", "expected story without feed selection")
+		assertContains(t, response.Body.String(), "New feed story", "new subscriptions join Today automatically")
+		assertNotContains(t, response.Body.String(), "Choose feeds", "obsolete selection control")
+		assertNotContains(t, response.Body.String(), `id="today-all-feeds"`, "obsolete desktop directory")
+	}
 }
 
 func TestTodayDefaultLandingPreservesExplicitFeedNavigation(t *testing.T) {

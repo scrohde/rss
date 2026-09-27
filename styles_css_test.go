@@ -254,7 +254,7 @@ func TestStylesPulseStatusContracts(t *testing.T) {
 		ok  bool
 	}{
 		{
-			ok:  cssRuleContains(source, ".feed-link", "grid-template-columns: 10px minmax(0, 1fr) auto;"),
+			ok:  cssRuleContains(source, ".feed-link", "grid-template-columns: minmax(0, 1fr) 10px auto;"),
 			msg: "expected desktop feed rows to reserve pulse status space",
 		},
 		{
