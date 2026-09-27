@@ -17,6 +17,19 @@ import (
 	"rss/internal/store"
 )
 
+func TestBrowserSmokeTodayEmptySetupNavigation(t *testing.T) {
+	app := newSmokeApp(t)
+	mustUpsertFeed(t, app, "https://example.com/setup.xml", "Setup feed")
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+	ctx := newSmokeBrowserContext(t)
+	runActions(t, ctx, chromedp.EmulateViewport(1365, 900), chromedp.Navigate(server.URL))
+	waitForJS(t, ctx, htmxReadyExpression(), "sidebar ready")
+	clickElement(t, ctx, ".today-sidebar-link", "open Today before setup")
+	waitForJS(t, ctx, desktopTodayLayoutExpression(), "Today setup has visible reading width")
+	waitForJS(t, ctx, textPresentExpression("No feeds selected for Today"), "first-time setup is displayed")
+}
+
 //nolint:funlen,revive // One browser journey covers Today setup, feed exits, responsive navigation, and history.
 func TestBrowserSmokeTodayResponsiveNavigationAndAccessibility(t *testing.T) {
 	app := newSmokeApp(t)
@@ -117,9 +130,12 @@ func desktopTodayLayoutExpression() string {
 	return `(() => {
 		const app = document.querySelector(".app");
 		const feedPanel = document.querySelector(".feed-panel");
+		const today = document.querySelector(".today-view");
+		const bounds = today?.getBoundingClientRect();
 		return !!app && !!feedPanel && document.querySelector(".today-view") &&
 			getComputedStyle(feedPanel).display === "none" &&
-			getComputedStyle(app).display === "grid";
+			getComputedStyle(app).display === "grid" && bounds.width > 500 &&
+			bounds.left >= 0 && bounds.right <= innerWidth;
 	})()`
 }
 

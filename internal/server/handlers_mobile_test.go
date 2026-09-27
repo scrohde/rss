@@ -1162,7 +1162,7 @@ func TestMobileStreamSelectorRendersInlineInHeaderAndShowsUnreadFeedsOnly(t *tes
 	assertContains(
 		t,
 		body,
-		`Bright Feed (New)`,
+		`Bright Feed`,
 		"expected unread feed option",
 	)
 	assertNotContains(
@@ -1206,7 +1206,7 @@ func TestMobileStreamSelectorMarksSelectedFeed(t *testing.T) {
 		fmt.Sprintf(`<option value="%d" selected>`, feedID),
 		"expected selected feed option to reflect selected_feed_id",
 	)
-	assertContains(t, rec.Body.String(), "Bright Feed (New)", "expected selected feed to retain its New label")
+	assertContains(t, rec.Body.String(), "Bright Feed", "expected selected feed to retain its title")
 	assertContains(
 		t,
 		rec.Body.String(),
@@ -1573,7 +1573,7 @@ func TestMobileReaderPreservesSelectedFeedID(t *testing.T) {
 		fmt.Sprintf(`<option value="%d" selected>`, feedID),
 		"expected reader response to keep the selected feed visible in the topbar selector",
 	)
-	assertContains(t, body, "Feed Title (New)", "expected reader selector to keep the New label")
+	assertContains(t, body, "Feed Title", "expected reader selector to keep the feed title")
 }
 
 func TestMobileReaderHTMXPushesURL(t *testing.T) {

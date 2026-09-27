@@ -28,28 +28,28 @@ func seedUnreadCountDisplayFeeds(t *testing.T, app *App) unreadCountFeedIDs {
 
 	activeFeedID := mustUpsertFeed(t, app, "http://example.com/unread-counts", "Unread Count Feed")
 	quietFeedID := mustUpsertFeed(t, app, "http://example.com/quiet-counts", "Quiet Count Feed")
-	olderThanNewLabel := time.Now().UTC().AddDate(0, 0, -90)
+	oldPublication := time.Now().UTC().AddDate(0, 0, -90)
 	mustUpsertItems(t, app, activeFeedID, []*gofeed.Item{
 		//nolint:exhaustruct_v5 // Only the fields used by the fixture are populated.
 		{
 			Title:           "Older unread one",
 			Link:            "http://example.com/unread-counts/1",
 			GUID:            "unread-counts-1",
-			PublishedParsed: &olderThanNewLabel,
+			PublishedParsed: &oldPublication,
 		},
 		//nolint:exhaustruct_v5 // Only the fields used by the fixture are populated.
 		{
 			Title:           "Older unread two",
 			Link:            "http://example.com/unread-counts/2",
 			GUID:            "unread-counts-2",
-			PublishedParsed: new(olderThanNewLabel.Add(-time.Hour)),
+			PublishedParsed: new(oldPublication.Add(-time.Hour)),
 		},
 	})
 
 	return unreadCountFeedIDs{active: activeFeedID, quiet: quietFeedID}
 }
 
-func TestSidebarUnreadCountsUseNewByDefaultAndExactCountsAfterOptIn(t *testing.T) {
+func TestSidebarUnreadCountsAreQuietByDefaultAndExactCountsAfterOptIn(t *testing.T) {
 	t.Parallel()
 
 	app := newTestApp(t)
@@ -60,10 +60,10 @@ func TestSidebarUnreadCountsUseNewByDefaultAndExactCountsAfterOptIn(t *testing.T
 	assertResponseCode(t, defaultResponse, "default sidebar unread count status")
 	defaultBody := defaultResponse.Body.String()
 	assertContains(t, defaultBody, `data-show-exact-unread-counts="false"`, "expected default count mode")
-	assertContains(t, defaultBody, `class="feed-count-new">New</span>`, "expected New badge by default")
+	assertNotContains(t, defaultBody, `class="feed-count-new"`, "quiet mode has no redundant New label")
 	assertContains(t, defaultBody, `class="feed-count-exact">2</span>`, "expected exact count to be available")
-	assertContains(t, defaultBody, "regardless of article age", "expected age-independent New explanation")
-	assertContains(t, defaultBody, `class="feed-details"`, "expected a touch-friendly feed details disclosure")
+	assertContains(t, defaultBody, "2 unread items", "exact totals remain accessible to screen readers")
+	assertNotContains(t, defaultBody, `class="feed-details"`, "no redundant info button")
 	if got := strings.Count(defaultBody, `class="feed-count"`); got != 1 {
 		t.Fatalf("expected one badge for the positive feed and none for the zero feed, got %d", got)
 	}
@@ -152,13 +152,13 @@ func TestUnreadCountPreferenceHTMXUpdatesSidebarAndMobileOptions(t *testing.T) {
 	}
 	assertContains(t, disableResponse.Body.String(), `data-show-exact-unread-counts="false"`,
 		"expected opt-out state to be returned")
-	assertContains(t, disableResponse.Body.String(), `class="feed-count-new">New</span>`,
-		"expected the sidebar to return to New labels")
-	assertContains(t, disableResponse.Body.String(), "(New)", "expected mobile options to return to New labels")
+	assertNotContains(t, disableResponse.Body.String(), `class="feed-count-new"`,
+		"expected the sidebar to return to quiet mode")
+	assertNotContains(t, disableResponse.Body.String(), "(New)", "mobile options omit redundant labels")
 
 	reloaded := getRequest(app, fmt.Sprintf("%s?selected_feed_id=%s", pathMobileStream, feedIDText))
 	assertResponseCode(t, reloaded, "mobile stream reload after count preference change")
-	assertContains(t, reloaded.Body.String(), "(New)", "expected the saved default to survive a mobile reload")
+	assertNotContains(t, reloaded.Body.String(), "(New)", "quiet mode survives a mobile reload")
 }
 
 func TestUnreadCountPreferenceKeepsZeroFeedsUnbadged(t *testing.T) {

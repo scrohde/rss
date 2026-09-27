@@ -23,8 +23,6 @@ func TestBrowserSmokeUnreadCountPreferenceAndDisclosure(t *testing.T) {
 	ctx := newSmokeBrowserContext(t)
 	feedSelector := fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, fixture.secondaryFeedID)
 	zeroFeedSelector := fmt.Sprintf(`#feed-list .feed-link[data-feed-id="%d"]`, zeroFeedID)
-	detailsSelector := feedSelector + ` + .feed-details`
-	summarySelector := detailsSelector + " summary"
 
 	runActions(
 		t,
@@ -40,7 +38,7 @@ func TestBrowserSmokeUnreadCountPreferenceAndDisclosure(t *testing.T) {
 		t,
 		ctx,
 		feedUnreadBadgeModeExpression(feedSelector, false),
-		"default New badge with exact count hidden",
+		"quiet feed row with exact count hidden",
 	)
 	waitForJS(t, ctx, zeroFeedHasNoCountExpression(zeroFeedSelector), "zero-unread feed has no badge")
 
@@ -59,15 +57,7 @@ func TestBrowserSmokeUnreadCountPreferenceAndDisclosure(t *testing.T) {
 	waitForJS(t, ctx, activeElementMatchesExpression(feedSelector), "keyboard focus reaches unread feed")
 	waitForJS(t, ctx, focusVisibleExpression(feedSelector), "keyboard focus indicator on unread feed")
 	waitForJS(t, ctx, exactUnreadCountVisibleExpression(feedSelector), "keyboard focus reveals exact unread count")
-	runActions(t, ctx, chromedp.KeyEvent(kb.Tab), chromedp.KeyEvent(kb.Enter))
-	waitForJS(t, ctx, detailsOpenExpression(detailsSelector), "keyboard opens feed details")
-	waitForJS(t, ctx, textPresentExpression("4 unread items"), "feed details expose exact count and explanation")
-
-	runActions(t, ctx, chromedp.EmulateViewport(1200, 900, chromedp.EmulateTouch))
-	touchElement(t, ctx, summarySelector)
-	waitForJS(t, ctx, detailsClosedExpression(detailsSelector), "touch closes the feed details disclosure")
-	touchElement(t, ctx, summarySelector)
-	waitForJS(t, ctx, detailsOpenExpression(detailsSelector), "touch opens the feed details disclosure")
+	waitForJS(t, ctx, elementAbsentExpression(".feed-details"), "feed rows have no info buttons")
 
 	clickElement(t, ctx, "#topbar-shortcuts-button", "open reading preferences menu")
 	runActions(t, ctx, chromedp.Focus("#show-unread-counts", chromedp.ByQuery))
@@ -117,27 +107,6 @@ func movePointerTo(t *testing.T, ctx context.Context, x, y float64) {
 	}))
 }
 
-func touchElement(t *testing.T, ctx context.Context, selector string) {
-	t.Helper()
-
-	var point struct {
-		X float64 `json:"x"`
-		Y float64 `json:"y"`
-	}
-	runActions(t, ctx, chromedp.Evaluate(fmt.Sprintf(`(() => {
-		const rect = document.querySelector(%q).getBoundingClientRect();
-		return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-	})()`, selector), &point))
-	runActions(t, ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-		touch := &input.TouchPoint{X: point.X, Y: point.Y, RadiusX: 2, RadiusY: 2, ID: 1}
-		if err := input.DispatchTouchEvent(input.TouchStart, []*input.TouchPoint{touch}).Do(ctx); err != nil {
-			return err
-		}
-
-		return input.DispatchTouchEvent(input.TouchEnd, nil).Do(ctx)
-	}))
-}
-
 func activeElementMatches(t *testing.T, ctx context.Context, selector string) bool {
 	t.Helper()
 
@@ -156,30 +125,17 @@ func activeElementMatches(t *testing.T, ctx context.Context, selector string) bo
 func feedUnreadBadgeModeExpression(selector string, exact bool) string {
 	return fmt.Sprintf(`(() => {
 		const feed = document.querySelector(%q);
-		const badge = feed && feed.querySelector(".feed-count");
-		const newLabel = badge && badge.querySelector(".feed-count-new");
-		const exactCount = badge && badge.querySelector(".feed-count-exact");
-		if (!feed || !badge || !newLabel || !exactCount ||
-			feed.dataset.showExactUnreadCounts !== %q) {
-			return false;
-		}
-		return getComputedStyle(newLabel).display === %q &&
-			getComputedStyle(exactCount).display === %q;
-	})()`, selector, fmt.Sprintf("%t", exact), visibility(exact, true), visibility(exact, false))
-}
-
-func visibility(exact, newLabel bool) string {
-	if exact == newLabel {
-		return "none"
-	}
-
-	return "inline"
+		const count = feed && feed.querySelector(".feed-count-exact");
+		return !!count && !feed.querySelector(".feed-count-new") &&
+			feed.dataset.showExactUnreadCounts === %q &&
+			(getComputedStyle(count).visibility === "visible") === %t;
+	})()`, selector, fmt.Sprintf("%t", exact), exact)
 }
 
 func exactUnreadCountVisibleExpression(selector string) string {
 	return fmt.Sprintf(`(() => {
 		const count = document.querySelector(%q + " .feed-count-exact");
-		return !!count && getComputedStyle(count).display !== "none";
+		return !!count && getComputedStyle(count).visibility === "visible";
 	})()`, selector)
 }
 
@@ -201,13 +157,6 @@ func detailsOpenExpression(selector string) string {
 	return fmt.Sprintf(`(() => {
 		const details = document.querySelector(%q);
 		return !!details && details.open;
-	})()`, selector)
-}
-
-func detailsClosedExpression(selector string) string {
-	return fmt.Sprintf(`(() => {
-		const details = document.querySelector(%q);
-		return !!details && !details.open;
 	})()`, selector)
 }
 

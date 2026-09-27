@@ -93,12 +93,12 @@
       {{end}}
       {{range .FeedOptions}}
         <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>
-          {{.Title}}{{if eq .UnreadCount 0}} (Caught up){{else if $.ShowExactUnreadCounts}} ({{.UnreadCount}} unread){{else}} (New){{end}}
+          {{.Title}}{{if eq .UnreadCount 0}} (Caught up){{else if $.ShowExactUnreadCounts}} ({{.UnreadCount}} unread){{end}}
         </option>
       {{end}}
     </select>
     <span id="mobile-feed-count-description" class="sr-only">
-      New means the feed has unread items, regardless of article age. Exact totals appear in options when enabled.
+      Exact unread totals appear in options when enabled in reading preferences.
     </span>
   </form>
   </div>

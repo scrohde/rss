@@ -116,12 +116,12 @@ func assertCollapsedZeroUnreadFeedList(t *testing.T, body string) {
 	assertContains(t, body, `class="feed-zero-list" hidden`, "expected zero-unread list to start hidden")
 	assertNotContains(t, body, "feed-more-label-collapsed", "expected legacy More label markup to be removed")
 	assertNotContains(t, body, "feed-more-label-expanded", "expected legacy Less label markup to be removed")
-	assertContains(t, body, `class="feed-details"`, "expected unread feeds to offer touch-friendly details")
+	assertNotContains(t, body, `class="feed-details"`, "expected uncluttered feed rows")
 	assertContains(
 		t,
 		body,
-		`aria-label="Unread details for Alpha Active"`,
-		"expected accessible details label for unread feed",
+		`class="sr-only" id="feed-unread-description-`,
+		"expected accessible unread description",
 	)
 
 	alphaIdx := strings.Index(body, "Alpha Active")
