@@ -209,3 +209,41 @@ func TestBrowserSmokeTodayKeyboardShortcuts(t *testing.T) {
 	runActions(t, ctx, chromedp.KeyEvent(kb.Enter))
 	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "Enter opens the active Today story")
 }
+
+func TestBrowserSmokeTodayFromPopulatedFeed(t *testing.T) {
+	for _, recent := range []bool{false, true} {
+		t.Run(fmt.Sprintf("recent=%t", recent), func(t *testing.T) {
+			smokeTodayFromPopulatedFeed(t, recent)
+		})
+	}
+}
+
+//nolint:funlen,revive // Covers empty and populated Today navigation, focus, and stale reader cleanup.
+func smokeTodayFromPopulatedFeed(t *testing.T, recent bool) {
+	t.Helper()
+	app := newSmokeApp(t)
+	fixture := seedSmokeFixture(t, app)
+	if recent {
+		mustUpsertItems(t, app, fixture.primaryFeedID, []*gofeed.Item{
+			newSmokeItem("Recent story", "https://example.com/recent", "recent", time.Now().UTC().Add(-time.Hour)),
+		})
+	}
+
+	server := newSmokeServer(t, app.Routes())
+	t.Cleanup(server.Close)
+	ctx := newSmokeBrowserContext(t)
+
+	runActions(t, ctx, chromedp.EmulateViewport(1365, 900), chromedp.Navigate(server.URL+"/today"))
+	waitForJS(t, ctx, htmxReadyExpression(), "Today ready")
+	clickElement(t, ctx, fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, fixture.primaryFeedID), "open populated feed")
+	waitForJS(t, ctx, elementAbsentExpression(".today-view"), "feed opens")
+	clickElement(t, ctx, ".today-sidebar-link", "return to Today from populated feed")
+	waitForJS(t, ctx, desktopTodayLayoutExpression(), "Today opens from populated feed")
+	clickElement(t, ctx, fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, fixture.primaryFeedID), "reopen populated feed")
+	waitForJS(t, ctx, elementAbsentExpression(".today-view"), "feed reopens")
+	clickElement(t, ctx, ".item-entry .item-read-in-app", "open article reader")
+	waitForJS(t, ctx, elementPresentExpression("#content-panel.is-open"), "reader opens")
+	clickElement(t, ctx, ".today-sidebar-link", "return to Today from reader")
+	waitForJS(t, ctx, elementPresentExpression(".today-view"), "Today opens from reader")
+	waitForJS(t, ctx, elementAbsentExpression("#content-panel.is-open"), "Today closes stale feed reader")
+}

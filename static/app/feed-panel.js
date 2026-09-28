@@ -419,6 +419,15 @@ export const focusFeedPanel = () => {
     return false;
   }
 
+  const todayLink = document.querySelector(".today-view") &&
+    getFeedList()?.querySelector(".today-sidebar-link");
+  if (todayLink) {
+    syncDisplayedFeedSelection();
+    todayLink.focus({ preventScroll: true });
+    setPanelFocus("feed");
+    return true;
+  }
+
   const visibleSelection = getSelectedFeedButton({ visibleOnly: true });
   if (visibleSelection) {
     focusFeedLink(visibleSelection, { shouldRequestItems: true });
