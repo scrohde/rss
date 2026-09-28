@@ -12,7 +12,6 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-//nolint:funlen // One scenario verifies every cutoff predicate and cross-feed exclusion together.
 func TestCountAndMarkUnreadItemsBeforeUsesStrictFeedScopedCutoff(t *testing.T) {
 	t.Parallel()
 
@@ -50,11 +49,7 @@ UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = 'read'
 
 	offsetCutoff := cutoff.In(time.FixedZone("offset", -7*60*60))
 
-	beforeCount, err := CountUnreadItemsBefore(context.Background(), db, feedID, offsetCutoff)
-	if err != nil {
-		t.Fatalf("CountUnreadItemsBefore: %v", err)
-	}
-
+	beforeCount := mustCountUnreadItemsBefore(t, db, feedID, offsetCutoff)
 	if beforeCount != 2 {
 		t.Fatalf("expected old and missing-publication items in preview, got %d", beforeCount)
 	}
@@ -70,15 +65,14 @@ UPDATE items SET read_at = ? WHERE feed_id = ? AND guid = 'read'
 
 	assertInt64SetEqual(t, result.ChangedItemIDs, itemIDsByGUID(t, db, feedID, "before", "missing"))
 
-	assertReadStateByGUID(t, db, feedID, "before", true)
-	assertReadStateByGUID(t, db, feedID, "missing", true)
-	assertReadStateByGUID(t, db, feedID, "at-cutoff", false)
-	assertReadStateByGUID(t, db, feedID, "after", false)
-	assertReadStateByGUID(t, db, feedID, "read", true)
-	assertReadStateByGUID(t, db, otherFeedID, "other", false)
+	assertReadByGUID(t, db, feedID, "before")
+	assertReadByGUID(t, db, feedID, "missing")
+	assertUnreadByGUID(t, db, feedID, "at-cutoff")
+	assertUnreadByGUID(t, db, feedID, "after")
+	assertReadByGUID(t, db, feedID, "read")
+	assertUnreadByGUID(t, db, otherFeedID, "other")
 }
 
-//nolint:revive // Covers a changed preview and a no-op apply as one contract.
 func TestMarkUnreadItemsBeforeRecalculatesAfterPreviewAndHandlesNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -90,11 +84,7 @@ func TestMarkUnreadItemsBeforeRecalculatesAfterPreviewAndHandlesNoOp(t *testing.
 		newGofeedItem("First", "https://example.com/first", "first", "", &before),
 	})
 
-	previewCount, err := CountUnreadItemsBefore(context.Background(), db, feedID, cutoff)
-	if err != nil {
-		t.Fatalf("CountUnreadItemsBefore: %v", err)
-	}
-
+	previewCount := mustCountUnreadItemsBefore(t, db, feedID, cutoff)
 	if previewCount != 1 {
 		t.Fatalf("expected one preview item, got %d", previewCount)
 	}
@@ -151,12 +141,38 @@ END;
 		t.Fatalf("expected update failure, got result %#v", result)
 	}
 
-	assertReadStateByGUID(t, db, feedID, "first", false)
-	assertReadStateByGUID(t, db, feedID, "failing", false)
+	assertUnreadByGUID(t, db, feedID, "first")
+	assertUnreadByGUID(t, db, feedID, "failing")
 }
 
-//nolint:revive // The shared assertion keeps the test matrix compact.
-func assertReadStateByGUID(t *testing.T, db *sql.DB, feedID int64, guid string, wantRead bool) {
+func mustCountUnreadItemsBefore(t *testing.T, db *sql.DB, feedID int64, cutoff time.Time) int {
+	t.Helper()
+
+	count, err := CountUnreadItemsBefore(context.Background(), db, feedID, cutoff)
+	if err != nil {
+		t.Fatalf("CountUnreadItemsBefore: %v", err)
+	}
+
+	return count
+}
+
+func assertReadByGUID(t *testing.T, db *sql.DB, feedID int64, guid string) {
+	t.Helper()
+
+	if !readByGUID(t, db, feedID, guid) {
+		t.Fatalf("expected guid %q to be read", guid)
+	}
+}
+
+func assertUnreadByGUID(t *testing.T, db *sql.DB, feedID int64, guid string) {
+	t.Helper()
+
+	if readByGUID(t, db, feedID, guid) {
+		t.Fatalf("expected guid %q to be unread", guid)
+	}
+}
+
+func readByGUID(t *testing.T, db *sql.DB, feedID int64, guid string) bool {
 	t.Helper()
 
 	var readAt sql.NullTime
@@ -168,9 +184,7 @@ SELECT read_at FROM items WHERE feed_id = ? AND guid = ?
 		t.Fatalf("load read state for %q: %v", guid, err)
 	}
 
-	if readAt.Valid != wantRead {
-		t.Fatalf("expected guid %q read state %t, got %t", guid, wantRead, readAt.Valid)
-	}
+	return readAt.Valid
 }
 
 func itemIDsByGUID(t *testing.T, db *sql.DB, feedID int64, guids ...string) []int64 {

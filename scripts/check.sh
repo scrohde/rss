@@ -19,8 +19,11 @@ export GOCACHE="$GO_BUILD_CACHE"
 export GOLANGCI_LINT_CACHE="$LINT_CACHE"
 
 if [[ "${SKIP_LINT:-false}" != "true" ]]; then
-	echo "==> golangci-lint run --fix ./..."
-	golangci-lint run --fix ./...
+	echo "==> golangci-lint fmt --diff ./..."
+	golangci-lint fmt --diff ./...
+
+	echo "==> golangci-lint run ./..."
+	golangci-lint run ./...
 fi
 
 if [[ "${SKIP_TESTS:-false}" != "true" ]]; then
