@@ -116,9 +116,7 @@ export const bindKeyboardShortcuts = ({
             content.collapseContentPanelToItems();
             break;
           }
-          if (!document.querySelector(".today-view")) {
-            feed.focusFeedPanel();
-          }
+          feed.focusFeedPanel();
           break;
         }
         content.toggleExpanded(false);
