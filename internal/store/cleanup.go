@@ -15,6 +15,7 @@ func SweepReadItems(ctx context.Context, db *sql.DB, feedID int64) (int64, error
 	ctx = contextOrBackground(ctx)
 
 	now := time.Now().UTC()
+	args := feedItemScopeArgs(feedID, now)
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -31,16 +32,16 @@ func SweepReadItems(ctx context.Context, db *sql.DB, feedID int64) (int64, error
 INSERT OR IGNORE INTO tombstones (feed_id, guid, deleted_at)
 SELECT feed_id, guid, ?
 FROM items
-WHERE feed_id = ? AND read_at IS NOT NULL
-	`, now, feedID)
+WHERE `+feedItemScopeSQL+` AND read_at IS NOT NULL
+	`, append([]any{now}, args...)...)
 	if err != nil {
 		return 0, fmt.Errorf("insert sweep tombstones for feed %d: %w", feedID, err)
 	}
 
 	deleteResult, err := tx.ExecContext(ctx, `
 DELETE FROM items
-WHERE feed_id = ? AND read_at IS NOT NULL
-	`, feedID)
+WHERE `+feedItemScopeSQL+` AND read_at IS NOT NULL
+	`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("delete read items for feed %d: %w", feedID, err)
 	}

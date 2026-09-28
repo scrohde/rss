@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"rss/internal/view"
 )
 
 // CatchUpResult describes the exact unread items changed by a date-cutoff
@@ -119,16 +121,17 @@ func MarkAllReadWithUndo(ctx context.Context, db *sql.DB, feedID int64) ([]int64
 // before cutoff.
 func CountUnreadItemsBefore(ctx context.Context, db *sql.DB, feedID int64, cutoff time.Time) (int, error) {
 	ctx = contextOrBackground(ctx)
+	args := feedItemScopeArgs(feedID, time.Now().UTC())
 
 	var count int
 
 	err := db.QueryRowContext(ctx, `
 SELECT COUNT(*)
 FROM items
-WHERE feed_id = ?
+WHERE `+feedItemScopeSQL+`
 	AND read_at IS NULL
 	AND COALESCE(published_at, created_at) < ?
-	`, feedID, cutoff.UTC()).Scan(&count)
+	`, append(args, cutoff.UTC())...).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count unread items before cutoff for feed %d: %w", feedID, err)
 	}
@@ -177,14 +180,18 @@ func MarkUnreadItemsBefore(
 }
 
 func markUnreadItemsBeforeTx(ctx context.Context, tx *sql.Tx, feedID int64, cutoff time.Time) ([]int64, error) {
+	now := time.Now().UTC()
+	args := feedItemScopeArgs(feedID, now)
+	args = append([]any{now}, args...)
+
 	rows, err := tx.QueryContext(ctx, `
 UPDATE items
 SET read_at = ?
-WHERE feed_id = ?
+WHERE `+feedItemScopeSQL+`
 	AND read_at IS NULL
 	AND COALESCE(published_at, created_at) < ?
 RETURNING id
-	`, time.Now().UTC(), feedID, cutoff.UTC())
+	`, append(args, cutoff.UTC())...)
 	if err != nil {
 		return nil, fmt.Errorf("mark unread items before cutoff for feed %d: %w", feedID, err)
 	}
@@ -249,12 +256,14 @@ func markAllReadWithUndoTx(ctx context.Context, tx *sql.Tx, feedID int64) ([]int
 }
 
 func unreadItemIDsForFeedTx(ctx context.Context, tx *sql.Tx, feedID int64) ([]int64, error) {
+	args := feedItemScopeArgs(feedID, time.Now().UTC())
+
 	rows, err := tx.QueryContext(ctx, `
 SELECT id
 FROM items
-WHERE feed_id = ? AND read_at IS NULL
+WHERE `+feedItemScopeSQL+` AND read_at IS NULL
 ORDER BY id ASC
-	`, feedID)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list unread items for mark-all-read feed %d: %w", feedID, err)
 	}
@@ -282,11 +291,14 @@ ORDER BY id ASC
 }
 
 func markUnreadItemsReadTx(ctx context.Context, tx *sql.Tx, feedID int64) error {
+	now := time.Now().UTC()
+	args := feedItemScopeArgs(feedID, now)
+
 	_, err := tx.ExecContext(ctx, `
 UPDATE items
 SET read_at = ?
-WHERE feed_id = ? AND read_at IS NULL
-	`, time.Now().UTC(), feedID)
+WHERE `+feedItemScopeSQL+` AND read_at IS NULL
+	`, append([]any{now}, args...)...)
 	if err != nil {
 		return fmt.Errorf("mark all items read for feed %d: %w", feedID, err)
 	}
@@ -340,7 +352,7 @@ func markItemsUnreadTx(ctx context.Context, tx *sql.Tx, feedID int64, itemIDs []
 	stmt, err := tx.PrepareContext(ctx, `
 UPDATE items
 SET read_at = NULL
-WHERE feed_id = ? AND id = ?
+WHERE (feed_id = ? OR ?) AND id = ?
 	`)
 	if err != nil {
 		return fmt.Errorf("prepare mark-items-unread statement for feed %d: %w", feedID, err)
@@ -354,7 +366,8 @@ WHERE feed_id = ? AND id = ?
 	}()
 
 	for _, itemID := range itemIDs {
-		_, execErr := stmt.ExecContext(ctx, feedID, itemID)
+		// Undo uses the captured IDs even when a Today story has since aged out.
+		_, execErr := stmt.ExecContext(ctx, feedID, feedID == view.TodayFeedID, itemID)
 		if execErr != nil {
 			return fmt.Errorf("mark item %d unread for feed %d: %w", itemID, feedID, execErr)
 		}

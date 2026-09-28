@@ -95,6 +95,7 @@ export const bindKeyboardShortcuts = ({
         if (desktopPanelNavigationEnabled) {
           if (panel === "feed") {
             content.setItemKeyboardNavActive(true);
+            content.ensureActive();
             feed.openSelectedFeed();
             break;
           }

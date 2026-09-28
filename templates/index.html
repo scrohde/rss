@@ -7,8 +7,6 @@
     {{template "mobile_reader" .MobileReader}}
   {{else if .MobileStream}}
     {{template "mobile_stream" .MobileStream}}
-  {{else if .Today}}
-    {{template "today_view" .Today}}
   {{else if .ItemList}}
     {{template "item_list" .ItemList}}
   {{else}}

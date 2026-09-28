@@ -451,6 +451,12 @@ func (a *App) handleFeedItems(w http.ResponseWriter, r *http.Request) {
 
 	a.clearMarkAllReadUndoExcept(feedID)
 
+	if !isHTMXRequest(r) || isHTMXHistoryRestoreRequest(r) {
+		a.renderFeedItemsPage(w, r, feedID)
+
+		return
+	}
+
 	if r.URL.Query().Get("from_today") == "1" {
 		if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
 			w.Header().Set("Hx-Push-Url", r.URL.RequestURI())
@@ -746,7 +752,13 @@ func (a *App) handleToggleRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := a.toggleReadResponseData(r, &item, feeds, feedID, currentView)
+
 	data.TodayMode = todayMode
+	if todayMode {
+		data.SelectedFeedID = view.TodayFeedID
+		data.Continuation = feedContinuationOOB(view.TodayFeedID, feeds)
+	}
+
 	a.renderTemplateWithReadingPreferences(w, r, "item_toggle_response", &data)
 }
 

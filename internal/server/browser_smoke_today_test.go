@@ -25,9 +25,9 @@ func TestBrowserSmokeTodayEmptySetupNavigation(t *testing.T) {
 	ctx := newSmokeBrowserContext(t)
 	runActions(t, ctx, chromedp.EmulateViewport(1365, 900), chromedp.Navigate(server.URL))
 	waitForJS(t, ctx, htmxReadyExpression(), "sidebar ready")
-	clickElement(t, ctx, ".today-sidebar-link", "open Today before setup")
+	clickElement(t, ctx, ".feed-link[data-feed-id='-1']", "open Today before setup")
 	waitForJS(t, ctx, desktopTodayLayoutExpression(), "Today setup has visible reading width")
-	waitForJS(t, ctx, textPresentExpression("No recent unread stories"), "Today works without setup")
+	waitForJS(t, ctx, textPresentExpression("No recent stories"), "Today works without setup")
 }
 
 //nolint:funlen,revive // One browser journey covers Today setup, feed exits, responsive navigation, and history.
@@ -69,9 +69,10 @@ func TestBrowserSmokeTodayResponsiveNavigationAndAccessibility(t *testing.T) {
 	clickElement(t, ctx, fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, zeroFeedID), "select a feed from Today")
 	waitForJS(t, ctx, elementAbsentExpression(`[data-today-view="true"]`), "feed selection exits Today")
 	waitForJS(t, ctx, textPresentExpression("Caught Up Smoke Feed"), "selected feed opens")
-	clickElement(t, ctx, ".today-sidebar-link", "return to Today")
+	clickElement(t, ctx, ".feed-link[data-feed-id='-1']", "return to Today")
 	waitForJS(t, ctx, desktopTodayLayoutExpression(), "sidebar persists after HTMX navigation")
-	waitForJS(t, ctx, elementAbsentExpression(".feed-link.active"), "Today clears prior feed selection")
+	waitForJS(t, ctx, elementPresentExpression(".feed-link[data-feed-id='-1'].active"),
+		"Today uses the shared selected feed state")
 
 	runActions(t, ctx, chromedp.EmulateViewport(390, 844), chromedp.Navigate(server.URL+"/today?layout=mobile"))
 	waitForJS(t, ctx, htmxReadyExpression(), "HTMX ready on mobile Today reload")
@@ -137,12 +138,11 @@ func desktopTodayLayoutExpression() string {
 
 func todayAccessibilityExpression() string {
 	return `(() => {
-        const source = document.querySelector(".today-item-source");
-        const today = document.querySelector(".today-sidebar-link");
-        const title = document.querySelector(".feed-link .feed-title");
+        const today = document.querySelector(".feed-link[data-feed-id='-1']");
+        const title = document.querySelector(".feed-link:not([data-feed-id='-1']) .feed-title");
         return !document.querySelector("#today-choose-feeds") && !document.querySelector("#today-all-feeds") &&
-            !!source && !!today && !!title &&
-            Math.abs(title.getBoundingClientRect().left - today.getBoundingClientRect().left - 11) < 2;
+            !!today && !!title && !!document.querySelector(".items > .item-list > .item-entry") &&
+            Math.abs(title.getBoundingClientRect().left - today.querySelector('.feed-title').getBoundingClientRect().left) < 2;
 	})()`
 }
 
@@ -200,15 +200,28 @@ func TestBrowserSmokeTodayKeyboardShortcuts(t *testing.T) {
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "h returns to Today")
 	waitForJS(t, ctx, htmxSettledExpression(), "reader collapse settles before read shortcut")
 	runActions(t, ctx, chromedp.KeyEvent(kb.ArrowLeft))
-	waitForJS(t, ctx, activeElementMatchesExpression(".today-sidebar-link"), "left selects Today in sidebar")
+	waitForJS(t, ctx, activeElementMatchesExpression(".feed-link[data-feed-id='-1']"), "left selects Today in sidebar")
 	runActions(t, ctx, chromedp.KeyEvent(kb.ArrowDown))
 	waitForJS(t, ctx, elementAbsentExpression(".today-view"), "down opens first feed")
 	waitForJS(t, ctx, activeElementMatchesExpression(".feed-link.active"), "first feed receives focus")
+	var feedStyle string
+	runActions(t, ctx, chromedp.Evaluate(selectedFeedStyleExpression(), &feedStyle))
 	runActions(t, ctx, chromedp.KeyEvent(kb.ArrowUp))
 	waitForJS(t, ctx, elementPresentExpression(".today-view"), "up returns to Today")
-	waitForJS(t, ctx, activeElementMatchesExpression(".today-sidebar-link"), "Today receives sidebar focus")
+	waitForJS(t, ctx, activeElementMatchesExpression(".feed-link[data-feed-id='-1']"), "Today receives sidebar focus")
+	var todayStyle string
+	runActions(t, ctx, chromedp.Evaluate(selectedFeedStyleExpression(), &todayStyle))
+	if todayStyle != feedStyle {
+		t.Fatalf("selected Today style %s differs from feed style %s", todayStyle, feedStyle)
+	}
 	runActions(t, ctx, chromedp.KeyEvent(kb.ArrowUp), chromedp.KeyEvent(kb.ArrowRight))
 	waitForJS(t, ctx, activeElementMatchesExpression("#item-list"), "right returns to Today items")
+	waitForJS(t, ctx, `(() => {
+		const list = document.querySelector('#item-list');
+		const first = list?.querySelector('.item-entry');
+		return first?.classList.contains('is-active') && getComputedStyle(list).outlineStyle === 'none' &&
+			getComputedStyle(first).boxShadow !== 'none';
+	})()`, "Right highlights the first story, without an outline around the list")
 	runActions(t, ctx, chromedp.KeyEvent("r"))
 	waitForJS(t, ctx, hasClassExpression(first, "is-read"), "r marks the active story read")
 	waitForJS(t, ctx, hasClassExpression(second, "is-active"), "read action advances within the batch")
@@ -218,6 +231,14 @@ func TestBrowserSmokeTodayKeyboardShortcuts(t *testing.T) {
 	waitForJS(t, ctx, missingClassExpression(first, "is-read"), "r can restore the read story to unread")
 	runActions(t, ctx, chromedp.KeyEvent(kb.Enter))
 	waitForJS(t, ctx, activeElementMatchesExpression("#content-panel"), "Enter opens the active Today story")
+}
+
+func selectedFeedStyleExpression() string {
+	return `(() => {
+		const style = getComputedStyle(document.querySelector('.feed-link.active'));
+		return JSON.stringify(['backgroundColor', 'borderColor', 'borderRadius', 'fontWeight', 'padding', 'color']
+			.map(property => style[property]));
+	})()`
 }
 
 func TestBrowserSmokeTodayFromPopulatedFeed(t *testing.T) {
@@ -247,13 +268,13 @@ func smokeTodayFromPopulatedFeed(t *testing.T, recent bool) {
 	waitForJS(t, ctx, htmxReadyExpression(), "Today ready")
 	clickElement(t, ctx, fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, fixture.primaryFeedID), "open populated feed")
 	waitForJS(t, ctx, elementAbsentExpression(".today-view"), "feed opens")
-	clickElement(t, ctx, ".today-sidebar-link", "return to Today from populated feed")
+	clickElement(t, ctx, ".feed-link[data-feed-id='-1']", "return to Today from populated feed")
 	waitForJS(t, ctx, desktopTodayLayoutExpression(), "Today opens from populated feed")
 	clickElement(t, ctx, fmt.Sprintf(`.feed-link[data-feed-id="%d"]`, fixture.primaryFeedID), "reopen populated feed")
 	waitForJS(t, ctx, elementAbsentExpression(".today-view"), "feed reopens")
 	clickElement(t, ctx, ".item-entry .item-read-in-app", "open article reader")
 	waitForJS(t, ctx, elementPresentExpression("#content-panel.is-open"), "reader opens")
-	clickElement(t, ctx, ".today-sidebar-link", "return to Today from reader")
+	clickElement(t, ctx, ".feed-link[data-feed-id='-1']", "return to Today from reader")
 	waitForJS(t, ctx, elementPresentExpression(".today-view"), "Today opens from reader")
 	waitForJS(t, ctx, elementAbsentExpression("#content-panel.is-open"), "Today closes stale feed reader")
 }

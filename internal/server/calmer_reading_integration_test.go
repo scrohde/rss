@@ -69,7 +69,7 @@ func verifyCalmerReadingJourney(t *testing.T, countMode string) {
 
 	refreshed := getHTMXRequest(app, "/today?refresh=1")
 	assertResponseCode(t, refreshed, "explicit Today refresh after Catch up")
-	assertNotContains(t, refreshed.Body.String(), "Integration story", "refresh removes the read story")
+	assertContains(t, refreshed.Body.String(), "Integration story", "refresh retains read stories")
 
 	prefs, err := store.GetReadingPreferences(context.Background(), app.db)
 	requireNoErr(t, err, "load preferences after combined flow: %v")

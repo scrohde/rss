@@ -18,6 +18,7 @@ import (
 
 	"rss/internal/server"
 	"rss/internal/store"
+	"rss/internal/view"
 )
 
 const (
@@ -61,7 +62,9 @@ func run() error {
 		closeDB(db)
 	}()
 
-	tmpl := template.Must(template.ParseFS(templateFiles, "templates/*.html", "templates/partials/*.html"))
+	tmpl := template.Must(template.New("").Funcs(view.TemplateFuncs()).ParseFS(
+		templateFiles, "templates/*.html", "templates/partials/*.html",
+	))
 
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {

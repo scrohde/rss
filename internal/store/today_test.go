@@ -78,7 +78,7 @@ UPDATE items SET created_at = ? WHERE feed_id = ? AND guid = 'missing'
 		t.Fatalf("ListTodayItems without selections: %v", err)
 	}
 
-	if len(items) != 6 {
+	if len(items) != 7 {
 		t.Fatalf("expected all eligible stories without setup, got %#v", items)
 	}
 
@@ -110,13 +110,16 @@ UPDATE items SET created_at = ? WHERE feed_id = ? AND guid = 'missing'
 		t.Fatalf("ListTodayItems: %v", err)
 	}
 
-	wantTitles := []string{"Unselected", "At now", "One hour", "Missing publication", "Six hours", "At lower boundary"}
+	wantTitles := []string{
+		"Unselected", "At now", "Already read", "One hour", "Missing publication", "Six hours", "At lower boundary",
+	}
 
 	if len(items) != len(wantTitles) {
 		t.Fatalf("expected %d Today stories, got %d: %#v", len(wantTitles), len(items), items)
 	}
 
 	wantFeedIDs := map[string]int64{
+		"Already read":        readFeedID,
 		"Unselected":          otherFeedID,
 		"At now":              selectedFeedID,
 		"One hour":            hourFeedID,
@@ -126,6 +129,7 @@ UPDATE items SET created_at = ? WHERE feed_id = ? AND guid = 'missing'
 	}
 
 	wantFeedTitles := map[string]string{
+		"Already read":        "Already read",
 		"Unselected":          "Other",
 		"At now":              "Selected",
 		"One hour":            "One hour",
@@ -186,7 +190,7 @@ func TestListTodayItemsReturnsEmptyWhenNoStoriesAreEligible(t *testing.T) {
 }
 
 //nolint:cyclop,funlen,gocognit,revive // The scenario verifies per-feed and global ranking together.
-func TestListTodayItemsEnforcesPerFeedAndTotalCapsWithIDTies(t *testing.T) {
+func TestListTodayItemsIncludesEveryRecentItemWithIDTies(t *testing.T) {
 	t.Parallel()
 
 	db := openTestDB(t)
@@ -200,7 +204,7 @@ func TestListTodayItemsEnforcesPerFeedAndTotalCapsWithIDTies(t *testing.T) {
 
 	feedIDs := make([]int64, 0, feedCount)
 
-	wantIDs := make([]int64, 0, feedCount*todayItemsPerFeed)
+	wantIDs := make([]int64, 0, feedCount*storiesPerFeed)
 
 	for feedIndex := range feedCount {
 		feedName := fmt.Sprintf("feed-%c", rune('a'+feedIndex))
@@ -226,7 +230,7 @@ func TestListTodayItemsEnforcesPerFeedAndTotalCapsWithIDTies(t *testing.T) {
 
 		mustUpsertTestItems(t, db, feedID, feedItems)
 
-		for storyIndex := 1; storyIndex < storiesPerFeed; storyIndex++ {
+		for storyIndex := range storiesPerFeed {
 			guid := fmt.Sprintf("%s-story-%d", feedName, storyIndex)
 
 			var itemID int64
@@ -252,13 +256,12 @@ SELECT id FROM items WHERE feed_id = ? AND guid = ?
 		t.Fatalf("ListTodayItems: %v", err)
 	}
 
-	if len(items) != todayItemsTotalLimit {
-		t.Fatalf("expected total cap of %d stories, got %d", todayItemsTotalLimit, len(items))
+	if len(items) != feedCount*storiesPerFeed {
+		t.Fatalf("expected all %d recent stories, got %d", feedCount*storiesPerFeed, len(items))
 	}
 
 	slices.Sort(wantIDs)
 	slices.Reverse(wantIDs)
-	wantIDs = wantIDs[:todayItemsTotalLimit]
 
 	feedItemCounts := make(map[int64]int)
 
@@ -275,8 +278,8 @@ SELECT id FROM items WHERE feed_id = ? AND guid = ?
 	}
 
 	for feedID, count := range feedItemCounts {
-		if count > todayItemsPerFeed {
-			t.Errorf("feed %d returned %d stories, above per-feed cap %d", feedID, count, todayItemsPerFeed)
+		if count != storiesPerFeed {
+			t.Errorf("feed %d returned %d stories, want %d", feedID, count, storiesPerFeed)
 		}
 	}
 }

@@ -33,6 +33,7 @@ func LoadItemList(
 	newestID := maxItemID(items)
 
 	return &view.ItemListData{
+		BatchIDsText:         "",
 		MarkAllReadUndoToken: "",
 		CatchUpFeedTitle:     "",
 		Feed:                 feed,
@@ -51,14 +52,20 @@ func ListItems(
 	db *sql.DB,
 	feedID int64,
 ) ([]view.ItemView, error) {
+	return listItemsAt(ctx, db, feedID, time.Now().UTC())
+}
+
+func listItemsAt(ctx context.Context, db *sql.DB, feedID int64, now time.Time) ([]view.ItemView, error) {
 	ctx = contextOrBackground(ctx)
+	args := feedItemScopeArgs(feedID, now)
 
 	rows, err := db.QueryContext(ctx, `
-SELECT id, title, link, summary, content, published_at, read_at
-FROM items
-WHERE feed_id = ?
-ORDER BY COALESCE(published_at, created_at) DESC, id DESC
-	`, feedID)
+SELECT i.id, i.title, i.link, i.summary, i.content, i.published_at, i.read_at,
+       i.feed_id, (SELECT COALESCE(f.custom_title, f.title) FROM feeds f WHERE f.id = i.feed_id)
+FROM items i
+WHERE `+feedItemScopeSQL+`
+ORDER BY COALESCE(published_at, created_at) DESC, i.id DESC
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query items for feed %d: %w", feedID, err)
 	}
@@ -73,11 +80,12 @@ ORDER BY COALESCE(published_at, created_at) DESC, id DESC
 	var items []view.ItemView
 
 	for rows.Next() {
-		item, scanErr := scanItemView(rows)
+		item, scanErr := scanFeedItemView(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
 
+		item.TodayMode = feedID == view.TodayFeedID
 		items = append(items, item)
 	}
 

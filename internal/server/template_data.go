@@ -16,7 +16,6 @@ type fullPageData struct {
 type pageData struct {
 	fullPageData
 
-	Today             *todayViewData
 	ItemList          *view.ItemListData
 	MobileStream      *mobileStreamResponseData
 	MobileReader      *mobileReaderResponseData

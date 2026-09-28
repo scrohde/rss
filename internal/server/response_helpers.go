@@ -45,6 +45,7 @@ func (a *App) itemListOrError(
 	}
 
 	itemList = a.attachMarkAllReadUndo(itemList)
+	itemList.BatchIDsText = todayBatchIDsText(itemsToIDs(itemList.Items))
 
 	return attachFeedContinuation(itemList, feeds), true
 }

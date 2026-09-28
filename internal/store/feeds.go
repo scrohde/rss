@@ -314,12 +314,18 @@ func containsFeedID(feeds []view.FeedView, targetID int64) bool {
 }
 
 // GetFeed is part of the store package API.
+//
+//nolint:funlen // Virtual feeds and stored subscriptions share this lookup entry point.
 func GetFeed(
 	ctx context.Context,
 	db *sql.DB,
 	feedID int64,
 ) (view.FeedView, error) {
 	ctx = contextOrBackground(ctx)
+
+	if feedID == view.TodayFeedID {
+		return view.TodayFeed(), nil
+	}
 
 	row := db.QueryRowContext(ctx, `
 SELECT f.id, COALESCE(f.custom_title, f.title) AS display_title, f.title, f.url,

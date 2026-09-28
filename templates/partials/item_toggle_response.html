@@ -12,11 +12,9 @@
       {{template "item_content_empty_oob" .Item}}
     {{end}}
   {{end}}
-  {{if not .TodayMode}}
     <div id="feed-list" hx-swap-oob="innerHTML">
       {{template "feed_list" .}}
     </div>
     {{template "feed_continuation" .Continuation}}
-  {{end}}
   {{template "reading_preferences_state_oob" .}}
 {{end}}

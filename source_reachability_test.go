@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"text/template/parse"
+
+	"rss/internal/view"
 )
 
 func filesWithExtensions(t *testing.T, root string, extensions ...string) []string {
@@ -58,7 +60,9 @@ func hasWantedExtension(path string, wanted map[string]struct{}) bool {
 func TestTemplateDefinitionsAreReachable(t *testing.T) {
 	t.Parallel()
 
-	tmpl, err := template.ParseFS(templateFiles, "templates/*.html", "templates/partials/*.html")
+	tmpl, err := template.New("").Funcs(view.TemplateFuncs()).ParseFS(
+		templateFiles, "templates/*.html", "templates/partials/*.html",
+	)
 	if err != nil {
 		t.Fatalf("parse embedded templates: %v", err)
 	}

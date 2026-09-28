@@ -192,7 +192,7 @@ func newTestApp(t *testing.T) *App {
 }
 
 func templateMust() *template.Template {
-	tmpl := template.Must(template.ParseGlob(filepath.Join(
+	tmpl := template.Must(template.New("").Funcs(view.TemplateFuncs()).ParseGlob(filepath.Join(
 		pathParentDir,
 		pathParentDir,
 		"templates",

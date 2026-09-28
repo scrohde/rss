@@ -15,12 +15,12 @@ import (
 	"rss/internal/view"
 )
 
-const todayBatchLimit = 20
-
 var errInvalidTodayBatchIDs = errors.New("invalid Today batch IDs")
 
-//nolint:cyclop,gocognit,revive // The Today route coordinates redirects, loading, and desktop/HTMX responses.
+//nolint:cyclop,funlen,gocognit,revive // The Today route coordinates redirects, loading, and desktop/HTMX responses.
 func (a *App) handleToday(w http.ResponseWriter, r *http.Request) {
+	a.clearMarkAllReadUndoExcept(view.TodayFeedID)
+
 	if isTodayMobileLayoutRequest(r) {
 		if !isHTMXRequest(r) && (r.URL.Query().Has("batch_ids") || r.URL.Query().Has("transition")) {
 			http.Redirect(w, r, "/today?layout=mobile", http.StatusSeeOther)
@@ -60,23 +60,33 @@ func (a *App) handleToday(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := newTodayViewData(&page, feeds, items)
-	today.FeedPulseStatuses = a.pulseStatusViews()
+	itemList, ok := a.itemListOrError(w, r, view.TodayFeedID, feeds)
+	if !ok {
+		return
+	}
+
+	itemList.Items = items
+	itemList.BatchIDsText = todayBatchIDsText(itemsToIDs(items))
 
 	if isHTMXRequest(r) {
 		if r.URL.Query().Get("transition") == "1" || r.URL.Query().Get("refresh") == "1" {
-			w.Header().Set("Hx-Replace-Url", todayPath(today.BatchIDs, false))
+			w.Header().Set("Hx-Replace-Url", todayPath(itemsToIDs(items), false))
 		}
 
-		a.renderTemplateWithReadingPreferences(w, r, "today_response", today)
+		data := new(itemListResponseData)
+		data.ItemList = itemList
+		data.Feeds = feeds
+		data.FeedPulseStatuses = a.pulseStatusViews()
+		data.SelectedFeedID = view.TodayFeedID
+		a.renderTemplateWithReadingPreferences(w, r, "item_list_response", data)
 
 		return
 	}
 
-	page.Today = today
+	page.ItemList = itemList
 	page.Feeds = feeds
 	page.FeedPulseStatuses = a.pulseStatusViews()
-	page.SelectedFeedID = 0
+	page.SelectedFeedID = view.TodayFeedID
 	page.FeedEditMode = false
 	page.ThemeReturnPath = "/today"
 	page.MobileTopBar = nil
@@ -244,10 +254,9 @@ func todayBatchIDsText(ids []int64) string {
 	return strings.Join(values, ",")
 }
 
-//nolint:revive // The single-pass parser keeps all malformed and duplicate-ID checks together.
 func parseTodayBatchIDs(raw string) ([]int64, bool) {
 	parts := strings.Split(raw, ",")
-	if len(parts) == 0 || len(parts) > todayBatchLimit {
+	if len(parts) == 0 {
 		return nil, false
 	}
 

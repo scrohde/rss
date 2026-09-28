@@ -20,7 +20,7 @@ func TestTodayIncludesAllFeedsWithoutSetup(t *testing.T) {
 	app := newTestApp(t)
 	feedID := mustUpsertFeed(t, app, "https://example.com/today", "Today feed")
 	empty := getRequest(app, "/today")
-	assertContains(t, empty.Body.String(), "No recent unread stories", "expected empty state without setup")
+	assertContains(t, empty.Body.String(), "No recent stories", "expected empty state without setup")
 	mustUpsertSingleStory(t, app, feedID, "Recent story", "https://example.com/story", "story",
 		time.Now().UTC().Add(-time.Hour))
 
@@ -124,9 +124,10 @@ func TestTodayKeepsStableBatchUntilExplicitRefresh(t *testing.T) {
 	refreshed := getHTMXRequest(app, "/today?refresh=1")
 	assertResponseCode(t, refreshed, "explicit Today refresh")
 	assertContains(t, refreshed.Body.String(), "New story", "expected explicit refresh to recompute Today batch")
-	assertNotContains(t, refreshed.Body.String(), "Original batch story", "read story should leave a refreshed batch")
+	assertContains(t, refreshed.Body.String(), "Original batch story",
+		"read stories remain until cleared, like other feeds")
 
-	refreshedPath := todayPath([]int64{mustListItems(t, app, feedID)[0].ID}, false)
+	refreshedPath := todayPath(itemsToIDs(mustListItems(t, app, feedID)), false)
 	if got := refreshed.Header().Get("Hx-Replace-Url"); got != refreshedPath {
 		t.Fatalf("expected refreshed URL to match new batch, got %q", got)
 	}

@@ -143,13 +143,13 @@
                 {{end}}
                 <input type="hidden" name="enabled" value="false">
                 <input type="hidden" name="return_to" value="{{.ThemeReturnPath}}">
-                {{if or .MobileTopBar .Today}}
+                {{if or .MobileTopBar (and .ItemList .ItemList.Feed.IsToday)}}
                   <input type="hidden" name="mobile_view" value="true">
                 {{end}}
                 {{if and .MobileTopBar .MobileTopBar.AllFeedsMode}}
                   <input type="hidden" name="view" value="all">
                 {{end}}
-                {{if or .Today (and .MobileTopBar .MobileTopBar.TodayMode)}}
+                {{if or (and .ItemList .ItemList.Feed.IsToday) (and .MobileTopBar .MobileTopBar.TodayMode)}}
                   <input type="hidden" name="today_mode" value="true">
                 {{end}}
                 <label class="topbar-shortcuts-reading-option">

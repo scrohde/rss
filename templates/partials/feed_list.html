@@ -46,15 +46,6 @@
     </div>
   </div>
   <input type="hidden" id="selected-feed-id" name="selected_feed_id" value="{{.SelectedFeedID}}">
-  <a
-    class="today-sidebar-link"
-    href="/today"
-    data-app-htmx="true"
-    hx-get="/today"
-    hx-push-url="/today"
-    hx-target="#main-content"
-    hx-swap="innerHTML"
-  >Today</a>
   {{if .FeedEditMode}}
     <p class="feed-edit-hint">Rename, reorder, or mark feeds for removal. Save to apply changes.</p>
     <form
@@ -135,36 +126,10 @@
           {{$hasNoUnreadFeeds = true}}
         {{end}}
       {{end}}
-      {{range .Feeds}}
-        {{if gt .UnreadCount 0}}
+      {{range navigationFeeds .Feeds}}
+        {{if or .IsToday (gt .UnreadCount 0)}}
           <li class="feed-row">
-            <button class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}" type="button" data-feed-id="{{.ID}}"
-              data-feed-order="{{.SortOrder}}"
-              data-show-exact-unread-counts="{{$.ReadingPreferences.ShowExactUnreadCounts}}"
-              aria-describedby="feed-unread-description-{{.ID}}"
-              data-app-htmx="true"
-              hx-get="/feeds/{{.ID}}/items"
-              hx-target="#main-content"
-              hx-swap="innerHTML"
-            >
-              {{with index $.FeedPulseStatuses .ID}}
-                <span
-                  class="feed-pulse-indicator {{.Class}}"
-                  title="{{.Label}}"
-                  role="img"
-                  aria-label="{{.Label}}"
-                ></span>
-              {{else}}
-                <span class="feed-pulse-indicator none" aria-hidden="true"></span>
-              {{end}}
-              <span class="feed-title">{{.Title}}</span>
-              <span class="feed-count" aria-hidden="true">
-                <span class="feed-count-exact">{{.UnreadCount}}</span>
-              </span>
-            </button>
-            <span class="sr-only" id="feed-unread-description-{{.ID}}">
-              {{.UnreadCount}} unread {{if eq .UnreadCount 1}}item{{else}}items{{end}}.
-            </span>
+            {{template "feed_link" (feedLink . $.SelectedFeedID $.ReadingPreferences.ShowExactUnreadCounts (index $.FeedPulseStatuses .ID))}}
           </li>
         {{end}}
       {{end}}
@@ -184,27 +149,7 @@
             {{range .Feeds}}
               {{if eq .UnreadCount 0}}
                 <li class="feed-row">
-                  <button
-                    class="feed-link {{if eq .ID $.SelectedFeedID}}active{{end}}"
-                    type="button" data-feed-id="{{.ID}}"
-                    data-feed-order="{{.SortOrder}}"
-                    data-app-htmx="true"
-                    hx-get="/feeds/{{.ID}}/items"
-                    hx-target="#main-content"
-                    hx-swap="innerHTML"
-                  >
-                    {{with index $.FeedPulseStatuses .ID}}
-                      <span
-                        class="feed-pulse-indicator {{.Class}}"
-                        title="{{.Label}}"
-                        role="img"
-                        aria-label="{{.Label}}"
-                      ></span>
-                    {{else}}
-                      <span class="feed-pulse-indicator none" aria-hidden="true"></span>
-                    {{end}}
-                    <span class="feed-title">{{.Title}}</span>
-                  </button>
+                  {{template "feed_link" (feedLink . $.SelectedFeedID $.ReadingPreferences.ShowExactUnreadCounts (index $.FeedPulseStatuses .ID))}}
                 </li>
               {{end}}
             {{end}}
@@ -212,6 +157,33 @@
         </li>
       {{end}}
     </ul>
+  {{end}}
+{{end}}
+{{define "feed_link"}}
+  <button class="feed-link {{if .Selected}}active{{end}}" type="button" data-feed-id="{{.Feed.ID}}"
+    data-feed-order="{{.Feed.SortOrder}}"
+    data-show-exact-unread-counts="{{.ShowCounts}}"
+    {{if not .Feed.IsToday}}aria-describedby="feed-unread-description-{{.Feed.ID}}"{{end}}
+    data-app-htmx="true"
+    hx-get="{{.Feed.ItemsPath}}"
+    hx-push-url="{{.Feed.ItemsPath}}"
+    hx-target="#main-content"
+    hx-swap="innerHTML"
+  >
+    {{with .Status}}
+      <span class="feed-pulse-indicator {{.Class}}" title="{{.Label}}" role="img" aria-label="{{.Label}}"></span>
+    {{else}}
+      <span class="feed-pulse-indicator none" aria-hidden="true"></span>
+    {{end}}
+    <span class="feed-title">{{.Feed.Title}}</span>
+    {{if gt .Feed.UnreadCount 0}}
+      <span class="feed-count" aria-hidden="true"><span class="feed-count-exact">{{.Feed.UnreadCount}}</span></span>
+    {{end}}
+  </button>
+  {{if not .Feed.IsToday}}
+    <span class="sr-only" id="feed-unread-description-{{.Feed.ID}}">
+      {{.Feed.UnreadCount}} unread {{if eq .Feed.UnreadCount 1}}item{{else}}items{{end}}.
+    </span>
   {{end}}
 {{end}}
 {{define "feed_list_response"}}

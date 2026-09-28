@@ -27,6 +27,26 @@ func scanItemView(rows *sql.Rows) (view.ItemView, error) {
 	return view.BuildItemView(id, title, link, summary, content, published, readAt), nil
 }
 
+func scanFeedItemView(rows *sql.Rows) (view.ItemView, error) {
+	var (
+		id, feedID             int64
+		title, link, feedTitle string
+		summary, content       sql.NullString
+		published, readAt      sql.NullTime
+	)
+
+	err := rows.Scan(&id, &title, &link, &summary, &content, &published, &readAt, &feedID, &feedTitle)
+	if err != nil {
+		return view.ItemView{}, fmt.Errorf("scan feed item: %w", err)
+	}
+
+	item := view.BuildItemView(id, title, link, summary, content, published, readAt)
+	item.FeedID = feedID
+	item.FeedTitle = feedTitle
+
+	return item, nil
+}
+
 func scanMobileStreamItemView(rows *sql.Rows) (view.ItemView, error) {
 	var (
 		id        int64

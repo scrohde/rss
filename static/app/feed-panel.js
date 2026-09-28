@@ -341,14 +341,6 @@ const setSelectedFeed = (feedButton) => {
 };
 
 export const syncDisplayedFeedSelection = () => {
-  if (document.querySelector(".today-view")) {
-    getFeedList()?.querySelectorAll(".feed-link.active").forEach((link) => link.classList.remove("active"));
-    const input = getSelectedFeedInput();
-    if (input) {
-      input.value = "0";
-    }
-    return false;
-  }
   const displayedFeedID = getDisplayedFeedID();
   if (!displayedFeedID || isFeedEditMode()) {
     return false;
@@ -419,15 +411,6 @@ export const focusFeedPanel = () => {
     return false;
   }
 
-  const todayLink = document.querySelector(".today-view") &&
-    getFeedList()?.querySelector(".today-sidebar-link");
-  if (todayLink) {
-    syncDisplayedFeedSelection();
-    todayLink.focus({ preventScroll: true });
-    setPanelFocus("feed");
-    return true;
-  }
-
   const visibleSelection = getSelectedFeedButton({ visibleOnly: true });
   if (visibleSelection) {
     focusFeedLink(visibleSelection, { shouldRequestItems: true });
@@ -460,16 +443,6 @@ export const moveSelectedFeed = (delta) => {
   const feedButtons = getFeedLinks({ visibleOnly: true });
   const unreadFeedButtons = getVisibleUnreadFeedLinks();
   const zeroFeedButtons = getVisibleZeroUnreadFeedLinks();
-  const todayLink = getFeedList()?.querySelector(".today-sidebar-link");
-  if (todayLink && document.activeElement === todayLink) {
-    if (step < 0) {
-      return true;
-    }
-    if (feedButtons.length) {
-      return focusFeedLink(feedButtons[0], { shouldRequestItems: true });
-    }
-    return focusFeedMoreButton();
-  }
   if (moreButton && document.activeElement === moreButton) {
     if (step > 0) {
       if (!state.feedMoreExpanded) {
@@ -489,9 +462,6 @@ export const moveSelectedFeed = (delta) => {
       });
     }
 
-    if (todayLink) {
-      return requestFeedItems(todayLink, "feed");
-    }
     return focusFeedMoreButton();
   }
 
@@ -533,9 +503,6 @@ export const moveSelectedFeed = (delta) => {
   if (index < 0) {
     index = 0;
   }
-  if (index === 0 && step < 0 && todayLink) {
-    return requestFeedItems(todayLink, "feed");
-  }
   const nextIndex = Math.min(
     feedButtons.length - 1,
     Math.max(0, index + step)
@@ -547,11 +514,6 @@ export const moveSelectedFeed = (delta) => {
 export const openSelectedFeed = () => {
   if (!isDesktopLayout() || isFeedEditMode()) {
     return false;
-  }
-
-  if (document.querySelector(".today-view")) {
-    focusItemList();
-    return true;
   }
 
   const selectedFeed =

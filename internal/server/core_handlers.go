@@ -203,7 +203,6 @@ func (a *App) newPageData(r *http.Request) (pageData, error) {
 
 	return pageData{
 		fullPageData:      base,
-		Today:             nil,
 		ItemList:          nil,
 		MobileStream:      nil,
 		MobileReader:      nil,

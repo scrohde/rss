@@ -1,20 +1,21 @@
 {{define "item_list"}}
-  <section class="items">
+  <section class="items {{if .Feed.IsToday}}today-view{{end}}"
+    {{if .Feed.IsToday}}data-today-view="true" data-today-batch-ids="{{.BatchIDsText}}"{{end}}>
     <div class="items-header">
       <div>
         <div class="items-title">{{.Feed.Title}}</div>
         <div class="items-observability">
           <span class="items-refresh-meta">
-            <span id="item-last-refresh">Last refresh: {{.Feed.LastRefreshDisplay}}</span>
+            <span id="item-last-refresh">{{if .Feed.IsToday}}From the last 24 hours.{{else}}Last refresh: {{.Feed.LastRefreshDisplay}}{{end}}</span>
             <button
               class="items-refresh-button"
               type="button"
               aria-label="Refresh feed {{.Feed.Title}}"
               title="Refresh feed"
               data-app-htmx="true"
-              hx-post="/feeds/{{.Feed.ID}}/refresh"
-              hx-target="closest section"
-              hx-swap="outerHTML"
+              {{if .Feed.IsToday}}hx-get="/today?refresh=1"{{else}}hx-post="/feeds/{{.Feed.ID}}/refresh"{{end}}
+              {{if .Feed.IsToday}}hx-target="#main-content" hx-swap="innerHTML"
+              {{else}}hx-target="closest section" hx-swap="outerHTML"{{end}}
             >
               <svg class="icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                 <circle cx="10" cy="10" r="9" stroke="currentColor" stroke-width="1.2" />
@@ -106,6 +107,7 @@
     ></p>
     {{template "new_items_banner" .NewItems}}
     <input type="hidden" id="cursor" name="after_id" value="{{.NewestID}}">
+    {{if not .Feed.IsToday}}
     <div
       class="poller"
       data-app-htmx="true"
@@ -115,12 +117,14 @@
       hx-swap="outerHTML"
       hx-include="#cursor"
     ></div>
-    <div class="item-list" id="item-list" tabindex="-1" data-feed-id="{{.Feed.ID}}">
+    {{end}}
+    <div class="item-list" id="item-list" tabindex="-1" data-feed-id="{{.Feed.ID}}"
+      {{if .Feed.IsToday}}data-today-batch-ids="{{.BatchIDsText}}"{{end}}>
       {{range .Items}}
         {{template "item_compact" .}}
       {{else}}
         <div class="empty-state small">
-          <h3>No items yet.</h3>
+          <h3>{{if .Feed.IsToday}}No recent stories{{else}}No items yet.{{end}}</h3>
           <p>Try refreshing the feed or subscribe to another source.</p>
         </div>
       {{end}}

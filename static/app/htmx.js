@@ -103,7 +103,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       ensureActive();
       syncActiveItemOutline();
       focusItemList();
-    } else if (getFeedLinks({ visibleOnly: true }).length) {
+    } else if (getFeedLinks({ visibleOnly: true }).some((link) => link.classList.contains("active"))) {
       focusFeedPanel();
     }
     setPendingPanelFocus(null);
@@ -121,6 +121,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
   document.body.addEventListener("htmx:afterSwap", (event) => {
     clearFeedDragState();
     hydrateSwappedContent(event.target);
+    syncDisplayedFeedSelection();
     const trigger = event && event.detail ? event.detail.elt : null;
     if (trigger && trigger.dataset && trigger.dataset.preserveFocus === "true") {
       return;
@@ -146,7 +147,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       content.setItemKeyboardNavActive(false);
       state.pendingReadShortcut = null;
       setPendingPanelFocus(null);
-      if (getFeedLinks({ visibleOnly: true }).length) {
+      if (getFeedLinks({ visibleOnly: true }).some((link) => link.classList.contains("active"))) {
         focusFeedPanel();
       }
     }
@@ -170,7 +171,9 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
       }
       event.detail.headers["X-CSRF-Token"] = csrfToken;
     }
-    if (!event.detail.parameters.selected_item_id && !source.matches(".today-feed-link")) {
+    if (event.detail.parameters.selected_item_id) {
+      state.activeId = event.detail.parameters.selected_item_id;
+    } else {
       if (sourceRow && sourceRow.id) {
         event.detail.parameters.selected_item_id = sourceRow.id;
         state.activeId = sourceRow.id;
@@ -203,6 +206,7 @@ export const bindHTMXLifecycle = ({ topbar, feed, content }) => {
 
   document.body.addEventListener("htmx:afterSettle", () => {
     syncDisplayedFeedSelection();
+    ensureActive();
     if (preservedFocusElement && document.contains(preservedFocusElement)) {
       preservedFocusElement.focus({ preventScroll: true });
     }

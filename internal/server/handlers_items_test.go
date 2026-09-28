@@ -31,6 +31,8 @@ func TestFeedItemsUpdatesFeedListSelection(t *testing.T) {
 		feedItemsPath(selectedFeedID),
 		http.NoBody,
 	)
+	req.Header.Set("Hx-Request", "true")
+
 	rec := httptest.NewRecorder()
 
 	app.Routes().ServeHTTP(rec, req)
