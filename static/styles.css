@@ -1578,6 +1578,14 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   gap: 4px;
 }
 
+.item-feed-source {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .item-title {
   display: inline-flex;
   align-items: center;

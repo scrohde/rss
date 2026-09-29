@@ -1,4 +1,7 @@
 {{define "item_title_actions"}}
+  {{if .TodayMode}}
+    <div class="item-feed-source"><span class="sr-only">Feed: </span>{{.FeedTitle}}</div>
+  {{end}}
   {{if .HasReaderContent}}
     <button
       class="item-title item-read-in-app"
