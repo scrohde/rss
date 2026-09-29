@@ -113,7 +113,10 @@
             <article class="mobile-card" id="mobile-card-{{.ID}}" data-mobile-item-id="{{.ID}}">
               <div class="mobile-card-meta">
                 <span class="mobile-card-source">{{.FeedTitle}}</span>
-                <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>
+                <span class="mobile-card-time" title="{{.PublishedDisplay}}"
+                  data-local-time-title="{{.PublishedISO}}">
+                  {{.PublishedCompact}}
+                </span>
               </div>
               <div class="mobile-card-title-row">
                 <button
@@ -262,7 +265,10 @@
         <article class="mobile-card" id="mobile-card-{{.ID}}" data-mobile-item-id="{{.ID}}">
           <div class="mobile-card-meta">
             <span class="mobile-card-source">{{.FeedTitle}}</span>
-            <span class="mobile-card-time" title="{{.PublishedDisplay}}">{{.PublishedCompact}}</span>
+            <span class="mobile-card-time" title="{{.PublishedDisplay}}"
+              data-local-time-title="{{.PublishedISO}}">
+              {{.PublishedCompact}}
+            </span>
           </div>
           <div class="mobile-card-title-row">
             <button

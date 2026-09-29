@@ -101,9 +101,11 @@ func BuildItemView(
 	compactPreview := buildCompactPreview(summary)
 	publishedDisplay := "Unpublished"
 	publishedCompact := "na"
+	publishedISO := ""
 
 	if published.Valid {
-		publishedDisplay = FormatTime(published.Time)
+		publishedDisplay = FormatTime(published.Time) + " UTC"
+		publishedISO = published.Time.UTC().Format(time.RFC3339)
 		publishedCompact = FormatRelativeShort(published.Time, time.Now())
 	}
 
@@ -117,6 +119,7 @@ func BuildItemView(
 		SummaryHTML:      summaryHTML,
 		ContentHTML:      contentHTML,
 		PublishedDisplay: publishedDisplay,
+		PublishedISO:     publishedISO,
 		PublishedCompact: publishedCompact,
 		IsRead:           readAt.Valid,
 		IsActive:         false,

@@ -12,6 +12,7 @@ import { bindMobilePullRefresh } from "./mobile-pull-refresh.js";
 import { bindKeyboardShortcuts } from "./keyboard.js";
 import { bindHTMXLifecycle } from "./htmx.js";
 import { bindCatchUpControls } from "./catch-up.js";
+import { bindLocalPublicationTimes } from "./local-time.js";
 
 configurePanelFocus({
   isFeedEditMode: feed.isFeedEditMode,
@@ -44,6 +45,7 @@ bindHTMXLifecycle({
   content,
 });
 bindCatchUpControls();
+bindLocalPublicationTimes();
 
 bindMobileReaderNavigation();
 bindMobilePullRefresh();

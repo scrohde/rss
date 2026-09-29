@@ -42,7 +42,9 @@
     <article class="mobile-reader-article">
       <p class="mobile-reader-source">{{.Item.FeedTitle}}</p>
       <h2 class="mobile-reader-title">{{.Item.Title}}</h2>
-      <p class="mobile-reader-meta">{{.Item.PublishedDisplay}}</p>
+      <p class="mobile-reader-meta">
+        <time datetime="{{.Item.PublishedISO}}" data-local-time>{{.Item.PublishedDisplay}}</time>
+      </p>
       <a class="mobile-reader-link" href="{{.Item.Link}}" target="_blank" rel="noopener">Open original</a>
       <div class="mobile-reader-body" data-reader-content="true" hx-disable>
         {{if .Item.HasContent}}

@@ -33,6 +33,7 @@ type ItemView struct {
 	SummaryHTML      template.HTML
 	ContentHTML      template.HTML
 	PublishedDisplay string
+	PublishedISO     string
 	PublishedCompact string
 	ID               int64
 	FeedID           int64

@@ -19,9 +19,11 @@
         <div class="item-title-wrap">
           {{template "item_title_actions" .}}
         </div>
-        <span class="item-time-badge" title="{{.PublishedDisplay}}">
+        <span class="item-time-badge" title="{{.PublishedDisplay}}" data-local-time-title="{{.PublishedISO}}">
           {{.PublishedCompact}}
-          <span class="sr-only">Published {{.PublishedDisplay}}</span>
+          <span class="sr-only">Published
+            <time datetime="{{.PublishedISO}}" data-local-time>{{.PublishedDisplay}}</time>
+          </span>
         </span>
       </div>
       <div class="item-actions">
@@ -29,7 +31,7 @@
       </div>
     </div>
     <div class="item-meta">
-      <span>{{.PublishedDisplay}}</span>
+      <span><time datetime="{{.PublishedISO}}" data-local-time>{{.PublishedDisplay}}</time></span>
     </div>
     {{if .CompactPreview}}
       <div class="item-summary">

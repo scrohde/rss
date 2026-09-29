@@ -39,7 +39,10 @@
   >
     <div class="mobile-card-meta">
       <span class="mobile-card-source">{{.Item.FeedTitle}}</span>
-      <span class="mobile-card-time" title="{{.Item.PublishedDisplay}}">{{.Item.PublishedCompact}}</span>
+      <span class="mobile-card-time" title="{{.Item.PublishedDisplay}}"
+        data-local-time-title="{{.Item.PublishedISO}}">
+        {{.Item.PublishedCompact}}
+      </span>
     </div>
     <div class="mobile-card-title-row">
       {{if .Item.IsRead}}
