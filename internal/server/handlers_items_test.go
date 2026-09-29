@@ -540,6 +540,8 @@ func TestItemExpandedSummaryOnlyRendersSummaryFallbackInContentPanel(t *testing.
 	body := rec.Body.String()
 	assertExpandedItemBody(t, body, items[firstItemIndex].ID)
 	assertContentPanelOOBUpdate(t, body)
+	assertContains(t, body, `<p class="content-panel-source">Expanded Summary Feed</p>`,
+		"expected reader header to show the feed title")
 	articleHTML := itemArticleHTML(t, body, items[firstItemIndex].ID)
 	assertContains(
 		t,

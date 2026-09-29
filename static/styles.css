@@ -2092,6 +2092,13 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   text-decoration: none;
 }
 
+.content-panel-source {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .content-panel-title:hover {
   text-decoration: underline;
 }

@@ -91,6 +91,7 @@
     {{template "item_content_panel_actions" .}}
     <article class="content-panel-article" data-item-id="{{.ID}}">
       <header class="content-panel-header">
+        {{if .FeedTitle}}<p class="content-panel-source">{{.FeedTitle}}</p>{{end}}
         <a class="content-panel-title" href="{{.Link}}" target="_blank" rel="noopener">{{.Title}}</a>
         <p class="content-panel-meta">{{.PublishedDisplay}}</p>
       </header>

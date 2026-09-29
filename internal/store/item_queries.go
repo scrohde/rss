@@ -363,9 +363,11 @@ func GetItem(ctx context.Context, db *sql.DB, itemID int64) (view.ItemView, erro
 	ctx = contextOrBackground(ctx)
 
 	row := db.QueryRowContext(ctx, `
-SELECT id, title, link, summary, content, published_at, read_at
-FROM items
-WHERE id = ?
+SELECT i.id, i.title, i.link, i.summary, i.content, i.published_at, i.read_at,
+       i.feed_id, COALESCE(f.custom_title, f.title)
+FROM items i
+JOIN feeds f ON f.id = i.feed_id
+WHERE i.id = ?
 `, itemID)
 
 	var (
@@ -378,14 +380,23 @@ WHERE id = ?
 		readAt    sql.NullTime
 	)
 
-	err := row.Scan(&id, &title, &link, &summary, &content, &published, &readAt)
+	var (
+		feedID    int64
+		feedTitle string
+	)
+
+	err := row.Scan(&id, &title, &link, &summary, &content, &published, &readAt, &feedID, &feedTitle)
 	if err != nil {
 		return view.ItemView{}, fmt.Errorf("scan item %d: %w", itemID, err)
 	}
 
 	slog.Info("db get item", "item_id", itemID)
 
-	return view.BuildItemView(id, title, link, summary, content, published, readAt), nil
+	item := view.BuildItemView(id, title, link, summary, content, published, readAt)
+	item.FeedID = feedID
+	item.FeedTitle = feedTitle
+
+	return item, nil
 }
 
 // GetFeedIDByItem is part of the store package API.
