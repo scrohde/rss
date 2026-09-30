@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
 	"rss/internal/feed"
@@ -266,7 +266,13 @@ func wrapMobilePulseContextErr(ctx context.Context) error {
 }
 
 func (a *App) renderMobileStream(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("today") == "1" {
+	if isMobileTodayRequest(r) {
+		if !isHTMXRequest(r) {
+			http.Redirect(w, r, "/today?layout=mobile", http.StatusSeeOther)
+
+			return
+		}
+
 		a.renderMobileToday(w, r)
 
 		return
@@ -296,8 +302,7 @@ func (a *App) renderMobileStreamResponse(w http.ResponseWriter, r *http.Request)
 	}
 
 	if isHTMXRequest(r) && !isHTMXHistoryRestoreRequest(r) {
-		trigger := r.Header.Get("Hx-Trigger")
-		if trigger == "mobile-today-all-feeds" || strings.HasPrefix(trigger, "mobile-all-feed-selection-") {
+		if mobileSelectorLeavesToday(r) {
 			w.Header().Set("Hx-Push-Url", mobileStreamStatePathForRequest(r, topBar.SelectedFeedID, state))
 		} else {
 			w.Header().Set("Hx-Replace-Url", mobileStreamStatePathForRequest(r, topBar.SelectedFeedID, state))
@@ -321,6 +326,16 @@ func (a *App) renderMobileStreamResponse(w http.ResponseWriter, r *http.Request)
 	page.MobileTopBar = &data.TopBar
 	page.MobileStream = &data
 	a.renderTemplate(w, "index", page)
+}
+
+func mobileSelectorLeavesToday(r *http.Request) bool {
+	if !isMobileStreamSelectorTrigger(r) {
+		return false
+	}
+
+	current, err := url.Parse(r.Header.Get("Hx-Current-Url"))
+
+	return err == nil && (current.Path == "/today" || current.Query().Get("today") == "1")
 }
 
 func (a *App) mobileStreamResponseDataOrError(
@@ -408,7 +423,7 @@ func (a *App) mobileStreamFeedOptions(r *http.Request) (mobileStreamSelection, e
 	}
 
 	feedOptions := unreadFeedOptions(feeds)
-	if isMobileAllFeedsRequest(r) {
+	if isMobileAllFeedsRequest(r) || isMobileTodayRequest(r) {
 		feedOptions = feeds
 	}
 
@@ -426,7 +441,6 @@ func (a *App) mobileTopBarData(r *http.Request) (mobileTopBarData, error) {
 	return a.mobileTopBarDataForState(r, parseMobileAggregateState(r))
 }
 
-//nolint:revive // Builds feed actions while preserving Today, All feeds, and active Undo context.
 func (a *App) mobileTopBarDataForState(
 	r *http.Request,
 	state mobileAggregateState,
@@ -460,7 +474,7 @@ func (a *App) mobileTopBarDataForState(
 		SelectedFeedID:           selection.FeedID,
 		ShowExactUnreadCounts:    false,
 		ShowCaughtUpSelectedFeed: shouldShowCaughtUpSelectedFeed(selection),
-		TodayMode:                r.URL.Query().Get("today") == "1" || isTodayMobileLayoutRequest(r),
+		TodayMode:                isMobileTodayRequest(r),
 		AllFeedsMode:             isMobileAllFeedsRequest(r),
 		StreamPath:               selectorPath,
 	}
@@ -471,6 +485,7 @@ func (a *App) mobileTopBarDataForState(
 	}
 
 	if topBar.TodayMode {
+		topBar.StreamPath = "/mobile/stream?view=all"
 		topBar.PulseLabel = "Refresh Today stories"
 		topBar.PulsePendingLabel = "Refreshing Today stories"
 		topBar.PulsePath = mobileTodayPulsePath()

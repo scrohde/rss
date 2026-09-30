@@ -111,16 +111,32 @@ func TestBrowserSmokeTodayResponsiveNavigationAndAccessibility(t *testing.T) {
 	waitForJS(t, ctx, requestURIExpression(todayPath([]int64{items[0].ID}, true)),
 		"reader history returns to the stable Today URL")
 
-	clickElement(t, ctx, "#mobile-today-all-feeds", "show all subscriptions from Today")
-	waitForJS(t, ctx, elementPresentExpression(".mobile-all-feed-list"), "mobile All feeds directory rendered")
-	waitForJS(t, ctx, textPresentExpression("Caught Up Smoke Feed"), "mobile All feeds includes zero-unread subscription")
-	clickElement(t, ctx, fmt.Sprintf("#mobile-all-feed-selection-%d", zeroFeedID), "select mobile feed")
-	waitForJS(t, ctx, requestURIExpression(fmt.Sprintf("/mobile/stream?selected_feed_id=%d&view=all", zeroFeedID)),
-		"mobile feed choice is pushed into normal reading")
-	waitForJS(t, ctx, elementAbsentExpression(".mobile-all-feed-list"), "selected mobile feed exits the directory")
+	selectMobileFeedFilter(t, ctx, 0)
+	waitForJS(t, ctx, elementPresentExpression("#mobile-stream-sections"), "mobile All feeds unread stream rendered")
+	waitForJS(t, ctx, elementAbsentExpression(".mobile-all-feed-list"), "All feeds omits the repeated feed directory")
+	waitForJS(t, ctx, textPresentExpression("Today Smoke Story"), "All feeds includes unread stories")
+	waitForJS(t, ctx, requestURIExpression("/mobile/stream?view=all"), "dropdown opens the All feeds stream")
 	runActions(t, ctx, chromedp.Evaluate(`window.history.back()`, nil))
-	waitForJS(t, ctx, elementPresentExpression(".mobile-all-feed-list"), "browser back restores the mobile All feeds directory")
-	waitForJS(t, ctx, requestURIExpression("/mobile/stream?view=all"), "browser back restores the all-feed URL")
+	waitForJS(t, ctx, todayMobileAccessibilityExpression(), "browser back restores Today and its selected option")
+	runActions(t, ctx, chromedp.Evaluate(`window.history.forward()`, nil))
+	waitForJS(t, ctx, elementPresentExpression("#mobile-stream-sections"), "browser forward restores All feeds")
+	waitForJS(t, ctx, mobileFilterValueExpression(0), "All feeds is selected after browser forward")
+	selectMobileFeedFilter(t, ctx, zeroFeedID)
+	waitForJS(t, ctx, requestURIExpression(fmt.Sprintf("/mobile/stream?selected_feed_id=%d&view=all", zeroFeedID)),
+		"dropdown opens a caught-up feed")
+	waitForJS(t, ctx, mobileFilterValueExpression(zeroFeedID), "caught-up feed is selected in the dropdown")
+	runActions(t, ctx, chromedp.Evaluate(`window.history.back()`, nil))
+	waitForJS(t, ctx, todayMobileAccessibilityExpression(), "browser back restores Today after a feed choice")
+	selectMobileFeedFilter(t, ctx, 0)
+	waitForJS(t, ctx, elementPresentExpression("#mobile-stream-sections"), "dropdown returns to the All feeds stream")
+	selectMobileFeedFilter(t, ctx, -1)
+	waitForJS(t, ctx, todayMobileAccessibilityExpression(), "dropdown returns to Today")
+	waitForJS(t, ctx, requestURIExpression(todayPath([]int64{items[0].ID}, true)), "Today has its canonical batch URL")
+	selectMobileFeedFilter(t, ctx, feedID)
+	waitForJS(t, ctx, mobileFilterValueExpression(feedID), "dropdown opens an individual feed from Today")
+	waitForJS(t, ctx, elementAbsentExpression(`[data-today-view="true"]`), "feed selection exits Today")
+	waitForJS(t, ctx, requestURIExpression(fmt.Sprintf("/mobile/stream?selected_feed_id=%d&view=all", feedID)),
+		"selected feed URL keeps All feeds navigation available")
 }
 
 func desktopTodayLayoutExpression() string {
@@ -149,9 +165,11 @@ func todayAccessibilityExpression() string {
 func todayMobileAccessibilityExpression() string {
 	return `(() => {
 		const choose = document.querySelector("#today-choose-feeds");
-		const link = document.querySelector("#mobile-today-all-feeds");
+		const select = document.querySelector("#mobile-stream-feed-filter");
 		const read = document.querySelector(".today-mobile-card .mobile-card-mark-read");
-		return !choose && !!link && link.textContent.trim() === "All feeds" &&
+		return !choose && !document.querySelector("#mobile-today-all-feeds, .mobile-today-link") &&
+			select?.value === "-1" && select.options[0].textContent === "Today" &&
+			select.options[1].textContent === "All feeds" &&
 			!!read && read.getAttribute("aria-label") === "Mark Today Smoke Story read" &&
 			!!document.querySelector(".today-mobile-header h1");
 	})()`

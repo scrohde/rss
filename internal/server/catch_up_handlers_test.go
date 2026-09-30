@@ -141,11 +141,11 @@ func TestCatchUpMobileSurfaceUsesMobileStreamAndUndoResponse(t *testing.T) {
 		"expected selected feed actions to remain visible",
 	)
 	assertContains(t, apply.Body.String(), `data-mark-all-read-undo-button`, "expected mobile undo after Catch up")
-	assertContains(
+	assertNotContains(
 		t,
 		apply.Body.String(),
 		"Undo lasts while you stay in this feed",
-		"expected mobile undo lifetime help",
+		"expected mobile Undo without extra explanatory text",
 	)
 	assertUnreadStateByGUID(t, app, feedID, "mobile-story", true)
 
@@ -193,10 +193,10 @@ func TestCatchUpDialogAndMobileReadActionsRenderForSelectedFeed(t *testing.T) {
 	assertContains(t, desktop.Body.String(), `data-catch-up-open`, "expected desktop Catch up opener")
 	assertContains(t, desktop.Body.String(), `aria-haspopup="dialog"`, "expected accessible desktop dialog opener")
 	assertContains(t, desktop.Body.String(), `aria-labelledby="catch-up-title-`, "expected dialog title reference")
-	assertContains(t, desktop.Body.String(), `name="range"`, "expected preset selector")
-	assertContains(t, desktop.Body.String(), `value="7" selected`, "expected seven-day default preset")
-	assertContains(t, desktop.Body.String(), `value="30"`, "expected thirty-day preset")
-	assertContains(t, desktop.Body.String(), `value="custom"`, "expected custom-date option")
+	assertContains(t, desktop.Body.String(), `name="days"`, "expected numeric day spinner")
+	assertContains(t, desktop.Body.String(), `value="7"`, "expected seven-day default")
+	assertContains(t, desktop.Body.String(), `data-catch-up-preset="30"`, "expected thirty-day shortcut")
+	assertContains(t, desktop.Body.String(), `data-catch-up-mode`, "expected custom-date toggle")
 	assertContains(t, desktop.Body.String(), `data-mark-all-read-button`, "expected Mark all read to remain available")
 
 	mobile := getRequest(app, fmt.Sprintf("/mobile/stream?selected_feed_id=%d", feedID))

@@ -150,8 +150,12 @@ func TestTodayMobileReloadReaderAndReadCardKeepTodayContext(t *testing.T) {
 	assertContains(t, fullPage.Body.String(), `data-mobile-stream="true"`, "expected mobile stream shell on reload")
 	assertContains(t, fullPage.Body.String(), `data-today-view="true"`, "expected Today context on mobile reload")
 	assertContains(t, fullPage.Body.String(), "Mobile Today story", "expected selected story in mobile batch")
-	assertContains(t, fullPage.Body.String(), `id="mobile-today-all-feeds"`,
-		"expected accessible All feeds action in mobile view")
+	assertContains(t, fullPage.Body.String(), `id="mobile-stream-feed-filter"`,
+		"expected the shared view selector on mobile Today")
+	assertContains(t, fullPage.Body.String(), `<option value="-1" selected>Today</option>`,
+		"expected Today to be selected in the shared dropdown")
+	assertNotContains(t, fullPage.Body.String(), `id="mobile-today-all-feeds"`,
+		"expected the dropdown to replace the separate All feeds link")
 
 	staleReload := getRequest(app, todayPath([]int64{itemID}, true))
 	if staleReload.Code != http.StatusSeeOther || staleReload.Header().Get("Location") != "/today?layout=mobile" {
@@ -213,7 +217,7 @@ func TestTodayQueryStringsPreserveMobileAllFeedMode(t *testing.T) {
 		http.NoBody,
 	)
 	request.Header.Set("Hx-Request", "true")
-	request.Header.Set("Hx-Trigger", "mobile-today-all-feeds")
+	request.Header.Set("Hx-Trigger", "mobile-stream-feed-filter")
 
 	state := mobileAggregateState{
 		FeedCursor: nil,
@@ -235,5 +239,53 @@ func TestTodayQueryStringsPreserveMobileAllFeedMode(t *testing.T) {
 	request.URL.RawQuery = url.Values{"selected_feed_id": {"4"}, "view": {"all"}}.Encode()
 	if got := mobileStreamStatePathForRequest(request, 4, state); got != "/mobile/stream?selected_feed_id=4&view=all" {
 		t.Fatalf("unexpected selected all-feed URL: %q", got)
+	}
+}
+
+func TestMobileSelectorOpensTodayAndPreservesNavigation(t *testing.T) {
+	t.Parallel()
+
+	app := newTestApp(t)
+	feedID := mustUpsertFeed(t, app, "https://example.com/view-selector", "Selector feed")
+	mustUpsertFeed(t, app, "https://example.com/caught-up-selector", "Caught up selector feed")
+	mustUpsertSingleStory(t, app, feedID, "Recent selector story", "https://example.com/recent-selector",
+		"recent-selector", time.Now().UTC().Add(-time.Hour))
+
+	fullPage := getRequest(app, "/mobile/stream?selected_feed_id=-1")
+	if got := fullPage.Header().Get("Location"); fullPage.Code != http.StatusSeeOther || got != "/today?layout=mobile" {
+		t.Fatalf("expected a canonical mobile Today redirect, got status %d location %q", fullPage.Code, got)
+	}
+
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/mobile/stream?selected_feed_id=-1", http.NoBody)
+	request.Header.Set("Hx-Request", "true")
+	request.Header.Set("Hx-Trigger", "mobile-stream-feed-filter")
+
+	response := httptest.NewRecorder()
+	app.Routes().ServeHTTP(response, request)
+	assertResponseCode(t, response, "Today selected from the mobile dropdown")
+	assertContains(t, response.Body.String(), "Recent selector story", "Today shows recent stories")
+	assertContains(t, response.Body.String(), `<option value="-1" selected>Today</option>`, "Today is selected")
+	assertContains(t, response.Body.String(), "Caught up selector feed", "Today offers every subscribed feed")
+	assertContains(t, response.Body.String(), `hx-get="/mobile/stream?view=all"`, "All feeds remains accessible")
+
+	if got := response.Header().Get("Hx-Push-Url"); !strings.HasPrefix(got, "/today?batch_ids=") {
+		t.Fatalf("expected the Today batch in browser history, got %q", got)
+	}
+
+	request = httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/mobile/stream?selected_feed_id=0&view=all", http.NoBody)
+	request.Header.Set("Hx-Request", "true")
+	request.Header.Set("Hx-Trigger", "mobile-stream-feed-filter")
+	request.Header.Set("Hx-Current-Url", "http://localhost/today?layout=mobile")
+
+	response = httptest.NewRecorder()
+	app.Routes().ServeHTTP(response, request)
+	assertResponseCode(t, response, "All feeds selected from Today")
+	assertNotContains(t, response.Body.String(), `class="mobile-all-feed-list"`, "dropdown replaces the feed directory")
+	assertContains(t, response.Body.String(), `id="mobile-stream-sections"`, "All feeds shows the unread stream")
+
+	if got := response.Header().Get("Hx-Push-Url"); got != "/mobile/stream?view=all" {
+		t.Fatalf("expected leaving Today to keep its Back history entry, got %q", got)
 	}
 }

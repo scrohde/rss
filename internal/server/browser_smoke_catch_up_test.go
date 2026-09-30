@@ -7,8 +7,10 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/chromedp/cdproto/emulation"
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 )
 
@@ -53,6 +55,7 @@ func TestBrowserSmokeCatchUpDesktopAndMobile(t *testing.T) {
 		elementPresentExpression(`[data-catch-up-preview][data-count="4"]`),
 		"default cutoff preview count",
 	)
+	assertCatchUpSpinner(t, ctx)
 
 	setCatchUpPreset(t, ctx, "30")
 	waitForJS(t, ctx, defaultCatchUpDateExpression(30), "thirty-day local-calendar preset")
@@ -138,7 +141,7 @@ func TestBrowserSmokeCatchUpDesktopAndMobile(t *testing.T) {
 	runActions(
 		t,
 		ctx,
-		chromedp.EmulateViewport(390, 844),
+		chromedp.EmulateViewport(320, 568),
 		chromedp.Navigate(server.URL+pathMobileStream),
 	)
 	waitForJS(t, ctx, htmxReadyExpression(), "htmx ready on mobile Catch up stream")
@@ -155,6 +158,7 @@ func TestBrowserSmokeCatchUpDesktopAndMobile(t *testing.T) {
 		elementPresentExpression(`[data-catch-up-preview][data-count="4"]`),
 		"mobile cutoff preview count",
 	)
+	assertCatchUpMobileSwipe(t, ctx)
 	setCatchUpPreset(t, ctx, "custom")
 	setCatchUpDate(t, ctx, "2026-03-09")
 	waitForJS(t, ctx, cutoffValueExpression("2026-03-09T07:00:00.000Z"), "mobile local cutoff across DST")
@@ -232,14 +236,11 @@ func TestBrowserSmokeCatchUpDesktopAndMobile(t *testing.T) {
 func setCatchUpPreset(t *testing.T, ctx context.Context, preset string) {
 	t.Helper()
 
-	expression := fmt.Sprintf(`(() => {
-		const range = document.querySelector("[data-catch-up-range]");
-		if (!range) return false;
-		range.value = %q;
-		range.dispatchEvent(new Event("change", {bubbles: true}));
-		return true;
-	})()`, preset)
-	waitForJS(t, ctx, expression, "select Catch up preset")
+	if preset == "custom" {
+		clickElement(t, ctx, "[data-catch-up-mode]", "choose a custom Catch up date")
+		return
+	}
+	clickElement(t, ctx, fmt.Sprintf(`[data-catch-up-preset="%s"]`, preset), "select Catch up preset")
 }
 
 func setCatchUpDate(t *testing.T, ctx context.Context, date string) {
@@ -265,9 +266,96 @@ func defaultCatchUpDateExpression(days int) string {
 		const expectedValue = String(expected.getFullYear()) + "-" + pad(expected.getMonth() + 1) +
 			"-" + pad(expected.getDate());
 		const input = document.querySelector("[data-catch-up-date]");
-		const range = document.querySelector("[data-catch-up-range]");
-		return Boolean(input && input.value === expectedValue && input.disabled && range?.value === "%d");
+		const days = document.querySelector("[data-catch-up-days]");
+		return Boolean(input && input.value === expectedValue && input.disabled && days?.value === "%d");
 	})()`, days, days)
+}
+
+func assertCatchUpSpinner(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	setCatchUpDays(t, ctx, "17")
+	waitForJS(t, ctx, defaultCatchUpDateExpression(17), "arbitrary typed day count uses local calendar days")
+	waitForJS(t, ctx, previewMatchesCutoffExpression(), "typed day count preview is ready")
+	clickElement(t, ctx, `[data-catch-up-step="1"]`, "increment Catch up day count")
+	waitForJS(t, ctx, defaultCatchUpDateExpression(18), "spinner increments by one day")
+
+	runActions(t, ctx, chromedp.Evaluate(`(() => {
+		const days = document.querySelector("[data-catch-up-days]");
+		days.dispatchEvent(new KeyboardEvent("keydown", {
+			key: "PageUp", bubbles: true, cancelable: true
+		}));
+		const wheel = document.querySelector("[data-catch-up-wheel]");
+		wheel.dispatchEvent(new WheelEvent("wheel", { deltaY: 48, bubbles: true, cancelable: true }));
+	})()`, nil))
+	waitForJS(t, ctx, defaultCatchUpDateExpression(30), "keyboard jump and wheel update the day count")
+	waitForJS(t, ctx, previewMatchesCutoffExpression(), "rapid changes settle on the latest cutoff")
+
+	setCatchUpDays(t, ctx, "365")
+	waitForJS(t, ctx, defaultCatchUpDateExpression(365), "typing supports large day counts")
+	setCatchUpDays(t, ctx, "1")
+	waitForJS(t, ctx, `document.querySelector('[data-catch-up-step="-1"]').disabled &&
+		document.querySelector('[data-catch-up-days-unit]').textContent === 'day'`, "one-day lower boundary")
+
+	// Invalidate a pending preview. It must not re-enable Apply after the number becomes invalid.
+	runActions(t, ctx, chromedp.Evaluate(`(() => {
+		const input = document.querySelector("[data-catch-up-days]");
+		input.value = "17";
+		input.dispatchEvent(new Event("change", { bubbles: true }));
+		input.value = "";
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+	})()`, nil))
+	runActions(t, ctx, chromedp.Sleep(300*time.Millisecond))
+	waitForJS(t, ctx, `document.querySelector('[data-catch-up-submit]').disabled &&
+		document.querySelector('[data-catch-up-cutoff]').value === '' &&
+		document.querySelector('[data-catch-up-form]').dataset.previewCutoff === ''`, "invalid days cancel stale previews")
+	setCatchUpPreset(t, ctx, "7")
+	waitForJS(t, ctx, defaultCatchUpDateExpression(7), "preset recovers an empty number")
+	waitForJS(t, ctx, previewMatchesCutoffExpression(), "recovered preset preview is ready")
+}
+
+func setCatchUpDays(t *testing.T, ctx context.Context, days string) {
+	t.Helper()
+
+	runActions(t, ctx, chromedp.Evaluate(fmt.Sprintf(`(() => {
+		const input = document.querySelector("[data-catch-up-days]");
+		input.value = %q;
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+	})()`, days), nil))
+}
+
+//nolint:exhaustruct // CDP optional touch fields use their defaults.
+func assertCatchUpMobileSwipe(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	waitForJS(t, ctx, `(() => {
+		const dialog = document.querySelector('[data-catch-up-dialog]');
+		const spinner = document.querySelector('.catch-up-spinner');
+		const controls = spinner.querySelectorAll('button, input');
+		const rect = spinner.getBoundingClientRect();
+		return dialog.scrollWidth <= dialog.clientWidth && rect.right <= innerWidth &&
+			Array.from(controls).every(control => {
+				const bounds = control.getBoundingClientRect();
+				return bounds.left >= rect.left && bounds.right <= rect.right;
+			});
+	})()`, "day spinner fits a narrow mobile screen")
+
+	var point struct{ X, Y float64 }
+	runActions(t, ctx, chromedp.Evaluate(`(() => {
+		const rect = document.querySelector('[data-catch-up-days-unit]').getBoundingClientRect();
+		return { X: rect.left + rect.width / 2, Y: rect.top + rect.height / 2 };
+	})()`, &point))
+	runActions(t, ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return input.DispatchTouchEvent(input.TouchStart, []*input.TouchPoint{{X: point.X, Y: point.Y}}).Do(ctx)
+	}))
+	runActions(t, ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return input.DispatchTouchEvent(input.TouchMove, []*input.TouchPoint{{X: point.X, Y: point.Y - 48}}).Do(ctx)
+	}))
+	runActions(t, ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return input.DispatchTouchEvent(input.TouchEnd, []*input.TouchPoint{}).Do(ctx)
+	}))
+	waitForJS(t, ctx, defaultCatchUpDateExpression(11), "touch swipe spins the cutoff by four days")
+	waitForJS(t, ctx, previewMatchesCutoffExpression(), "touch swipe preview is ready")
 }
 
 func cutoffValueExpression(value string) string {

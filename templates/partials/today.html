@@ -4,16 +4,6 @@
           <h1>Today</h1>
           <p>From the last 24 hours.</p>
         </div>
-        <a
-          id="mobile-today-all-feeds"
-          class="chip ghost"
-          href="/mobile/stream?view=all"
-          data-app-htmx="true"
-          hx-get="/mobile/stream?view=all"
-          hx-push-url="true"
-          hx-target="#main-content"
-          hx-swap="innerHTML"
-        >All feeds</a>
       </header>
 
       {{if eq (len .Items) 0}}

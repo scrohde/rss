@@ -1,8 +1,11 @@
+import { bindCatchUpSpinner, syncCatchUpSpinner } from "./catch-up-spinner.js";
+
 const previewRequests = new WeakMap();
+const previewTimers = new WeakMap();
 const dialogOpeners = new WeakMap();
 
 const getFormElements = (form) => ({
-  range: form.querySelector("[data-catch-up-range]"),
+  days: form.querySelector("[data-catch-up-days]"),
   date: form.querySelector("[data-catch-up-date]"),
   cutoff: form.querySelector("[data-catch-up-cutoff]"),
   cutoffLabel: form.querySelector("[data-catch-up-cutoff-label]"),
@@ -154,38 +157,57 @@ const requestPreview = async (form, cutoff) => {
 };
 
 const syncCutoff = (form) => {
-  const { date, cutoff, cutoffLabel } = getFormElements(form);
+  const { days, date, cutoff, cutoffLabel } = getFormElements(form);
   if (!date || !cutoff) {
     return "";
   }
 
+  if (date.disabled) {
+    const count = Number(days.value);
+    date.value = days.validity.valid && Number.isSafeInteger(count) && count >= 1 ? addCalendarDays(count) : "";
+  }
   const instant = localMidnightISO(date.value);
   cutoff.value = instant;
   if (cutoffLabel) {
     cutoffLabel.textContent = instant
       ? `Cutoff: ${date.value} at midnight local time.`
-      : "Choose a valid date for the cutoff.";
+      : "Choose a valid number of days or a date for the cutoff.";
   }
 
   return instant;
 };
 
-const previewForm = (form) => {
+const cancelPreview = (form) => {
+  clearTimeout(previewTimers.get(form));
+  previewTimers.delete(form);
+  previewRequests.get(form)?.controller.abort();
+  previewRequests.delete(form);
+};
+
+const previewForm = (form, delay = 0) => {
+  cancelPreview(form);
+  form.dataset.previewCutoff = "";
+  const { submit, preview } = getFormElements(form);
+  if (submit) submit.disabled = true;
   const instant = syncCutoff(form);
   if (!instant) {
-    form.dataset.previewCutoff = "";
-    showFormError(form, "Choose a valid date before previewing or applying Catch up.");
-    const { preview, submit } = getFormElements(form);
+    showFormError(form, "Choose a positive whole number of days or a valid date.");
     if (preview) {
       preview.textContent = "Choose a valid date to preview matching unread items.";
-    }
-    if (submit) {
-      submit.disabled = true;
     }
     return;
   }
 
-  void requestPreview(form, instant);
+  showFormError(form, "");
+  if (delay) {
+    if (preview) preview.textContent = "Updating the preview…";
+    previewTimers.set(form, setTimeout(() => {
+      previewTimers.delete(form);
+      if (form.isConnected) void requestPreview(form, instant);
+    }, delay));
+  } else {
+    void requestPreview(form, instant);
+  }
 };
 
 const initializeForm = (form) => {
@@ -194,15 +216,16 @@ const initializeForm = (form) => {
     return;
   }
 
-  const { range, date } = getFormElements(form);
-  if (!range || !date) {
+  const { days, date } = getFormElements(form);
+  if (!days || !date) {
     return;
   }
 
-  range.value = "7";
+  days.value = "7";
   date.value = addCalendarDays(7);
   date.disabled = true;
   form.dataset.initialized = "true";
+  syncCatchUpSpinner(form);
   previewForm(form);
 };
 
@@ -221,6 +244,7 @@ const getEventDetail = (event) => {
 };
 
 export const bindCatchUpControls = () => {
+  bindCatchUpSpinner((form) => previewForm(form, 200));
   document.addEventListener("click", (event) => {
     const opener = event.target.closest("[data-catch-up-open]");
     if (opener) {
@@ -233,6 +257,8 @@ export const bindCatchUpControls = () => {
       if (dialog.dataset.focusReturnBound !== "true") {
         dialog.dataset.focusReturnBound = "true";
         dialog.addEventListener("close", () => {
+          const form = dialog.querySelector("[data-catch-up-form]");
+          if (form) cancelPreview(form);
           const returnTarget = dialogOpeners.get(dialog);
           if (returnTarget && document.contains(returnTarget)) {
             returnTarget.focus({ preventScroll: true });
@@ -243,7 +269,8 @@ export const bindCatchUpControls = () => {
       const form = dialog.querySelector("form[data-catch-up-form]");
       if (form) {
         initializeForm(form);
-        form.querySelector("[data-catch-up-range]")?.focus({ preventScroll: true });
+        const { days, date } = getFormElements(form);
+        (date.disabled ? days : date)?.focus({ preventScroll: true });
       }
       return;
     }
@@ -257,6 +284,21 @@ export const bindCatchUpControls = () => {
         returnTarget.focus({ preventScroll: true });
       }
     }
+
+    const mode = event.target.closest("[data-catch-up-mode]");
+    if (mode) {
+      const form = closestCatchUpForm(mode);
+      const { days, date } = getFormElements(form);
+      const customDate = date.disabled;
+      date.disabled = !customDate;
+      days.disabled = customDate;
+      form.querySelector("[data-catch-up-days-picker]").hidden = customDate;
+      form.querySelector("[data-catch-up-custom]").hidden = !customDate;
+      mode.setAttribute("aria-expanded", String(customDate));
+      mode.textContent = customDate ? "Choose a number of days" : "Choose a specific date";
+      (customDate ? date : days).focus({ preventScroll: true });
+      previewForm(form);
+    }
   });
 
   document.addEventListener("change", (event) => {
@@ -265,25 +307,15 @@ export const bindCatchUpControls = () => {
       return;
     }
 
-    const { range, date } = getFormElements(form);
-    if (event.target === range && range && date) {
-      const customDate = range.value === "custom";
-      date.disabled = !customDate;
-      if (!customDate) {
-        date.value = addCalendarDays(Number(range.value));
-      }
-      if (customDate) {
-        date.focus({ preventScroll: true });
-      }
-    }
-    previewForm(form);
+    if (event.target.matches("[data-catch-up-days], [data-catch-up-date]")) previewForm(form);
   });
 
   document.addEventListener("input", (event) => {
-    if (event.target.matches("[data-catch-up-date]")) {
+    if (event.target.matches("[data-catch-up-days], [data-catch-up-date]")) {
       const form = closestCatchUpForm(event.target);
       if (form) {
-        previewForm(form);
+        if (event.target.matches("[data-catch-up-days]")) syncCatchUpSpinner(form);
+        previewForm(form, 200);
       }
     }
   });

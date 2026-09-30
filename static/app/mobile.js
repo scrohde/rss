@@ -116,6 +116,20 @@ const syncMobileFilterHistoryState = (event) => {
   lastMobileStreamPath = pathWithSelectedFeed(mobileStreamPath, lastMobileFeedID);
 };
 
+const restoreMobileFilterSelection = () => {
+  const selector = document.getElementById("mobile-stream-feed-filter");
+  if (!selector) {
+    return;
+  }
+
+  const today = document.querySelector("#main-content [data-today-view='true'], [data-today-reader='true']");
+  const feedID = new URL(window.location.href).searchParams.get("selected_feed_id");
+  selector.value = today ? "-1" : normalizeFeedID(feedID) || "0";
+  for (const option of selector.options) {
+    option.defaultSelected = option.selected;
+  }
+};
+
 const pathWithSelectedFeed = (path, feedID) => {
   if (!feedID) {
     return path;
@@ -360,7 +374,7 @@ const loadMobileStream = () => {
 const loadDesktopReader = () => {
   rememberMobileFeed();
   const streamPath = currentMobileStreamPath();
-  if (isTodayPath(streamPath)) {
+  if (isTodayPath(streamPath) || document.getElementById("mobile-stream-feed-filter")?.value === "-1") {
     startTransition("desktop", todayLayoutPath("desktop"));
     return;
   }
@@ -418,6 +432,7 @@ export const bindMobileBootstrap = () => {
     document.body.addEventListener("htmx:afterSwap", trackFeedSelectionSwap);
     document.body.addEventListener("htmx:afterSettle", resetFeedSelectionScroll);
     document.body.addEventListener("htmx:afterSwap", syncResponsiveLayout);
+    document.body.addEventListener("htmx:historyRestore", restoreMobileFilterSelection);
     document.body.addEventListener("htmx:historyRestore", syncResponsiveLayout);
     syncResponsiveLayout();
   };

@@ -29,18 +29,7 @@
       {{if and .AllFeedsMode (eq .TopBar.SelectedFeedID 0)}}
         <div class="mobile-stream-navigation">
           <h1>All feeds</h1>
-          <a
-            id="mobile-today-all-feeds"
-            class="chip ghost"
-            href="/today?layout=mobile"
-            data-app-htmx="true"
-            hx-get="/today?layout=mobile"
-            hx-push-url="true"
-            hx-target="#main-content"
-            hx-swap="innerHTML"
-        >Today</a>
         </div>
-        {{template "mobile_all_feed_list" .TopBar}}
       {{end}}
       {{if gt .TopBar.SelectedFeedID 0}}
         <div
@@ -89,12 +78,6 @@
               </form>
             {{end}}
           </div>
-          {{if .TopBar.MarkAllReadUndoToken}}
-            <p class="bulk-read-undo-help">
-              Undo lasts while you stay in this feed. Leaving it, clearing read items, another bulk action,
-              or restarting Pulse removes it.
-            </p>
-          {{end}}
           <p
             class="catch-up-notice"
             data-catch-up-notice
@@ -160,36 +143,6 @@
       {{end}}
     </div>
   </section>
-{{end}}
-
-{{define "mobile_all_feed_list"}}
-  <nav class="mobile-all-feed-list" aria-label="All subscriptions">
-    <ul>
-      {{range .FeedOptions}}
-        <li>
-          <a
-            id="mobile-all-feed-selection-{{.ID}}"
-            href="/mobile/stream?view=all&amp;selected_feed_id={{.ID}}"
-            data-app-htmx="true"
-            hx-get="/mobile/stream?view=all&amp;selected_feed_id={{.ID}}"
-            hx-push-url="/mobile/stream?view=all&amp;selected_feed_id={{.ID}}"
-            hx-target="#main-content"
-            hx-swap="innerHTML"
-          >
-            <span>{{.Title}}</span>
-            <span
-              class="mobile-all-feed-count"
-              aria-label="{{if eq .UnreadCount 0}}Caught up{{else if eq .UnreadCount 1}}1 unread story{{else}}{{.UnreadCount}} unread stories{{end}}"
-            >
-              {{if eq .UnreadCount 0}}Caught up{{else if $.ShowExactUnreadCounts}}{{.UnreadCount}} unread{{else}}New{{end}}
-            </span>
-          </a>
-        </li>
-      {{else}}
-        <li>No subscriptions yet.</li>
-      {{end}}
-    </ul>
-  </nav>
 {{end}}
 
 {{define "mobile_stream_sections"}}

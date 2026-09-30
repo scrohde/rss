@@ -6,6 +6,6 @@
     data-count="{{.AffectedCount}}"
     aria-live="polite"
   >
-    {{.AffectedCount}} unread {{if eq .AffectedCount 1}}item{{else}}items{{end}} match this cutoff.
+    {{.AffectedCount}} {{if eq .AffectedCount 1}}item{{else}}items{{end}} will be marked read.
   </output>
 {{end}}

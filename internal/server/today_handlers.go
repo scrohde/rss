@@ -127,7 +127,6 @@ func (a *App) renderMobileToday(w http.ResponseWriter, r *http.Request) {
 	topBar.PulseLabel = "Refresh Today stories"
 	topBar.PulsePendingLabel = "Refreshing Today stories"
 	topBar.PulsePath = mobileTodayPulsePath()
-	topBar.StreamPath = todayPath(itemsToIDs(items), true)
 
 	data := mobileStreamResponseData{
 		ReadingPreferences: page.ReadingPreferences,
@@ -300,6 +299,11 @@ func isTodayMobileLayoutRequest(r *http.Request) bool {
 
 func isTodayMobileReaderRequest(r *http.Request) bool {
 	return r.URL.Query().Get("today") == "1"
+}
+
+func isMobileTodayRequest(r *http.Request) bool {
+	return isTodayMobileLayoutRequest(r) || isTodayMobileReaderRequest(r) ||
+		strings.TrimSpace(r.FormValue("selected_feed_id")) == strconv.FormatInt(view.TodayFeedID, 10)
 }
 
 func isMobileAllFeedsRequest(r *http.Request) bool {

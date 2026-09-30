@@ -54,30 +54,18 @@
 {{end}}
 
 {{define "mobile_topbar_selector"}}
-  {{if .TodayMode}}
-    <span class="mobile-today-label" aria-current="page">Today</span>
-  {{else}}
-    <div class="mobile-stream-topbar-controls">
-      <a
-        class="mobile-today-link"
-        href="/today?layout=mobile"
-        data-app-htmx="true"
-        hx-get="/today?layout=mobile"
-        hx-push-url="true"
-        hx-target="#main-content"
-        hx-swap="innerHTML"
-      >Today</a>
+  <div class="mobile-stream-topbar-controls">
   <form
     class="mobile-stream-filter"
     method="get"
     action="{{.StreamPath}}"
   >
-    <label class="sr-only" for="mobile-stream-feed-filter">Filter unread stream by feed</label>
+    <label class="sr-only" for="mobile-stream-feed-filter">Choose a view or feed</label>
     <select
       class="mobile-stream-filter-select"
       id="mobile-stream-feed-filter"
       name="selected_feed_id"
-      aria-label="Filter unread stream by feed"
+      aria-label="Choose a view or feed"
       aria-describedby="mobile-feed-count-description"
       data-app-htmx="true"
       hx-get="{{.StreamPath}}"
@@ -87,12 +75,13 @@
       hx-swap="innerHTML"
       hx-trigger="change"
     >
-      <option value="0" {{if eq .SelectedFeedID 0}}selected{{end}}>All feeds</option>
+      <option value="-1" {{if .TodayMode}}selected{{end}}>Today</option>
+      <option value="0" {{if and (not .TodayMode) (eq .SelectedFeedID 0)}}selected{{end}}>All feeds</option>
       {{if .ShowCaughtUpSelectedFeed}}
         <option value="{{.SelectedFeedID}}" selected>{{.SelectedFeedTitle}} (caught up)</option>
       {{end}}
       {{range .FeedOptions}}
-        <option value="{{.ID}}" {{if eq .ID $.SelectedFeedID}}selected{{end}}>
+        <option value="{{.ID}}" {{if and (not $.TodayMode) (eq .ID $.SelectedFeedID)}}selected{{end}}>
           {{.Title}}{{if eq .UnreadCount 0}} (Caught up){{else if $.ShowExactUnreadCounts}} ({{.UnreadCount}} unread){{end}}
         </option>
       {{end}}
@@ -102,7 +91,6 @@
     </span>
   </form>
   </div>
-  {{end}}
 {{end}}
 
 {{define "mobile_topbar_slot"}}
