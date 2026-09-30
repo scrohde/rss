@@ -22,6 +22,12 @@ const (
 	authInvalidSessionKey   authContextKey = "invalidSession"
 )
 
+// Allow only the Codex browser's annotation overlay and cursor CSS, rather than arbitrary inline styles.
+// Refresh these hashes when those stylesheets change in a browser update.
+const codexAnnotationStyleHashes = "'sha256-bcCtXUz3q46yDLxfuGeAP5Mgp9ZCmIkyTmh9IVgoGF4=' " +
+	"'sha256-OUoShR0c3lqWNHEaHdorwfYnp/0EJHI/7QhTEUtan9w=' " +
+	"'sha256-6ddE/BE/E7OfXOyznfBSKxo7Dfm3OMuxy0O5a2y6TqI='"
+
 func (*App) withRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID, err := randomToken(requestIDTokenBytes)
@@ -54,7 +60,8 @@ func (*App) withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set(
 			"Content-Security-Policy",
 			"default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; "+
-				"style-src-elem 'self'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'none'; "+
+				"style-src-elem 'self' "+codexAnnotationStyleHashes+"; "+
+				"font-src 'self' data:; img-src 'self' data: blob:; media-src 'none'; "+
 				"connect-src 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com; "+
 				"object-src 'none'; base-uri 'self'; "+
 				"frame-ancestors 'none'; form-action 'self'",
