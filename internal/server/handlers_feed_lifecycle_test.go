@@ -266,7 +266,7 @@ func TestPulseStatusEndpointStopsPollingWhenIdle(t *testing.T) {
 	assertResponseCode(t, rec, "pulse idle status response")
 
 	body := rec.Body.String()
-	assertContains(t, body, `id="subscribe-message"`, "expected message OOB response")
+	assertContains(t, body, `id="pulse-message"`, "expected pulse message OOB response")
 	assertContains(t, body, `hx-swap-oob="outerHTML"`, "expected message OOB swap")
 	assertContains(t, body, `id="feed-list" hx-swap-oob="innerHTML"`, "expected feed-list OOB update")
 	assertContains(t, body, `class="feed-pulse-indicator fresh"`, "expected fresh status to remain visible")

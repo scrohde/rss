@@ -18,7 +18,10 @@
   <div class="page">
     {{template "reading_preferences_state" .}}
     <header class="topbar">
-      {{template "topbar_brand_slot" .MobileTopBar}}
+      <div class="topbar-pulse">
+        {{template "topbar_brand_slot" .MobileTopBar}}
+        <div id="pulse-message" class="message" role="status"></div>
+      </div>
       {{template "mobile_topbar_slot" .MobileTopBar}}
       <div class="topbar-side">
         <div class="topbar-shortcuts" id="topbar-shortcuts">

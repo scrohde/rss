@@ -221,6 +221,25 @@ body {
   z-index: 10;
 }
 
+.topbar-pulse {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar-pulse .message {
+  min-width: 0;
+  max-width: none;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.topbar-brand-slot {
+  flex: 0 0 auto;
+}
+
 .topbar-brand-slot,
 .topbar-mobile-slot {
   min-width: 0;
@@ -1187,7 +1206,7 @@ body.is-resizing-content-panel .content-panel-resizer::before {
   padding: 8px 10px;
   border-radius: 10px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 10px auto;
+  grid-template-columns: minmax(0, 1fr) 10px 4ch;
   align-items: center;
   gap: 10px;
   font-size: 13px;
@@ -1271,7 +1290,11 @@ body.is-resizing-content-panel .content-panel-resizer::before {
 }
 
 .feed-count {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
   flex: 0 0 auto;
 }
@@ -2468,6 +2491,13 @@ html[data-theme="dark"] .mobile-reader-body {
     grid-template-columns: auto minmax(0, 1fr) auto;
     text-align: left;
     align-items: center;
+  }
+
+  .topbar-pulse {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    max-width: 140px;
   }
 
   .brand {

@@ -1188,6 +1188,7 @@ func desktopPulseIndicatorsExpression(fixture smokeFixture) string {
 			if (document.documentElement.scrollWidth > window.innerWidth + 1) {
 				return false;
 			}
+			let indicatorLeft = null;
 			return checks.every(([feedID, className, label]) => {
 				const feed = document.querySelector(
 					'#feed-list .feed-link[data-feed-id="' + feedID + '"]'
@@ -1197,9 +1198,11 @@ func desktopPulseIndicatorsExpression(fixture smokeFixture) string {
 					indicator.getAttribute("aria-label") !== label) {
 					return false;
 				}
-				const style = window.getComputedStyle(feed);
-				const columns = style.gridTemplateColumns.split(" ");
-				return columns.length === 3 && Math.round(parseFloat(columns[1])) === 10;
+				const rect = indicator.getBoundingClientRect();
+				const feedRect = feed.getBoundingClientRect();
+				indicatorLeft ??= rect.left;
+				return rect.width > 0 && Math.abs(rect.left - indicatorLeft) < 1 &&
+					Math.abs(rect.top + rect.height / 2 - feedRect.top - feedRect.height / 2) < 1;
 			});
 		})()`,
 		fmt.Sprintf("%d", fixture.primaryFeedID),

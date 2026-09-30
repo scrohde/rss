@@ -1,7 +1,8 @@
 {{define "pulse_status_response"}}
   <div
-    id="subscribe-message"
+    id="pulse-message"
     class="message {{.MessageClass}}"
+    role="status"
     {{if not .Initial}}hx-swap-oob="outerHTML"{{end}}
   >{{.Message}}</div>
   {{if not .FeedEditMode}}

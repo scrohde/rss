@@ -74,6 +74,22 @@ func seedSmokePulseStatuses(t *testing.T, app *App, fixture smokeFixture) {
 		t.Fatalf("store.UpdateFeedTitle: %v", err)
 	}
 
+	for _, count := range []struct {
+		feedID   int64
+		existing int
+		total    int
+	}{
+		{fixture.secondaryFeedID, 4, 10},
+		{fixture.tertiaryFeedID, 1, 100},
+	} {
+		items := make([]*gofeed.Item, 0, count.total-count.existing)
+		for i := count.existing; i < count.total; i++ {
+			guid := fmt.Sprintf("pulse-layout-%d-%d", count.feedID, i)
+			items = append(items, newSmokeItem(guid, "https://example.com/"+guid, guid, time.Now().UTC()))
+		}
+		mustUpsertItems(t, app, count.feedID, items)
+	}
+
 	app.resetPulseStatuses(
 		[]int64{
 			fixture.primaryFeedID,
